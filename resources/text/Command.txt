@@ -1,0 +1,45 @@
+#---Spectrum---:
+[self.index_spec]
+self.Spectrum
+.Gauges
+
+.Calcul_study(mini=True)
+
+.Data_treatement(deg_baseline=None,type_filtre=None,param_f=None ) # print_data=False , ax=None,ax2=None )
+
+#---CEDX---:
+self.RUN
+.Spectra
+.Summary
+.data_oscillo
+.data_drx
+.Time_spectrum
+.Corr_Summary(num_spec=None)
+.Temps_Pression(temps=None, signale_spec=None,Y=None,data_time=None)
+.Print(Oscilo=True)
+
+
+
+#---Element---:
+[self.index_jauge]
+.pics
+.Calcul(input_spe=None,mini=False,lambda_error=0)
+.EoS_VP(P)
+.EoS_PV(P)
+.Element_ref
+
+#---Pics---:
+[self.index_pic_select]
+.Update(ctr=None,ampH=None,coef_spe=None,sigma=None,inter=None,model_fit=None,Delta_ctr=None,amp=None,move=False)
+
+#---DRX---:
+self.ClassDRX
+.Bibli_elements
+
+#---Utile---:
+self.RUN.Print(Oscilo=True)
+self.RUN.Temps_Pression(Y="Channel4") #ESRF2023
+self.RUN.Summary.to_csv(CL.os.path.basename(self.RUN.CEDd_path), index=False)
+self.RUN.Summary["Time"]=self.RUN.Time_spectrum
+
+#DEBUG

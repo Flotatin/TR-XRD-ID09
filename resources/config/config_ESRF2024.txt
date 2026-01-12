@@ -1,0 +1,11 @@
+folder_DRX=D:\ESRF\2024 Juin HC-5719 id09\PROCESSED_DATA
+folder_OSC=D:\ESRF\2024 Juin HC-5719 id09\Oscillo
+folder_CED=D:\ESRF\2024 Juin HC-5719 id09\Fichier_CED_DRX
+loaded_file_DRX=
+loaded_file_OSC=
+calib_file_mask=d:\ESRF\2024 Juin HC-5719 id09\Dioptas_file\id09_bis.mask
+calib_file_poni=d:\ESRF\2024 Juin HC-5719 id09\Dioptas_file\calibration_LaB6_06062024.poni
+zone=[[8, 27.5]]
+energie_DRX=19000.0
+bib_files=[]
+date=2025-12-09 16:21:29

@@ -1,0 +1,36 @@
+*!=BUG / touche != TOUCHE
+
+#---PIC---:
+r(R): Replace pic (FIT)
+u(U)*!: Undo pic (select)
+c*!: Confirm pic
+y*!: Auto pic
+m: Find peak
+
+#---GAUGE---:
+A: Add Gauge
+D: Delete Gauge
+i*!: Output bib gauge
+
+#---SPECTRUM---:
+S: New Spectrum
+F: Fit lmfit VS curvfit
+b: Filtre & Baseline
+x(X): Calcul Study (mini)
+
+
+#---dDAC---:
+E*: New CEDd
+F5*: Clear CEDd
+F3*: Save CEDd
+F4*: Refresh CEDd
+
+#---SETUP---:
+L: Lecroy Interface
+p: Resize window Spec/CEDd
+q: Toggle clic box
+h: Toggle spectrum select
+F2: help touch
+z: print zone
+
+ctrl+entrée: Execute code

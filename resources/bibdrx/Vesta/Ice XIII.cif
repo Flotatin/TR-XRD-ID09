@@ -1,0 +1,54 @@
+
+#======================================================================
+# CRYSTAL DATA
+#----------------------------------------------------------------------
+data_VESTA_phase_1
+
+_chemical_name_common                  'Ice XIII'
+_cell_length_a                         9.241700
+_cell_length_b                         7.472400
+_cell_length_c                         10.297000
+_cell_angle_alpha                      90.000000
+_cell_angle_beta                       109.687302
+_cell_angle_gamma                      90.000000
+_cell_volume                           669.520525
+_space_group_name_H-M_alt              'P 21/c'
+_space_group_IT_number                 14
+
+loop_
+_space_group_symop_operation_xyz
+   'x, y, z'
+   '-x, -y, -z'
+   '-x, y+1/2t, -z+1/2t'
+   'x, -y+1/2t, z+1/2t'
+
+loop_
+   _atom_site_label
+   _atom_site_occupancy
+   _atom_site_fract_x
+   _atom_site_fract_y
+   _atom_site_fract_z
+   _atom_site_adp_type
+   _atom_site_U_iso_or_equiv
+   _atom_site_type_symbol
+   O1        1.0     0.254100     0.562900     0.251700    Uiso  ? O
+   O2        1.0     0.477100     0.799200     0.408900    Uiso  ? O
+   O3        1.0     0.050300     0.094100     0.094100    Uiso  ? O
+   O4        1.0     0.261300     0.404500     0.499200    Uiso  ? O
+   O5        1.0     0.211300     0.402900     0.003400    Uiso  ? O
+   O6        1.0     0.414700     0.110300     0.233600    Uiso  ? O
+   O7        1.0     0.124500     0.114200     0.264300    Uiso  ? O
+   D1        0.9910  0.344400     0.642700     0.300800    Uiso  ? H
+   D2        0.9430  0.245800     0.494200     0.329900    Uiso  ? H
+   D3        0.9520  0.107400     0.718700     0.156300    Uiso  ? H
+   D4        0.9680  0.482000     0.907500     0.355800    Uiso  ? H
+   D5        0.9740  0.576300     0.749900     0.443700    Uiso  ? H
+   D6        1.0370  0.948600     0.750800     0.047800    Uiso  ? H
+   D7        1.0150  0.237200     0.454300     0.098900    Uiso  ? H
+   D8        0.8960  0.304300     0.490400     0.577700    Uiso  ? H
+   D9        1.0150  0.170800     0.355500     0.513700    Uiso  ? H
+   D10       1.0140  0.307200     0.373700     0.990400    Uiso  ? H
+   D11       0.9380  0.078100     0.019400     0.198900    Uiso  ? H
+   D12       0.9160  0.325000     0.137400     0.255400    Uiso  ? H
+   D13       0.9200  0.382300     0.049600     0.146700    Uiso  ? H
+   D14       0.9110  0.050900     0.208200     0.254800    Uiso  ? H

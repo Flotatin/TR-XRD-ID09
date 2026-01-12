@@ -1,0 +1,50 @@
+
+#======================================================================
+# CRYSTAL DATA
+#----------------------------------------------------------------------
+data_VESTA_phase_1
+
+_chemical_name_common                  'Ice XII'
+_cell_length_a                         8.304000
+_cell_length_b                         8.304000
+_cell_length_c                         4.024000
+_cell_angle_alpha                      90.000000
+_cell_angle_beta                       90.000000
+_cell_angle_gamma                      90.000000
+_cell_volume                           277.480623
+_space_group_name_H-M_alt              'I -4 2 d'
+_space_group_IT_number                 122
+
+loop_
+_space_group_symop_operation_xyz
+   'x, y, z'
+   '-x, -y, z'
+   'y, -x, -z'
+   '-y, x, -z'
+   '-x+1/2, y, -z+3/4'
+   'x+1/2, -y, -z+3/4'
+   '-y+1/2, -x, z+3/4'
+   'y+1/2, x, z+3/4'
+   'x+1/2, y+1/2, z+1/2'
+   '-x+1/2, -y+1/2, z+1/2'
+   'y+1/2, -x+1/2, -z+1/2'
+   '-y+1/2, x+1/2, -z+1/2'
+   '-x, y+1/2, -z+1/4'
+   'x, -y+1/2, -z+1/4'
+   '-y, -x+1/2, z+1/4'
+   'y, x+1/2, z+1/4'
+
+loop_
+   _atom_site_label
+   _atom_site_occupancy
+   _atom_site_fract_x
+   _atom_site_fract_y
+   _atom_site_fract_z
+   _atom_site_adp_type
+   _atom_site_U_iso_or_equiv
+   _atom_site_type_symbol
+   O1         1.0     0.000000     0.000000     0.000000    Uiso  ? O
+   O2         1.0     0.364300     0.250000     0.125000    Uiso  ? O
+   H1         1.0     0.041900     0.087100     0.866000    Uiso  ? H
+   H2         1.0     0.292200     0.218100     0.309000    Uiso  ? H
+   H3         1.0     0.420200     0.332700     0.222600    Uiso  ? H

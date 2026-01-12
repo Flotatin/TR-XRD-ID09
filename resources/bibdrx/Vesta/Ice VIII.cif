@@ -1,0 +1,63 @@
+
+#======================================================================
+# CRYSTAL DATA
+#----------------------------------------------------------------------
+data_VESTA_phase_1
+
+_chemical_name_common                  'Ice VIV'
+_cell_length_a                         4.449000
+_cell_length_b                         4.449000
+_cell_length_c                         6.413000
+_cell_angle_alpha                      90.000000
+_cell_angle_beta                       90.000000
+_cell_angle_gamma                      90.000000
+_cell_volume                           126.936359
+_space_group_name_H-M_alt              'I 41/a m d'
+_space_group_IT_number                 141
+
+loop_
+_space_group_symop_operation_xyz
+   'x, y, z'
+   '-x, -y, -z'
+   '-x+1/2t, -y, z+1/2t'
+   'x+1/2t, y, -z+1/2t'
+   '-y+1/4t, x+3/4t, z+1/4t'
+   'y+3/4t, -x+1/4t, -z+3/4t'
+   'y+1/4t, -x+1/4t, z+3/4t'
+   '-y+3/4t, x+3/4t, -z+1/4t'
+   '-x+1/2t, y, -z+1/2t'
+   'x+1/2t, -y, z+1/2t'
+   'x, -y, -z'
+   '-x, y, z'
+   'y+1/4t, x+3/4t, -z+1/4t'
+   '-y+3/4t, -x+1/4t, z+3/4t'
+   '-y+1/4t, -x+1/4t, -z+3/4t'
+   'y+3/4t, x+3/4t, z+1/4t'
+   'x+1/2t, y+1/2t, z+1/2t'
+   '-x+1/2t, -y+1/2t, -z+1/2t'
+   '-x, -y+1/2t, z'
+   'x, y+1/2t, -z'
+   '-y+3/4t, x+1/4t, z+3/4t'
+   'y+1/4t, -x+3/4t, -z+1/4t'
+   'y+3/4t, -x+3/4t, z+1/4t'
+   '-y+1/4t, x+1/4t, -z+3/4t'
+   '-x, y+1/2t, -z'
+   'x, -y+1/2t, z'
+   'x+1/2t, -y+1/2t, -z+1/2t'
+   '-x+1/2t, y+1/2t, z+1/2t'
+   'y+3/4t, x+1/4t, -z+3/4t'
+   '-y+1/4t, -x+3/4t, z+1/4t'
+   '-y+3/4t, -x+3/4t, -z+1/4t'
+   'y+1/4t, x+1/4t, z+3/4t'
+
+loop_
+   _atom_site_label
+   _atom_site_occupancy
+   _atom_site_fract_x
+   _atom_site_fract_y
+   _atom_site_fract_z
+   _atom_site_adp_type
+   _atom_site_U_iso_or_equiv
+   _atom_site_type_symbol
+   O1        1.0     0.000000     0.250000     0.110600    Uiso  ? O
+   D1        50.0000  0.000000     0.425600     0.201100    Uiso  ? H

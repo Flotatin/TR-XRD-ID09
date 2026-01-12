@@ -1,0 +1,42 @@
+
+#======================================================================
+# CRYSTAL DATA
+#----------------------------------------------------------------------
+data_VESTA_phase_1
+
+_chemical_name_common                  'Ice XI'
+_cell_length_a                         4.501900
+_cell_length_b                         7.797800
+_cell_length_c                         7.328000
+_cell_angle_alpha                      90.000000
+_cell_angle_beta                       90.000000
+_cell_angle_gamma                      90.000000
+_cell_volume                           257.248839
+_space_group_name_H-M_alt              'C m c 21'
+_space_group_IT_number                 36
+
+loop_
+_space_group_symop_operation_xyz
+   'x, y, z'
+   '-x, -y, z+1/2t'
+   'x, -y, z+1/2t'
+   '-x, y, z'
+   'x+1/2t, y+1/2t, z'
+   '-x+1/2t, -y+1/2t, z+1/2t'
+   'x+1/2t, -y+1/2t, z+1/2t'
+   '-x+1/2t, y+1/2t, z'
+
+loop_
+   _atom_site_label
+   _atom_site_occupancy
+   _atom_site_fract_x
+   _atom_site_fract_y
+   _atom_site_fract_z
+   _atom_site_adp_type
+   _atom_site_U_iso_or_equiv
+   _atom_site_type_symbol
+   O1        1.0     0.000000     0.664800     0.631000    Uiso  ? O
+   O2        1.0     0.500000     0.825500     0.936900    Uiso  ? O
+   D1        1.0     0.000000     0.663600     0.196300    Uiso  ? H
+   D2        1.0     0.000000     0.536300     0.018300    Uiso  ? H
+   D3        1.0     0.676600     0.774800     0.981700    Uiso  ? H

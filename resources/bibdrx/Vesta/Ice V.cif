@@ -1,0 +1,55 @@
+
+#======================================================================
+# CRYSTAL DATA
+#----------------------------------------------------------------------
+data_VESTA_phase_1
+
+_chemical_name_common                  'Ice V'
+_cell_length_a                         9.220000
+_cell_length_b                         7.540000
+_cell_length_c                         10.349999
+_cell_angle_alpha                      90.000000
+_cell_angle_beta                       109.200005
+_cell_angle_gamma                      90.000000
+_cell_volume                           679.497249
+_space_group_name_H-M_alt              'C 2/c'
+_space_group_IT_number                 15
+
+loop_
+_space_group_symop_operation_xyz
+   'x, y, z'
+   '-x, -y, -z'
+   '-x, y, -z+1/2t'
+   'x, -y, z+1/2t'
+   'x+1/2t, y+1/2t, z'
+   '-x+1/2t, -y+1/2t, -z'
+   '-x+1/2t, y+1/2t, -z+1/2t'
+   'x+1/2t, -y+1/2t, z+1/2t'
+
+loop_
+   _atom_site_label
+   _atom_site_occupancy
+   _atom_site_fract_x
+   _atom_site_fract_y
+   _atom_site_fract_z
+   _atom_site_adp_type
+   _atom_site_U_iso_or_equiv
+   _atom_site_type_symbol
+   O1        1.0     0.250000     0.815300     0.000000    Uiso  ? O
+   O2        1.0     0.462900     0.056500     0.154400    Uiso  ? O
+   O3        1.0     0.275100     0.652500     0.247700    Uiso  ? O
+   O4        1.0     0.399300     0.359600     0.985400    Uiso  ? O
+   H1        0.5000  0.330000     0.900000     0.060000    Uiso  ? H
+   H2        0.5000  0.260000     0.760000     0.090000    Uiso  ? H
+   H3        0.5000  0.390000     0.970000     0.100000    Uiso  ? H
+   H4        0.5000  0.380000     0.090000     0.190000    Uiso  ? H
+   H5        0.5000  0.440000     0.170000     0.090000    Uiso  ? H
+   H6        0.5000  0.560000     0.980000     0.190000    Uiso  ? H
+   H7        0.5000  0.270000     0.710000     0.160000    Uiso  ? H
+   H8        0.5000  0.370000     0.580000     0.280000    Uiso  ? H
+   H9        0.5000  0.320000     0.730000     0.330000    Uiso  ? H
+   H10       0.5000  0.190000     0.620000     0.280000    Uiso  ? H
+   H11       0.5000  0.420000     0.250000     0.050000    Uiso  ? H
+   H12       0.5000  0.290000     0.360000     0.000000    Uiso  ? H
+   H13       0.5000  0.360000     0.290000     0.900000    Uiso  ? H
+   H14       0.5000  0.470000     0.460000     0.000000    Uiso  ? H

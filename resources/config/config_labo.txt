@@ -1,0 +1,11 @@
+folder_DRX=D:\ESRF\2025 Juin HC -6205 id09\RAW_DATA
+folder_OSC=D:\ESRF\2025 Juin HC -6205 id09\Oscilloscope
+folder_CED=D:\ESRF\2025 Juin HC -6205 id09\Fichier_CED_DRX
+loaded_file_DRX=D:\ESRF\2025 Juin HC -6205 id09\RAW_DATA\water09\water09_0001\scan0010\scan_jf1m_0000.h5
+loaded_file_OSC=D:\ESRF\2025 Juin HC -6205 id09\Oscilloscope\Water_09_scan10_130625_18h44
+calib_file_mask=None
+calib_file_poni=D:/ESRF/2025 Juin HC -6205 id09/dioptas_files/calib_LaB6_dDAC2.poni
+zone=[[9.394523720860715, 24.705906710261164]]
+energie_DRX=19000.0
+bib_files=["H2O/Ice-Ih.jcpds", "H2O/Ice-VI.jcpds", "H2O/Ice-VII.jcpds", "Sn/Sn_Beta_modif.jcpds", "Cu/Cu_fcc.jcpds"]
+date=2025-07-09 16:21:29

@@ -1,0 +1,46 @@
+
+#======================================================================
+# CRYSTAL DATA
+#----------------------------------------------------------------------
+data_VESTA_phase_1
+
+_chemical_name_common                  'Ga-I'
+_cell_length_a                         4.430000
+_cell_length_b                         7.600000
+_cell_length_c                         4.560000
+_cell_angle_alpha                      90.000000
+_cell_angle_beta                       90.000000
+_cell_angle_gamma                      90.000000
+_cell_volume                           153.526070
+_space_group_name_H-M_alt              'C m c e'
+_space_group_IT_number                 64
+
+loop_
+_space_group_symop_operation_xyz
+   'x, y, z'
+   '-x, -y, -z'
+   '-x, -y+1/2t, z+1/2t'
+   'x, y+1/2t, -z+1/2t'
+   '-x, y+1/2t, -z+1/2t'
+   'x, -y+1/2t, z+1/2t'
+   'x, -y, -z'
+   '-x, y, z'
+   'x+1/2t, y+1/2t, z'
+   '-x+1/2t, -y+1/2t, -z'
+   '-x+1/2t, -y, z+1/2t'
+   'x+1/2t, y, -z+1/2t'
+   '-x+1/2t, y, -z+1/2t'
+   'x+1/2t, -y, z+1/2t'
+   'x+1/2t, -y+1/2t, -z'
+   '-x+1/2t, y+1/2t, z'
+
+loop_
+   _atom_site_label
+   _atom_site_occupancy
+   _atom_site_fract_x
+   _atom_site_fract_y
+   _atom_site_fract_z
+   _atom_site_adp_type
+   _atom_site_U_iso_or_equiv
+   _atom_site_type_symbol
+   Ga         1.0     0.000000     0.344430     0.415401    Uiso  ? Ga

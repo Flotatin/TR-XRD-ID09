@@ -1,0 +1,39 @@
+data_Ice_XIV
+
+_chemical_name_common                'Ice XIV'
+_cell_length_a                       8.3499
+_cell_length_b                       8.1391
+_cell_length_c                       4.0825
+_cell_angle_alpha                    90.0
+_cell_angle_beta                     90.0
+_cell_angle_gamma                    90.0
+_cell_volume                         277.23
+_space_group_name_H-M_alt            'P 2_1 2_1 2_1'
+_space_group_IT_number               19
+
+loop_
+_space_group_symop_operation_xyz
+  'x, y, z'
+  '-x, -y, z'
+  '-x, y, -z'
+  'x, -y, -z'
+  'x+1/2, y, z+1/2'
+  '-x+1/2, -y, z+1/2'
+  '-x+1/2, y, -z+1/2'
+  'x+1/2, -y, -z+1/2'
+
+loop_
+_atom_site_label
+_atom_site_occupancy
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+_atom_site_adp_type
+_atom_site_U_iso_or_equiv
+_atom_site_type_symbol
+O1  1.0  0.0059   0.2568  0.1018  Uiso  ?  O
+O2  1.0  0.6308   0.9922  0.3248  Uiso  ?  O
+O3  1.0  0.2525   0.8858  0.1304  Uiso  ?  O
+D1  1.0  0.0557   0.3284  0.2485  Uiso  ?  D
+D2  1.0  0.5275   0.8410  0.0063  Uiso  ?  D
+D3  1.0  0.0920   0.2056  0.9845  Uiso  ?  D

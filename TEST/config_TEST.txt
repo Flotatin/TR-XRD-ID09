@@ -1,0 +1,11 @@
+folder_DRX=TEST
+folder_OSC=TEST
+folder_CED=TEST
+loaded_file_DRX=TEST/scan_jf1m_0000.h5
+loaded_file_OSC=TEST/Water_03_scan067_110625_19h28.bin
+calib_file_mask=TEST/mask_jf1M_flo.mask
+calib_file_poni=TEST/calib_LaB6_11062025_correct.poni
+zone=[]
+energie_DRX=19000
+bib_files=["TEST/Ice-VII.jcpds", "TEST/Ice-VI.jcpds", "TEST/Sn_Beta_modif.jcpds"]
+date=2025-08-28 17:54:09

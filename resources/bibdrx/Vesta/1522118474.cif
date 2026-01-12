@@ -1,0 +1,57 @@
+
+#======================================================================
+# CRYSTAL DATA
+#----------------------------------------------------------------------
+data_VESTA_phase_1
+
+_chemical_name_common                  'New structure'
+_cell_length_a                         5.721425
+_cell_length_b                         5.723506
+_cell_length_c                         5.938808
+_cell_angle_alpha                      90.846313
+_cell_angle_beta                       90.062965
+_cell_angle_gamma                      59.996021
+_cell_volume                           168.391460
+_space_group_name_H-M_alt              'P 1'
+_space_group_IT_number                 1
+
+loop_
+_space_group_symop_operation_xyz
+   'x, y, z'
+
+loop_
+   _atom_site_label
+   _atom_site_occupancy
+   _atom_site_fract_x
+   _atom_site_fract_y
+   _atom_site_fract_z
+   _atom_site_adp_type
+   _atom_site_U_iso_or_equiv
+   _atom_site_type_symbol
+   H          1.0    -0.484807    -0.250952    -0.501763    Uiso  ? H
+   H          1.0     0.413977     0.314724    -0.141141    Uiso  ? H
+   H          1.0     0.224884     0.467067     0.195225    Uiso  ? H
+   H          1.0    -0.325010    -0.437165    -0.163253    Uiso  ? H
+   H          1.0    -0.286694    -0.284681     0.173617    Uiso  ? H
+   H          1.0     0.249809     0.282748    -0.466758    Uiso  ? H
+   H          1.0     0.432866    -0.031311     0.205428    Uiso  ? H
+   H          1.0    -0.492468     0.432345     0.159882    Uiso  ? H
+   H          1.0    -0.024620    -0.324925    -0.438153    Uiso  ? H
+   H          1.0    -0.364647     0.355335     0.472334    Uiso  ? H
+   H          1.0    -0.076783    -0.403088    -0.127506    Uiso  ? H
+   H          1.0     0.385694     0.062090    -0.174291    Uiso  ? H
+   H          1.0     0.197554    -0.153411     0.030358    Uiso  ? H
+   H          1.0    -0.275564     0.077711     0.333011    Uiso  ? H
+   H          1.0     0.278254    -0.261242    -0.354198    Uiso  ? H
+   H          1.0     0.002102     0.293608     0.386406    Uiso  ? H
+   H          1.0    -0.214080    -0.047787    -0.298740    Uiso  ? H
+   H          1.0     0.028602     0.182678     0.000021    Uiso  ? H
+   O          1.0    -0.390410    -0.134460     0.286700    Uiso  ? O
+   O          1.0     0.327705     0.513437     0.083761    Uiso  ? O
+   O          1.0     0.112064     0.383286     0.413665    Uiso  ? O
+   O          1.0    -0.522271    -0.350907    -0.382067    Uiso  ? O
+   O          1.0    -0.175229    -0.484807    -0.051938    Uiso  ? O
+   O          1.0     0.459917     0.165008    -0.254772    Uiso  ? O
+   O          1.0     0.206790     0.014870     0.014993    Uiso  ? O
+   O          1.0    -0.248653     0.237619     0.345489    Uiso  ? O
+   O          1.0    -0.027272    -0.208320    -0.309770    Uiso  ? O

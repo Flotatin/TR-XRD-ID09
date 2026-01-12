@@ -1,0 +1,145 @@
+"""Widgets related to the CED/dDAC UI."""
+
+from __future__ import annotations
+
+import numpy as np
+import pyqtgraph as pg
+from pyqtgraph import GraphicsLayoutWidget
+
+from PyQt5.QtGui import QFont
+from PyQt5.QtWidgets import (
+    QCheckBox,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QVBoxLayout,
+)
+
+
+class DdacWidget:
+    """Widget containing the dDAC plots and controls."""
+
+    def __init__(self, main) -> None:
+        self._drx_container = main
+        self._create_drx_plots()
+        self._create_drx_persistent_items()
+        self._create_drx_selection_items()
+        self._init_drx_state()
+        self._build_drx_controls()
+        self._connect_drx_events()
+        self._configure_drx_layout()
+
+
+    def _create_drx_plots(self) -> None:
+        host = self._drx_container
+        host.fig_DRX_dynamic = GraphicsLayoutWidget()
+        host.ax_P = host.fig_DRX_dynamic.addPlot(row=0, col=0, title="Pressure (GPa)")
+        host.ax_P.setLabel("left", "Pressure", units="GPa")
+        host.ax_P.showAxis("right")
+        host.ax_P.getAxis("right").setLabel("Piezo", units="V")
+        host.ax_P.getAxis("right").setPen(pg.mkPen("b"))
+        host.ax_P_piezo = pg.ViewBox()
+        host.ax_P.scene().addItem(host.ax_P_piezo)
+        host.ax_P.getAxis("right").linkToView(host.ax_P_piezo)
+        host.ax_P_piezo.setXLink(host.ax_P)
+        host.ax_P_piezo.enableAutoRange(axis="y", enable=True)
+        host.ax_P.vb.sigResized.connect(host._update_piezo_view_geometry)
+        host._update_piezo_view_geometry()
+
+        host.ax_dPdt = host.fig_DRX_dynamic.addPlot(row=1, col=0, title="dP/dt (GPa/ms) & T (K)")
+        host.ax_dPdt.addLegend()
+        host.ax_diff_int = host.fig_DRX_dynamic.addPlot(row=2, col=0, title="Sigma (nm)")
+
+    def _create_drx_persistent_items(self) -> None:
+        host = self._drx_container
+        host.img_diff_int_item = pg.ImageItem(np.zeros((1, 1), dtype=float))
+        host.ax_diff_int.addItem(host.img_diff_int_item)
+
+        host.line_P = pg.InfiniteLine(angle=90, movable=False, pen="r")
+        host.line_dPdt = pg.InfiniteLine(angle=90, movable=False, pen="r")
+        host.ax_P.addItem(host.line_P)
+        host.ax_dPdt.addItem(host.line_dPdt)
+
+    def _create_drx_selection_items(self) -> None:
+        host = self._drx_container
+        host.zone_diff_int = pg.LinearRegionItem(
+            values=[0, 0],
+            orientation=pg.LinearRegionItem.Vertical,
+            brush=pg.mkBrush(255, 0, 0, 40),
+            movable=False,
+        )
+        host.ax_diff_int.addItem(host.zone_diff_int)
+
+    def _init_drx_state(self) -> None:
+        host = self._drx_container
+        host.list_index_file_CED_Load = []
+        host.Pstart, host.Pend, host.tstart, host.tend, host.bit_dP = 2, 1, 2, 1, 0
+        host.x1 = host.y1 = host.x3 = host.y3 = host.x5 = host.y5 = host.x_clic = host.y_clic = 0
+        host.time = []
+        host.spectre_number = []
+        host.plot_P = []
+        host.plot_piezo = None
+        host.plot_spe = []
+        host._cedx_gauge_items = {}
+        host._cedx_gauge_meta = {}
+        host._cedx_symbol_index = 0
+        host._cedx_mean_curve_item = None
+        host._cedx_mean_curve_data = (np.asarray([]), np.asarray([]))
+        host._cedx_gauge_series = {}
+        host._cedx_image_cache = None
+        host._cedx_image_row_map = {}
+        host._cedx_spectrum_theta_range = {}
+        host._cedx_image_trimmed_length = 0
+        host._cedx_theta_bounds = None
+        host._cedx_levels = None
+        host._runtime_gauge_elements = {}
+        host._gauge_library_dirty = False
+        host._current_spectrum_gauges = set()
+        host._drx_in_refresh = False
+
+    def _build_drx_controls(self) -> None:
+        host = self._drx_container
+        host.label_CED = QLabel("CEDd file select:", self._drx_container )
+        host.label_CED.setFont(QFont("Arial", 6))
+        host.label_CED.setMaximumHeight(100)
+
+        host.spectrum_select_box = QCheckBox("clic spectrum (h)", self._drx_container )
+        host.spectrum_select_box.setChecked(True)
+
+    def _connect_drx_events(self) -> None:
+        host = self._drx_container
+        host.ax_P.scene().sigMouseClicked.connect(
+            lambda evt: host._on_drx_plot_clicked(evt, axis_role="pressure")
+        )
+        host.ax_dPdt.scene().sigMouseClicked.connect(
+            lambda evt: host._on_drx_plot_clicked(evt, axis_role="derivative")
+        )
+        host.ax_diff_int.scene().sigMouseClicked.connect(
+            lambda evt: host._on_drx_plot_clicked(evt, axis_role="image")
+        )
+
+    def _configure_drx_layout(self) -> None:
+        host = self._drx_container
+        host.fig_DRX_dynamic.ci.setContentsMargins(0, 0, 0, 0)
+        host.fig_DRX_dynamic.ci.layout.setSpacing(4)
+
+        if host is None:
+            return
+
+        host.ddac_box = QGroupBox("dDAC")
+        ddac_layout = QVBoxLayout()
+        host.ddac_box.setLayout(ddac_layout)
+
+        
+        ddac_layout.addWidget(host.fig_DRX_dynamic)
+
+        layhrun = QHBoxLayout()
+        layhrun.addWidget(host.label_CED)
+        layhrun.addWidget(host.spectrum_select_box)
+        ddac_layout.addLayout(layhrun)
+
+        host.setLayout(ddac_layout)
+
+    def add_to_layout(self, grid_layout) -> None:
+        """Add the ddac widgets to the provided grid layout."""
+        grid_layout.addWidget(self._drx_container.ddac_box, 0, 4, 4, 1)

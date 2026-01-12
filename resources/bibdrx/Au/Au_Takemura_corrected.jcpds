@@ -1,0 +1,25 @@
+VERSION:   4 #(EOS from Takemura and Dewaele, updated for ruby 2020, Vinet K0=167, K0p=5.881, params are BM3 fit)
+COMMENT: Au 
+K0:       173.01
+K0P:      5.3887
+DK0DT:    0.0
+DK0PDT:   0.0
+SYMMETRY: CUBIC
+A:        4.078
+B:        4.078
+C:        4.078
+ALPHA:    90.0
+BETA:     90.0
+GAMMA:    90.0
+VOLUME:   67.81748255200002
+ALPHAT:   0.0
+DALPHADT: 0.0
+DIHKL:    2.35443	100	1	1	1
+DIHKL:    2.039	100	2	0	0
+DIHKL:    1.44179	100	2	2	0
+DIHKL:    1.22956	100	3	1	1
+DIHKL:    1.17722	100	2	2	2
+DIHKL:    1.0195	100	4	0	0
+DIHKL:    0.911869	100	4	2	0
+DIHKL:    0.832418	100	4	2	2
+DIHKL:    0.784811	100	5	1	1
