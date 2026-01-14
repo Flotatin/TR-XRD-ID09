@@ -7,7 +7,7 @@ name = "cedapp"
 version = "0.1.0"
 description = "Python graphical application dedicated to X-ray diffraction (XRD) data processing and visualization."
 readme = "README.md"
-requires-python = "==3.10.15"
+requires-python = ">=3.10"
 dependencies = [
   "pyFAI",
   "pybaselines",
@@ -18,6 +18,9 @@ dependencies = [
   "matplotlib",
   "PyQt5",
 ]
+
+[project.gui-scripts]
+cedapp = "cedapp.main:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
