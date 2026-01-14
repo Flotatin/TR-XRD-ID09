@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cedapp"
+version = "0.1.0"
+description = "Python graphical application dedicated to X-ray diffraction (XRD) data processing and visualization."
+readme = "README.md"
+requires-python = "==3.10.15"
+dependencies = [
+  "pyFAI",
+  "pybaselines",
+  "pynverse",
+  "lecroyscope",
+  "numpy",
+  "scipy",
+  "matplotlib",
+  "PyQt5",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
