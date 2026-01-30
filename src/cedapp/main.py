@@ -116,6 +116,8 @@ import matplotlib.colors as mcolors
 from pynverse import inversefunc
 import re
 
+
+
 import pyFAI
 import fabio
 import warnings
@@ -124,6 +126,10 @@ from cedapp.ui import qt_styles, ui_sections
 from cedapp.utils import paths
 from cedapp.utils.logging_config import setup_logging
 
+
+import silx
+
+from silx.io.h5py_utils import File
 
 claire = True
 
@@ -140,7 +146,7 @@ setup_logging(debug=_DEBUG_ENV)
 logger = logging.getLogger(__name__)
 
 folder_start = ""
-file_config = paths.get_default_config_path()
+file_config = r'config_H2O.txt'#paths.get_default_config_path()
 text_dir = paths.get_text_dir(require=False)
 
 file_help = text_dir / "Help.txt"
@@ -216,6 +222,7 @@ def _setattr_and_call(method_name: str, attribute: str, value) -> Callable[["Mai
 
 KEYBOARD_SHORTCUTS: Dict[Tuple[int, int], Dict[str, object]] = {
     (Qt.Key_Return, Qt.ControlModifier): _direct_action(lambda self: self.execute_code()),
+    (Qt.Key_C, Qt.ControlModifier): _direct_action(_method_action("copy_gauge_models_to_clipboard")),
     (Qt.Key_R, Qt.ShiftModifier): {
         "handler": _method_action("Replace_pic_fit"),
         "name": "Replace pic",
@@ -265,7 +272,7 @@ KEYBOARD_SHORTCUTS: Dict[Tuple[int, int], Dict[str, object]] = {
         "requires_box": True,
         "allow_extra_modifiers": True,
     },
-    (Qt.Key_B, Qt.NoModifier): {
+    (Qt.Key_B, Qt.ShiftModifier): {
         "handler": _method_action("Baseline_spectrum"),
         "name": "Baseline",
         "requires_box": False,
@@ -335,6 +342,10 @@ KEYBOARD_SHORTCUTS: Dict[Tuple[int, int], Dict[str, object]] = {
     (Qt.Key_Q, Qt.NoModifier): _direct_action(_toggle_checkbox_action("select_clic_box")),
     (Qt.Key_H, Qt.NoModifier): _direct_action(_toggle_checkbox_action("spectrum_select_box")),
     (Qt.Key_F2, Qt.NoModifier): _direct_action(_method_action("afficher_clavier_utilise")),
+    (Qt.Key_S, Qt.ControlModifier): _direct_action(_method_action("show_gauge_selection_zone")),
+    (Qt.Key_V, Qt.ControlModifier): _direct_action(_method_action("paste_gauge_models_from_clipboard")),
+    (Qt.Key_Delete, Qt.NoModifier): _direct_action(_method_action("delete_gauges_in_zone")),
+    (Qt.Key_Escape, Qt.NoModifier): _direct_action(_method_action("hide_gauge_selection_zone")),
     (Qt.Key_Z, Qt.NoModifier): {
         "handler": _method_action("f_print_region"),
         "name": "f_print_region",
@@ -355,6 +366,8 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         self.spectro_data: Optional[pd.DataFrame] = None
         self.spec_fit: List[Optional[object]] = []
         self.RUN=None
+        self._gauge_clipboard: Optional[List[Gauge]] = None
+        self._gauge_clipboard_zone: Optional[pg.LinearRegionItem] = None
         self.config_file = paths.resolve_config_path(config_file).expanduser()
         self.folder_start = folder_start or ""
         self.DEFAULT_THETA_RANGE = DEFAULT_THETA_RANGE
@@ -365,6 +378,12 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         self.file_variables = str(file_variables)
         
         self.file_controller = FileSelectionController(self)
+        self.loaded_drx_scan_name = ""
+        self.live_timer = QTimer(self)
+        self.live_timer.setInterval(100)
+        self.live_timer.timeout.connect(self._check_live_folder)
+        self.live_mode_active = False
+        self.jungfrau_mode="burst"
 #########################################################################################################################################################################################
 #? Setup Main window parameters
 
@@ -623,7 +642,6 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         """Configure the base window layout."""
 
         self.setWindowTitle("0.1 vXRD © F.Dembele")
-        self.setGeometry(0, 0, 80, 80)
         self.grid_layout = QGridLayout()
         central_widget = QWidget()
         central_widget.setLayout(self.grid_layout)
@@ -968,6 +986,12 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
     def _update_help_button_color(self, visible: bool) -> None:
         color = 'lightgreen' if visible else 'lightcoral'
         self.help_toggle_btn.setStyleSheet(f"background-color: {color};")
+        
+        
+    def _update_live_button_color(self, active: bool) -> None:
+        color = "lightgreen" if active else "lightcoral"
+        self.live_toggle_btn.setStyleSheet(f"background-color: {color};")
+
 
     def _ensure_help_entries_loaded(self) -> None:
         """Populate the help cache for the keyboard window."""
@@ -998,6 +1022,161 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         self.help_widget.setVisible(visible)
         self.help_tab_visible = visible
         self._update_help_button_color(visible)
+
+    def toggle_live_mode(self, active: Optional[bool] = None) -> None:
+        """Toggle the live DRX folder monitoring."""
+        if active is None:
+            active = bool(self.live_toggle_btn.isChecked())
+
+        self.live_mode_active = active
+        self._update_live_button_color(active)
+
+        if active:
+            self.live_timer.start()
+            self._check_live_folder()
+        else:
+            self.live_timer.stop()
+
+    def set_jungfrau_mode(self, mode: str) -> None:
+        self.jungfrau_mode = mode.lower()
+    
+
+
+    def _get_latest_drx_folder(self) -> Optional[Path]:
+        drx_root = Path(self.dict_folders.get("DRX", ""))
+        if not drx_root.exists():
+            return None
+
+        folders = [entry for entry in drx_root.iterdir() if entry.is_dir()]
+        if not folders:
+            return None
+
+        return max(folders, key=lambda entry: entry.stat().st_ctime)
+
+    def _get_current_drx_folder(self) -> Optional[Path]:
+        if not self.loaded_file_DRX:
+            return None
+
+        drx_root = Path(self.dict_folders.get("DRX", ""))
+        if not drx_root.exists():
+            return None
+
+        try:
+            relative_path = Path(self.loaded_file_DRX).resolve().relative_to(drx_root.resolve())
+        except Exception:
+            return None
+
+        if not relative_path.parts:
+            return None
+
+        return drx_root / relative_path.parts[0]
+
+    def _find_latest_drx_file(self, folder: Path) -> Optional[Path]:
+        candidates = list(folder.rglob("scan_jf1m_0000.h5"))
+        if not candidates:
+            return None
+        return max(candidates, key=lambda entry: entry.stat().st_mtime)
+
+    def _set_loaded_drx_file(self, file_path: Path) -> bool:
+        if not file_path.exists():
+            self.text_box_msg.setText("File not found")
+            return False
+
+        self.loaded_file_DRX = str(file_path)
+        self.file_label_spectro.setText(f"DRX: {file_path.name}")
+        self.DRX_selector.clear()
+
+        try:
+            data_drx = fabio.open(str(file_path))
+        except Exception as exc:
+            self.text_box_msg.setText(f"Erreur lecture DRX: {exc}")
+            return False
+        
+        num_spec=min(self.DRX_selector.currentIndex(),data_drx.nframes-1)
+        self.DRX_selector.addItems([f"DRX{i}" for i in range(data_drx.nframes)])
+        self.DRX_selector.setCurrentIndex(0)
+        return True
+
+    def _create_spectrum_from_loaded_drx(self, save_gauges: Optional[List[Element]] = None) -> bool:
+        if not os.path.exists(self.loaded_file_DRX):
+            self.text_box_msg.setText("File not found")
+            return False
+
+        if self.calib is None or getattr(self.calib, "mask", None) is None or getattr(self.calib, "ai", None) is None:
+            self.text_box_msg.setText("err: calibration not available for integration")
+            return False
+
+        save_gauges = list(save_gauges or [])
+        try:
+            img_data = fabio.open(self.loaded_file_DRX)
+            frame = img_data.getframe(min(self.DRX_selector.currentIndex(),img_data.nframes-1)).data
+        except Exception as exc:
+            self.text_box_msg.setText(f"Erreur chargement DRX: {exc}")
+            return False
+
+        tth, intens = Calibration.Integrate_DRX(
+            frame,
+            self.calib.mask,
+            self.calib.ai,
+            theta_range=self.calib.theta_range,
+        )
+
+        self.text_box_msg.setText("New integration")
+        self.bit_bypass = True
+        try:
+            self.f_Spectrum_Load(
+                Spectrum=CL.Spectre(np.array(tth), np.array(intens), Gauges=save_gauges)
+            )
+        finally:
+            self.bit_bypass = False
+        return True
+
+    def _check_live_folder(self) -> None:
+        if not self.live_mode_active:
+            return
+        
+        latest_folder = self._get_latest_drx_folder()
+        if latest_folder is None:
+            return
+
+        current_folder = self._get_current_drx_folder()
+        if current_folder is not None and latest_folder.resolve() == current_folder.resolve():
+            return
+
+        latest_file = self._find_latest_drx_file(latest_folder)
+        if latest_file is None:
+            return
+
+        if self.loaded_file_DRX and Path(self.loaded_file_DRX).resolve() == latest_file.resolve():
+            return
+
+        previous_spectrum = self.Spectrum
+        save_gauges = []
+        has_fit_gauges = False
+        if previous_spectrum is not None:
+            gauges = getattr(previous_spectrum, "Gauges", None) or []
+            if gauges:
+                save_gauges = copy.deepcopy(gauges)
+                has_fit_gauges = bool(
+                    getattr(previous_spectrum, "bit_fit", False)
+                    or any(getattr(gauge, "bit_fit", False) for gauge in gauges)
+                )
+
+        if not self._set_loaded_drx_file(latest_file):
+            return
+
+        if not self._create_spectrum_from_loaded_drx(save_gauges=save_gauges):
+            return
+
+        if has_fit_gauges and save_gauges:
+            previous_bypass = self.bit_bypass
+            self.bit_bypass = True
+            try:
+                self.FIT_lmfitVScurvfit()
+            finally:
+                self.bit_bypass = previous_bypass
+
+
 
     def try_command(self,item):
         print("à coder")
@@ -1290,12 +1469,15 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
 
     def select_file_DRX(self):
         options = QFileDialog.Options()
-        self.loaded_file_DRX,_ = QFileDialog.getOpenFileName(self, "F_DRX", options=options,directory=os.path.dirname(self.loaded_file_DRX))
-        self.file_label_spectro.setText(f"DRX: {os.path.basename(self.loaded_file_DRX) if self.loaded_file_DRX else 'None'}")
-        if self.loaded_file_DRX:
-            self.DRX_selector.clear()
-            data_drx=fabio.open(self.loaded_file_DRX)
-            self.DRX_selector.addItems([f'DRX{i}' for i in range(data_drx.nframes)])
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "F_DRX",
+            options=options,
+            directory=os.path.dirname(self.loaded_file_DRX),
+        )
+        if file_path:
+            self.set_loaded_drx_file(file_path)
+
                 
     def select_file_oscilo(self):
         options = QFileDialog.Options()
@@ -1313,7 +1495,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             self.set_energy_value(new_energy)
 
     def _open_calibration_dialog(self):
-        if self.RUN is not None and getattr(self.RUN, "calib", None) is not None:
+        if self.RUN is not None and getattr(self.RUN, "calib", None) is not None :
             self.calib = self.RUN.calib
 
         file_img = None
@@ -1333,10 +1515,48 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         if self.energy_value != new_energy and new_energy is not None:
             self.set_energy_value(new_energy)
 
+    def set_loaded_drx_file(self, file_path: str, scan_name: Optional[str] = None) -> None:
+        self.loaded_file_DRX = file_path
+        self.loaded_drx_scan_name = scan_name or self._infer_drx_scan_name(file_path)
+        self.file_label_spectro.setText(f"DRX: {os.path.basename(self.loaded_file_DRX) if self.loaded_file_DRX else 'None'}")
+        if self.loaded_file_DRX:
+            try:
+                self.DRX_selector.clear()
+                data_drx = fabio.open(self.loaded_file_DRX)
+                self.DRX_selector.addItems([f"DRX{i}" for i in range(data_drx.nframes)])
+            except Exception as exc:
+                print(f"Erreur lors du chargement DRX : {exc}")
+
+
+    def _infer_drx_scan_name(self, file_path: str) -> str:
+        if not file_path:
+            return ""
+        scan_folder = os.path.basename(os.path.dirname(file_path))
+        if scan_folder.lower().startswith("scan"):
+            root_folder = os.path.basename(os.path.dirname(os.path.dirname(file_path)))
+            match = re.match(r"(.*)_\d+$", root_folder)
+            prefix = match.group(1) if match else root_folder
+            return f"{prefix}_{scan_folder}"
+        return os.path.splitext(os.path.basename(file_path))[0]
+
+    def _get_cedx_base_name(self) -> str:
+        if self.loaded_drx_scan_name:
+            return self.loaded_drx_scan_name
+        if self.loaded_file_OSC:
+            return os.path.basename(self.loaded_file_OSC)
+        if self.loaded_file_DRX:
+            return os.path.splitext(os.path.basename(self.loaded_file_DRX))[0]
+        return "CEDX"
+
+
 #########################################################################################################################################################################################
 #? COMMANDE AUTO DIF
     def f_print_region(self):
         self.spectrum_controller.toggle_regions_visibility()
+
+    def set_find_peaks_zones_visibility(self, checked: bool) -> None:
+        if hasattr(self, "spectrum_controller"):
+            self.spectrum_controller.set_regions_visible(bool(checked))
 
     def run_fit_selected_spectra(self):
         index_start = self.index_start_entry.value()
@@ -1380,7 +1600,72 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
 
 #########################################################################################################################################################################################
 #? COMMANDE PRINT
-    
+    def _compute_spectrum_bounds(self, *, include_overlays: bool = True):
+        spectrum = getattr(self, "Spectrum", None)
+        if spectrum is None:
+            return None
+
+        x_values = np.asarray(getattr(spectrum, "wnb", []), dtype=float)
+        if x_values.size == 0:
+            return None
+
+        finite_x = x_values[np.isfinite(x_values)]
+        if finite_x.size == 0:
+            return None
+
+        x_min = float(finite_x.min())
+        x_max = float(finite_x.max())
+        y_candidates = []
+
+        def _append(values):
+            if values is None:
+                return
+            arr = np.asarray(values, dtype=float)
+            if arr.size == 0:
+                return
+            finite = arr[np.isfinite(arr)]
+            if finite.size:
+                y_candidates.append(finite)
+
+        _append(getattr(spectrum, "y_corr", None))
+        _append(getattr(self, "y_fit_start", None))
+
+        if include_overlays:
+            if getattr(self, "act_show_raw", None) is not None and self.act_show_raw.isChecked():
+                _append(getattr(spectrum, "spec", None))
+            if getattr(self, "act_show_filtered", None) is not None and self.act_show_filtered.isChecked():
+                _append(getattr(spectrum, "y_filtre", None))
+            if getattr(self, "act_show_baseline", None) is not None and self.act_show_baseline.isChecked():
+                _append(getattr(spectrum, "blfit", None))
+
+        if not y_candidates:
+            return None
+
+        y_values = np.concatenate(y_candidates)
+        y_min = float(y_values.min())
+        y_max = float(y_values.max())
+        if not np.isfinite(y_min) or not np.isfinite(y_max):
+            return None
+        if y_min == y_max:
+            y_min -= 1
+            y_max += 1
+
+        return x_min, x_max, y_min, y_max
+
+    def _apply_spectrum_limits(self, *, include_overlays: bool = True) -> None:
+        bounds = self._compute_spectrum_bounds(include_overlays=include_overlays)
+        if bounds is None:
+            return
+
+        x_min, x_max, y_min, y_max = bounds
+        padding = (y_max - y_min) * 0.05
+        y_max_limit = y_max + padding
+
+        self.ax_spectrum.disableAutoRange()
+        self.ax_spectrum.setLimits(xMin=x_min, xMax=x_max, yMin=y_min, yMax=y_max_limit)
+        self.ax_spectrum.setXRange(x_min, x_max)
+        self.ax_spectrum.setYRange(y_min, y_max_limit)
+
     
     def plot_spectrum(self):# INUTILE ,
         self.ax_spectrum.set_xlabel('X (U.A)')
@@ -1392,16 +1677,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
 
         
         
-        self.ax_spectrum.setXRange(min(self.Spectrum.wnb),max(self.Spectrum.wnb))
-
-        max_plot=max(self.Spectrum.y_corr)
-        if self.y_fit_start is None:
-            min_plot=min(self.Spectrum.y_corr)
-        else:
-            min_plot=min(min(self.y_fit_start),min(self.Spectrum.y_corr))-0.025*max_plot
-        self.ax_spectrum.disableAutoRange()
-        self.ax_spectrum.setLimits(xMin=None, xMax=None, yMin=None, yMax=None)
-        self.ax_spectrum.setYRange(min_plot ,max_plot*1.05)
+        self._apply_spectrum_limits(include_overlays=True)
         self.ax_dy.setXRange(min(self.Spectrum.wnb),max(self.Spectrum.wnb))
         #self.ax_zoom.plot(self.Spectrum.wnb,self.Spectrum.y_corr,'-',color='dimgray',markersize=4) #,label='Data brut'
         self._update_spectrum_overlay_data()
@@ -1452,11 +1728,11 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         col1 = self.filtre_type_selector.model().item(self.filtre_type_selector.currentIndex()).background().color().getRgb()
         self.filtre_type_selector.setStyleSheet("background-color: rgba{};	selection-background-color: gray;".format(col1))
         if self.filtre_type_selector.currentText() == "svg":
-            self.param_filtre_1_name.setText("window_length")
-            self.param_filtre_2_name.setText("polyorder")
+            self.param_filtre_1_name.setText("w_length")
+            self.param_filtre_2_name.setText("degpoly")
         elif self.filtre_type_selector.currentText() == "fft":
-            self.param_filtre_1_name.setText("f_c low")
-            self.param_filtre_2_name.setText("f_c high")
+            self.param_filtre_1_name.setText("f_c l")
+            self.param_filtre_2_name.setText("f_c h")
         else:
             self.param_filtre_1_name.setText("filtre p1")
             self.param_filtre_2_name.setText("filtre p2")
@@ -1749,7 +2025,6 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             self.bit_fit_T=True    
             self.index_jauge=save_jauge
             self.index_pic_select=save_pic
-            
             self.f_Gauge_Load()
             self.Print_fit_start()
 
@@ -1782,7 +2057,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             self.Spectrum.Calcul_study(mini=True)
             self.text_box_msg.setText('BAD FIT r^2 INCREAS')
 
-    def FIT_lmfitVScurvfit(self):
+    def FIT_lmfitVScurvfit(self,skip_ui=False):
         """Fit avec comparaison lmfit vs curve_fit"""
         save_jauge, save_pic = self.index_jauge, self.index_pic_select
         self.Param_FIT, list_F, initial_guess = [], [], []
@@ -1862,10 +2137,11 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         best = (np.sum((fit - y_sub) ** 2) < np.sum(self.Spectrum.dY ** 2))
         text_fit = "Curve_fit BEST you can Validate" if best else "Curve_fit LESS GOOD you can Cancel"
 
-        # Affichage fit
-        self.plot_curv_fit.setData(x_sub, fit)
-        self.plot_curv_dY.setData(x_sub, y_sub - fit)
-        self.Print_fit_start()
+        if not skip_ui:
+            # Affichage fit
+            self.plot_curv_fit.setData(x_sub, fit)
+            self.plot_curv_dY.setData(x_sub, y_sub - fit)
+            self.Print_fit_start(skip_ui=skip_ui)
 
         # Interaction validation
         go = True
@@ -1888,14 +2164,15 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
 
         # Post-traitement
         if go and best:
-            self._apply_best_fit(params, params_sigma, fit, x_sub, y_sub, blfit, save_jauge, save_pic)
+            self._apply_best_fit(params, params_sigma, fit, x_sub, y_sub, blfit, save_jauge, save_pic,skip_ui=skip_ui)
         else:
-            self._apply_bad_fit(save_jauge)
+            self._apply_bad_fit(save_jauge,skip_ui=skip_ui)
 
-    def _apply_best_fit(self, params, params_sigma, fit, x_sub, y_sub, blfit, save_jauge, save_pic):
+    def _apply_best_fit(self, params, params_sigma, fit, x_sub, y_sub, blfit, save_jauge, save_pic,skip_ui=False):
         """Applique les résultats quand le fit est validé et meilleur que l'existant"""
-        self.plot_curv_fit.setData([], [])
-        self.plot_curv_dY.setData([], [])
+        if not skip_ui:
+            self.plot_curv_fit.setData([], [])
+            self.plot_curv_dY.setData([], [])
 
         # Mise à jour spectre global
         self.Spectrum.Y = fit + blfit
@@ -1931,8 +2208,6 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                     sigma=float(self.Param0[i][j][2]),
                     inter=self.get_fit_variation()
                 )
-                #p.ctr = [float(self.Param0[i][j][0]), [float(self.Param0[i][j][0]) - l_sigma[0], float(self.Param0[i][j][0]) + l_sigma[0]]]
-
                 params_f = p.model.make_params()
                 y_plot = p.model.eval(params_f, x=self.Spectrum.wnb)
                 self.list_y_fit_start[i][j] = y_plot
@@ -1944,36 +2219,37 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                     f"Coef:{self.Param0[i][j][3]} ; Modele:{self.Param0[i][j][4]}"
                 )
                 self.list_text_pic[i][j] = str(new_name)
-
-                self._update_pic_fill_data(
-                    i,
-                    j,
-                    self.Spectrum.wnb,
-                    y_plot,
-                    np.zeros_like(self.Spectrum.blfit),
-                )
+                if not skip_ui:
+                    self._update_pic_fill_data(
+                        i,
+                        j,
+                        self.Spectrum.wnb,
+                        y_plot,
+                        np.zeros_like(self.Spectrum.blfit),
+                    )
 
             gauge.lamb_fit = self.Param0[i][0][0]
             gauge.bit_fit = True
 
         self.Spectrum.estimate_all_sigma_noise()
         self.Spectrum.bit_fit = True
-        self.Spectrum.Calcul_study(mini=True)
-        self.text_box_msg.setText("FIT TOTAL \n DONE")
         self.bit_fit_T = True
 
-        # Restauration indices
-        self.index_jauge = save_jauge
-        self.index_pic_select = save_pic
-        self.f_Gauge_Load()
-        self.Print_fit_start()
+        if not skip_ui:
+            self.text_box_msg.setText("FIT TOTAL \n DONE")
+            self.Spectrum.Calcul_study(mini=True)
+            # Restauration indices
+            self.index_jauge = save_jauge
+            self.index_pic_select = save_pic
+            self.f_Gauge_Load()
+            self.Print_fit_start(skip_ui=skip_ui)
 
-    def _apply_bad_fit(self, save_jauge):
+    def _apply_bad_fit(self, save_jauge,skip_ui=False):
         """Applique les résultats si le fit est rejeté ou moins bon"""
-        self.plot_curv_fit.setData([], [])
-        self.plot_curv_dY.setData([], [])
+        if not skip_ui:
+            self.plot_curv_fit.setData([], [])
+            self.plot_curv_dY.setData([], [])
         self.bit_fit_T = True
-
         for i, gauge in enumerate(self.Spectrum.Gauges):
             gauge.bit_fit = True
             if self.vslmfit.isChecked():
@@ -1981,38 +2257,31 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                     y_plot = self.list_y_fit_start[i][j]
                     new_P0, _ = p.Out_model()
                     self.Param0[i][j][:4] = new_P0
-                    self._update_pic_display(i, j, y_plot, update_listbox=i == save_jauge)
-
+                    if not skip_ui:
+                        self._update_pic_display(i, j, y_plot, update_listbox=i == save_jauge)
             gauge.lamb_fit = self.Param0[i][0][0]
+
         self.Spectrum.estimate_all_sigma_noise()
         self.Spectrum.bit_fit = True
-        self.Spectrum.Calcul_study(mini=True)
-        self.text_box_msg.setText("BAD FIT r^2 INCREAS")    
+        if not skip_ui:
+            self.Spectrum.Calcul_study(mini=True)
+            self.text_box_msg.setText("BAD FIT r^2 INCREAS")    
     
     def Baseline_spectrum(self):
         param=[float(self.param_filtre_1_entry.text()),float(self.param_filtre_2_entry.text())]
-        
+
         if self.filtre_type_selector.currentText() == "svg":
             param[0],param[1]=int(param[0]),int(param[1])
-    
         self.Spectrum.Data_treatement(
             deg_baseline=int(self.deg_baseline_entry.value()),
             type_filtre=self.filtre_type_selector.currentText(),
             param_f=param,
-            print_data_QT=False,
-        )
-
-
-        #if self.plot_blfit is not None:
-        #self.plot_blfit.remove()
-
+            print_data_QT=False,)
+        
         self.plot_data_fit.setData(self.Spectrum.wnb, self.Spectrum.y_corr)
         self.plot_zoom.setData(self.Spectrum.wnb, self.Spectrum.y_corr)
         self._update_spectrum_overlay_data()
-        self.ax_spectrum.setXRange(min(self.Spectrum.wnb),max(self.Spectrum.wnb))
-        self.ax_spectrum.disableAutoRange()
-        self.ax_spectrum.setLimits(xMin=None, xMax=None, yMin=None, yMax=None)
-        self.ax_spectrum.setYRange(min(self.Spectrum.y_corr) ,max(self.Spectrum.y_corr)*1.05)
+        self._apply_spectrum_limits(include_overlays=True)
         self.ax_dy.setXRange(min(self.Spectrum.wnb),max(self.Spectrum.wnb))
 
     def _update_spectrum_overlay_data(self):
@@ -2077,6 +2346,9 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         self.plot_baseline_curve.setVisible(
             baseline_available and self.act_show_baseline.isChecked()
         )
+        if spectrum is not None:
+            self._apply_spectrum_limits(include_overlays=True)
+
     
     def _CEDX_multi_fit(self):
         if self.RUN is None:
@@ -2093,13 +2365,13 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         if index_start > index_stop:
             print("Index start must be less than or equal to index stop.")
             return
-
+        skip_ui=self.skip_ui_update_checkbox.isChecked()
         total_steps = max(0, index_stop - index_start)
         progress_dialog = None
         if total_steps > 0:
             progress_dialog = ProgressDialog(
                 "Ajustement des spectres en cours...",
-                "Annuler",
+                "STOP",
                 0,
                 total_steps,
                 self,
@@ -2109,12 +2381,10 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             progress_dialog.setAutoClose(True)
             progress_dialog.show()
             QApplication.processEvents()
-
         try:
             for step, i in enumerate(range(index_start, index_stop), start=1):
                 if progress_dialog is not None:
                     if progress_dialog.wasCanceled():
-                        print("Ajustement interrompu par l'utilisateur.")
                         break
                     progress_dialog.setLabelText(
                         f"Spectre {i + 1} ({step}/{total_steps})"
@@ -2122,14 +2392,20 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                     QApplication.processEvents()
 
                 self.bit_bypass = False
-                self.f_Spectrum_Load(Spectrum=self.RUN.Spectra[i])
+                if skip_ui:
+                    self.Spectrum = self.RUN.Spectra[i]
+                    self._last_spectrum_load_bypass = True
+                    self._rebuild_fit_state(skip_ui=skip_ui)
+                else:
+                    self.f_Spectrum_Load(Spectrum=self.RUN.Spectra[i])
                 try:
                     self.bit_bypass = True
-                    self.FIT_lmfitVScurvfit()
+                    self.FIT_lmfitVScurvfit(skip_ui=skip_ui)
                 except Exception as e:
                     print("Error_fit:", e)
                 self.bit_bypass = False
                 self.RUN.Spectra[i] = self.Spectrum
+
 
                 if progress_dialog is not None:
                     progress_dialog.setValue(step)
@@ -2142,7 +2418,198 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
 
         self.Spectrum=self.RUN.Spectra[self.index_spec]
         self.REFRESH()
+
+    def _ensure_gauge_clipboard_zone(self) -> Optional[pg.LinearRegionItem]:
+        if not hasattr(self, "ax_diff_int"):
+            return None
+        if self._gauge_clipboard_zone is None:
+            zone = pg.LinearRegionItem(
+                values=[0, 0],
+                orientation=pg.LinearRegionItem.Vertical,
+                brush=pg.mkBrush(0, 120, 255, 40),
+                movable=True,
+            )
+            zone.setZValue(10)
+            self.ax_diff_int.addItem(zone)
+            zone.setVisible(False)
+            self._gauge_clipboard_zone = zone
+        return self._gauge_clipboard_zone
+
+    def _default_gauge_zone_range(self) -> Optional[Tuple[float, float]]:
+        if self.RUN is None:
+            return None
+        time_values = getattr(self, "time", None)
+        if time_values is None or len(time_values) == 0:
+            start = float(getattr(self, "index_spec", 0))
+            dt = 1.0
+        else:
+            start = float(self._get_cedx_time_value(getattr(self, "index_spec", 0)))
+            dt = self._get_cedx_dt(getattr(self, "index_spec", 0))
+            if dt is None and len(time_values) > 1:
+                dt = float(np.nanmean(np.diff(np.asarray(time_values, dtype=float))))
+            if dt is None or not np.isfinite(dt) or dt <= 0:
+                dt = 1.0
+        end = start + dt
+        return (start, end) if start <= end else (end, start)
+
+    def _get_gauge_selection_indices(self) -> List[int]:
+        if self.RUN is None:
+            return []
+        zone = self._gauge_clipboard_zone
+        if zone is None or not zone.isVisible():
+            return []
+        start, end = sorted(map(float, zone.getRegion()))
+        time_values = getattr(self, "time", None)
+        if time_values is None or len(time_values) == 0:
+            time_values = np.arange(len(self.RUN.Spectra), dtype=float)
+        indices = []
+        max_len = min(len(time_values), len(self.RUN.Spectra))
+        for idx in range(max_len):
+            value = time_values[idx]
+            try:
+                time_value = float(value)
+            except Exception:
+                continue
+            if start <= time_value <= end:
+                indices.append(idx)
+        return indices
+
+    def _format_spectra_indices(self, indices: Sequence[int], per_line: int = 12) -> str:
+        if not indices:
+            return "-"
+        lines = []
+        for i in range(0, len(indices), per_line):
+            lines.append(", ".join(str(idx) for idx in indices[i : i + per_line]))
+        return "\n".join(lines)
+
+    def copy_gauge_models_to_clipboard(self) -> None:
+        spectrum = getattr(self, "Spectrum", None)
+        gauges = getattr(spectrum, "Gauges", None) if spectrum is not None else None
+        if not gauges:
+            self.text_box_msg.setText("No gauge model to copy.")
+            return
+        self._gauge_clipboard = copy.deepcopy(gauges)
+        zone = self._ensure_gauge_clipboard_zone()
+        if zone is not None:
+            default_range = self._default_gauge_zone_range()
+            if default_range is not None:
+                zone.setRegion(default_range)
+            zone.setVisible(True)
+        self.text_box_msg.setText(f"Gauge model copied ({len(gauges)}).")
+
+    def show_gauge_selection_zone(self) -> None:
+        zone = self._ensure_gauge_clipboard_zone()
+        if zone is None:
+            return
+        if not zone.isVisible():
+            default_range = self._default_gauge_zone_range()
+            if default_range is not None:
+                zone.setRegion(default_range)
+        zone.setVisible(True)
+        self.text_box_msg.setText("Zone de sélection active.")
+
+    def hide_gauge_selection_zone(self) -> None:
+        zone = self._gauge_clipboard_zone
+        if zone is not None:
+            zone.setVisible(False)
+            self.text_box_msg.setText("Zone de sélection masquée.")
+
+    def paste_gauge_models_from_clipboard(self) -> None:
+        if self.RUN is None:
+            self.text_box_msg.setText("No RUN loaded.")
+            return
+        if not self._gauge_clipboard:
+            self.text_box_msg.setText("No gauge model copied.")
+            return
+        indices = self._get_gauge_selection_indices()
+        if not indices:
+            self.text_box_msg.setText("No spectrum in selection zone.")
+            return
+
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("Paste gauge models")
+        selection_text = self._format_spectra_indices(indices)
+        msg_box.setText(
+            "Spectres dans la zone:\n"
+            f"{selection_text}\n\n"
+            "Confirmer le collage des jauges ?"
+        )
+        v_button = msg_box.addButton("Validate", QMessageBox.AcceptRole)
+        a_button = msg_box.addButton("Cancel", QMessageBox.RejectRole)
+        msg_box.setDefaultButton(v_button)
+
+        def on_key_press(event):
+            if event.key() == Qt.Key_V:
+                v_button.click()
+            elif event.key() == Qt.Key_C:
+                a_button.click()
+
+        msg_box.keyPressEvent = on_key_press
+        msg_box.exec_()
+
+        if msg_box.clickedButton() != v_button:
+            return
+
+        for idx in indices:
+            spectrum = self.RUN.Spectra[idx]
+            spectrum.Gauges = copy.deepcopy(self._gauge_clipboard)
+            spectrum.bit_fit = False
+            for gauge in spectrum.Gauges:
+                self._register_gauge_from_run(gauge)
+
+        if getattr(self, "index_spec", None) in indices:
+            self.f_Spectrum_Load(Spectrum=self.RUN.Spectra[self.index_spec])
+
+        self._update_cedx_plots_from_run(reset_legend=True)
+        self.text_box_msg.setText(
+            f"Gauges collées sur {len(indices)} spectres."
+        )
+
+    def delete_gauges_in_zone(self) -> None:
+        if self.RUN is None:
+            self.text_box_msg.setText("No RUN loaded.")
+            return
+        indices = self._get_gauge_selection_indices()
+        if not indices:
+            self.text_box_msg.setText("No spectrum in selection zone.")
+            return
         
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("Dell gauge models")
+        selection_text = self._format_spectra_indices(indices)
+        msg_box.setText(
+            "Spectres dans la zone:\n"
+            f"{selection_text}\n\n"
+            "Confirmer la suppression des jauges ?"
+        )
+        v_button = msg_box.addButton("Validate", QMessageBox.AcceptRole)
+        a_button = msg_box.addButton("Cancel", QMessageBox.RejectRole)
+        msg_box.setDefaultButton(v_button)
+
+        def on_key_press(event):
+            if event.key() == Qt.Key_V:
+                v_button.click()
+            elif event.key() == Qt.Key_C:
+                a_button.click()
+
+        msg_box.keyPressEvent = on_key_press
+        msg_box.exec_()
+
+        if msg_box.clickedButton() != v_button:
+            return
+
+        for idx in indices:
+            spectrum = self.RUN.Spectra[idx]
+            spectrum.Gauges = []
+            spectrum.bit_fit = False
+
+        if getattr(self, "index_spec", None) in indices:
+            self.f_Spectrum_Load(Spectrum=self.RUN.Spectra[self.index_spec])
+
+        self._update_cedx_plots_from_run(reset_legend=True)
+        self.text_box_msg.setText(
+            f"Gauges supprimées sur {len(indices)} spectres."
+        )
  
 #########################################################################################################################################################################################
 #? COMMANDE LOAD IT
@@ -2377,6 +2844,33 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         self._current_spectrum_gauges = set(self.list_name_gauges)
         self._apply_gauge_presence_colors()
 
+    def _refresh_gauge_fit_cache(self, spectrum=None):
+        spectrum = spectrum or self.Spectrum
+        gauges = getattr(spectrum, "Gauges", []) or []
+
+        nb_j = len(gauges)
+        self.Nom_pic = [[] for _ in range(nb_j)]
+        self.list_text_pic = [[] for _ in range(nb_j)]
+        self.Param0 = [[] for _ in range(nb_j)]
+        self.J = [0 for _ in range(nb_j)]
+        self.list_y_fit_start = [[] for _ in range(nb_j)]
+        self.list_name_gauges = []
+
+        if nb_j == 0:
+            return
+
+        for i, gauge in enumerate(gauges):
+            self.list_name_gauges.append(gauge.name)
+            for pic in gauge.pics:
+                self.Nom_pic[i].append(pic.name)
+                new_P0, param = pic.Out_model()
+                self.Param0[i].append(new_P0 + [pic.model_fit])
+                y_plot = pic.model.eval(param, x=spectrum.wnb)
+                self.list_y_fit_start[i].append(y_plot)
+                self.J[i] += 1
+                pic_index = len(self.Param0[i]) - 1
+                self.list_text_pic[i].append(self._format_pic_label(i, pic_index))
+
     def _refresh_gauge_library_if_needed(self):
         if getattr(self, "_gauge_library_dirty", False):
             self._sync_library_state()
@@ -2580,8 +3074,6 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
 
         self.ax_diff_int.setLimits(xMin=x_min, xMax=x_max)
         self.ax_diff_int.setXRange(x_min, x_max)
-        self.ax_diff_int.setLabel('bottom', 'Temps (s)', **{'font-size': '18pt'})
-        self.ax_diff_int.setLabel('left', r'$2\\theta$ (°)', **{'font-size': '18pt'})
         self.ax_diff_int.invertY(True)
         return theta_min, theta_max
 
@@ -3153,7 +3645,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
 
         return bypass
 
-    def _rebuild_fit_state(self):
+    def _rebuild_fit_state(self,skip_ui=False):
         if getattr(self, "Spectrum", None) is None:
             logger.debug("Aucun spectre chargé : reconstruction de l'état fit ignorée")
             return
@@ -3191,7 +3683,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                 if gauges[i].indexX is not None:
                     self.X_s[i] = self.Spectrum.wnb[gauges[i].indexX][0]
                     self.X_e[i] = self.Spectrum.wnb[gauges[i].indexX][-1]
-                    if i == 0:
+                    if i == 0 and not skip_ui:
                         self.X_s[0] = self.Spectrum.wnb[self.Spectrum.indexX][0]
                         self.X_e[0] = self.Spectrum.wnb[self.Spectrum.indexX][-1]
 
@@ -3222,9 +3714,9 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                     self.Spectrum.model = gauge.model
                 else:
                     self.Spectrum.model += gauge.model
-
-        self._refresh_gauge_views()
-        self.Print_fit_start()
+        if not skip_ui:
+            self._refresh_gauge_views()
+            self.Print_fit_start(skip_ui=skip_ui)
 
         if hasattr(self, "plot_raw_spectrum"):
             self._update_spectrum_overlay_data()
@@ -3592,7 +4084,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                 y_mask.append(yi)
             else:
                 y_mask.append(last_valid if last_valid is not None else 0)
-       
+        
         # Appel de la fonction de détection
         _, peak_x, result = self.ClassDRX.F_Find_peaks(
             x, y_mask,
@@ -3621,86 +4113,62 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         )
 
         print(f"{len(peak_x)} pics détectés et affichés. \n {result}")
-        
-    def CREAT_new_CEDd(self):
-        if self.calib is None:
-            print("Calibration absente : création de CEDd impossible.")
+
+    def clear_gauges_range(self):
+        if not hasattr(self, "RUN") or self.RUN is None:
+            self.text_box_msg.setText("No RUN loaded.")
             return
-        CEDX=CL.CED_DRX(self.loaded_file_DRX,self.calib,self.ClassDRX.E,data_oscillo=self.loaded_file_OSC,time_index="Channel2")
 
+        spectra = getattr(self.RUN, "Spectra", []) or []
+        if not spectra:
+            self.text_box_msg.setText("No spectra loaded.")
+            return
 
-        best_ind=None
-        for i,X in enumerate(CEDX.Spectra):
-            self.CLEAR_ALL(empty=False)
-            self.index_spec=i
-            self.bit_bypass=True
-            self.f_Spectrum_Load(Spectrum=X)
-            self.bit_bypass=False
+        index_start = max(0, self.index_start_entry.value())
+        index_stop = min(len(spectra) - 1, self.index_stop_entry.value())
 
-            height = self.height_entry.value()
-            distance = self.distance_entry.value()
-            prominence = self.prominence_entry.value()
-            width = self.width_entry.value()
-            number_peak_max = self.nb_peak_entry.value() if hasattr(self, "nb_peak_entry") else 10
-            
-            theta2_range = self.spectrum_controller.update_theta2_range()
-            y= [i if any(a <= x <= b for a, b in theta2_range) else 0 for i,x in zip(y,x)]
-
-            # Appel de la fonction de détection
-            _ , detected_peaks,result = self.ClassDRX.F_Find_peaks(
-                X.wnb,X.y_corr,
-                height=height*max(X.y_corr),
-                distance=distance,
-                prominence=prominence*max(X.y_corr),
-                width=width,
-                number_peak_max=number_peak_max
+        if index_start > index_stop:
+            QMessageBox.warning(
+                self,
+                "Index invalides",
+                "Index start doit être inférieur ou égal à index stop.",
             )
-            #print(result)
-            # Supprimer l'affichage précédent s'il existe
-            if hasattr(self, "peak_plot_item") and self.peak_plot_item is not None:
-                self.ax_spectrum.removeItem(self.peak_plot_item)
-                self.peak_plot_item = None
-
-            # Ajouter les nouveaux pics détectés
-            peak_y = [X.y_corr[np.argmin(np.abs(X.wnb - px))] for px in detected_peaks]  # approx ordonnée
-            self.peak_plot_item = self.ax_spectrum.plot(
-                detected_peaks,
-                peak_y,
-                pen=None,
-                symbol='o',
-                symbolSize=8,
-                symbolBrush='r',
-                name="Peaks")
-            QApplication.processEvents()
-            last_pressure=np.mean([g.P for g in CEDX.Spectra[i].Gauges]) 
-            if i==0:
-                best_ind,_,Gauges =self.ClassDRX.F_Find_compo(detected_peaks,NGEN = 300,MUTPB = 0.4,CXPB =0.4,POPINIT=150,pressure_range=[0,20],max_ecart_pressure=1,max_elements=3,tolerance=0.1,print_process=True)
-            else:
-                best_ind,_,Gauges =self.ClassDRX.F_Find_compo(detected_peaks,NGEN = 300,MUTPB = 0.5,CXPB =0.5,POPINIT=150,pressure_range=[last_pressure*0.9-2,last_pressure*1.1+2],max_ecart_pressure=1,
-                                    max_elements=3,tolerance=0.1,indiv_start=best_ind,print_process=True)
-            CEDX.Spectra[i].Gauges=Gauges
-            CEDX.Spectra[i].bit_fit=True
-            CEDX.Spectra[i].Calcul_study(mini=True)
-            last_pressure=np.mean([g.P for g in CEDX.Spectra[i].Gauges])
-            CEDX.Summary=pd.concat([CEDX.Summary,pd.concat([pd.DataFrame({"n°Spec": [int(i)]}),CEDX.Spectra[i].study],ignore_index=False,axis=1)],ignore_index=True)
-        
-    
-        New_CEDd=CEDX
-
-        if New_CEDd.Summary.empty:
-            return print("Loop STOP")
-        name_CED= os.path.basename(self.loaded_file_OSC)
-        name_version=""#".CEDdrxUp"
-        #title_end=CL.datetime.datetime.now().strftime("_d%m_%dt%H_%M")
-        folder_ced = self.dict_folders.get("CED", "")
-        if not folder_ced:
-            print("No CED folder configured; cannot define save path.")
             return
-        New_CEDd.CEDd_path=os.path.join(folder_ced,(name_CED + name_version))
-        #dill.dump( New_CEDd, open( New_CEDd.CEDd_path, "wb" ) )
-        print("Save as ",name_CED,"in folder ",folder_ced)
-        print(New_CEDd.Summary)
-        self.f_CEDX_Load(objet_run=New_CEDd,item=None)
+
+        message = (
+            f"Effacer toutes les jauges pour les spectres {index_start} à {index_stop} ?"
+        )
+        response = QMessageBox.question(
+            self,
+            "Confirmation",
+            message,
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if response != QMessageBox.Yes:
+            return
+
+        for i in range(index_start, index_stop + 1):
+            spectrum = spectra[i]
+            if spectrum is None:
+                continue
+            spectrum.Gauges = []
+            spectrum.study = pd.DataFrame()
+            spectrum.bit_fit = False
+            spectrum.fit = "Fit Non effectué"
+
+        summary = getattr(self.RUN, "Summary", None)
+        if isinstance(summary, pd.DataFrame) and not summary.empty:
+            if "n°Spec" in summary.columns:
+                self.RUN.Summary = (
+                    summary.loc[
+                        ~summary["n°Spec"].between(index_start, index_stop)
+                    ].reset_index(drop=True)
+                )
+
+        if index_start <= self.index_spec <= index_stop:
+            self.f_Spectrum_Load(Spectrum=self.RUN.Spectra[self.index_spec])
+            self.REFRESH()
     
     def CREAT_empty_CEDd_from_loaded_files(self):
         if not hasattr(self, "loaded_file_DRX") or self.loaded_file_DRX is None:
@@ -3709,6 +4177,36 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         if self.calib is None:
             print("Calibration absente : impossible de créer un CEDd.")
             return
+        data_oscillo=None
+        if self.jungfrau_mode !="oscillo":
+            try:
+                scan_f_name=self.listbox_file.currentItem().text()
+                h5name=os.path.dirname(self.loaded_file_DRX).replace('/'+scan_f_name,"").split("/")[-1] + '.h5'
+                path_file_h5=os.path.dirname(self.loaded_file_DRX).replace(scan_f_name,"") +h5name 
+                
+                scan_lbl = str(int(scan_f_name.replace("scan", ""))) + ".1"
+                print(scan_lbl,'->',path_file_h5)
+                with File(path_file_h5) as f:
+                    t2 = f[scan_lbl]["measurement"]["ch6_time"][:].ravel()
+                    y2 = f[scan_lbl]["measurement"]["ch6"][:].ravel()
+                    t1 = f[scan_lbl]["measurement"]["ch5_time"][:].ravel()
+                    y1 = f[scan_lbl]["measurement"]["ch5"][:].ravel()
+                
+                if not (len(t1) == len(y1) == len(y2)):
+                    raise ValueError(
+                    f"Tailles incohérentes : "
+                    f"t1={len(t1)}, y1={len(y1)}, y2={len(y2)}"
+                )
+
+                data_oscillo = pd.DataFrame(
+                    {
+                    "Time": np.array(t1),
+                    "Channel2": np.array(y1),
+                    "Channel3": np.array(y2),
+                    }
+                    )
+            except Exception as e:
+                print("ERROR h5:",e)
 
         self.CLEAR_CEDd()
 
@@ -3716,12 +4214,19 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             self.loaded_file_DRX,
             self.calib,
             self.ClassDRX.E,
-            data_oscillo=self.loaded_file_OSC,
-            time_index="Channel2"
+            data_oscillo=data_oscillo,
+            time_index="Channel2",
+            deg_baseline=int(self.deg_baseline_entry.value())
         )
-        
+        if self.jungfrau_mode =="continue":
+            CEDX.Time_spectrum= np.array([i*1e-3 for i in range(len(CEDX.Spectra))])
+            CEDX.time_index=np.array([i for i in range(len(CEDX.Spectra))])
         self.RUN = CEDX
-        self.RUN.CEDd_path=os.path.join(self.dict_folders["CED"],os.path.basename(self.loaded_file_OSC)+".CEDX")
+        self.RUN.CEDd_path = os.path.join(
+            self.dict_folders["CED"],
+            f"{self._get_cedx_base_name()}.CEDX",
+        )
+
         print(f"CED vide créé avec {len(CEDX.Spectra)} spectres. Pas de recherche de compos effectué.")
         self.f_CEDX_Load(objet_run=self.RUN, item=None)
 
@@ -3730,6 +4235,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             print("Aucun RUN chargé.")
             return
 
+        skip_ui=self.skip_ui_update_checkbox.isChecked()
         try:
             index_start = self.index_start_entry.value()
             index_stop = self.index_stop_entry.value()
@@ -3802,12 +4308,15 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                     QApplication.processEvents()
 
                 X = self.RUN.Spectra[i]
-                self.CLEAR_ALL(empty=False)
-                self.index_spec = i
-                self.DRX_selector.setCurrentIndex(self.index_spec)
-                self.bit_bypass = True
-                self.f_Spectrum_Load(Spectrum=X)
-                self.bit_bypass = False
+                if skip_ui:
+                    self.Spectrum = X
+                else:
+                    self.CLEAR_ALL(empty=False)
+                    self.index_spec = i
+                    self.DRX_selector.setCurrentIndex(self.index_spec)
+                    self.bit_bypass = True
+                    self.f_Spectrum_Load(Spectrum=X)
+                    self.bit_bypass = False
                 theta2_range = self.spectrum_controller.update_theta2_range()
                 # Détection des pics
                 x=X.wnb
@@ -3820,33 +4329,40 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                         y_mask.append(yi)
                     else:
                         y_mask.append(last_valid if last_valid is not None else 0)
-                _, detected_peaks, result = self.ClassDRX.F_Find_peaks(
-                    X.wnb, y_mask,
-                    height=height*max(y_mask),
-                    distance=distance,
-                    prominence=prominence*max(y_mask),
-                    width=width,
-                    number_peak_max=number_peak_max
-                )
-                print(f"[DRX {i}] Peaks found: {[f'th2:{pic} I:{i}' for pic,i in zip(detected_peaks,result['peak_heights'])]}")
 
-                # Affichage des pics
-                if hasattr(self, "peak_plot_item") and self.peak_plot_item is not None:
-                    self.ax_spectrum.removeItem(self.peak_plot_item)
-                    self.peak_plot_item = None
+                try:
+                    _, detected_peaks, result = self.ClassDRX.F_Find_peaks(
+                        X.wnb, y_mask,
+                        height=height*max(y_mask),
+                        distance=distance,
+                        prominence=prominence*max(y_mask),
+                        width=width,
+                        number_peak_max=number_peak_max
+                    )
+                    #print(f"[DRX {i}] Peaks found: {[f'th2:{pic} I:{i}' for pic,i in zip(detected_peaks,result['peak_heights'])]}")
 
-                peak_y = [X.y_corr[np.argmin(np.abs(X.wnb - px))] for px in detected_peaks]
-                self.peak_plot_item = self.ax_spectrum.plot(
-                    detected_peaks,
-                    peak_y,
-                    pen=None,
-                    symbol='o',
-                    symbolSize=8,
-                    symbolBrush='r',
-                    name="Peaks"
-                )
+                except Exception as e:
+                    print("ERROR find peak :",e)
+                    break
+                if not skip_ui:
+                    if hasattr(self, "peak_plot_item") and self.peak_plot_item is not None:
+                        self.ax_spectrum.removeItem(self.peak_plot_item)
+                        self.peak_plot_item = None
+
+                    peak_y = [
+                        X.y_corr[np.argmin(np.abs(X.wnb - px))] for px in detected_peaks
+                    ]
+                    self.peak_plot_item = self.ax_spectrum.plot(
+                        detected_peaks,
+                        peak_y,
+                        pen=None,
+                        symbol='o',
+                        symbolSize=8,
+                        symbolBrush='r',
+                        name="Peaks"
+                    )
                 
-                QApplication.processEvents()
+                    QApplication.processEvents()
                 
                 best_ind, _, Gauges = self.ClassDRX.F_Find_compo(
                     detected_peaks,
@@ -3873,8 +4389,8 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                     for ps,save in enumerate(g.Element_ref.save_var):
                         if save:
                             x0=g.Element_ref.thetas_PV[ps][0]
-                            m=np.argmin(np.abs(self.Spectrum.wnb -x0 ))
-                            g.pics[pi].ampH[0]=round(self.Spectrum.y_corr[m],3)
+                            m=np.argmin(np.abs(X.wnb -x0 ))
+                            g.pics[pi].ampH[0]=round(X.y_corr[m],3)
                             g.pics[pi].Update()
                             pi+=1
                     g.Update_model()
@@ -3898,7 +4414,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                 if not progress_dialog.wasCanceled():
                     progress_dialog.setValue(len(spectra_indices))
                 progress_dialog.close()
-        print(f"RUN mis à jour pour les spectres {index_start} à {index_stop}.")
+        #print(f"RUN mis à jour pour les spectres {index_start} à {index_stop}.")
         self.CLEAR_CEDd()
         self.f_CEDX_Load(objet_run=self.RUN, item=None)
 
@@ -3927,7 +4443,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
 
             if msg_box.clickedButton() == v_button:
                 save_gauges=copy.deepcopy(self.Spectrum.Gauges)
-        
+        nb_img=self.DRX_selector.currentIndex()
         self.CLEAR_ALL(empty=False)
 
         #file_DXR=self.list_exp[self.exp_selector.currentIndex()][1][self.run_selector.currentIndex()][2][self.DRX_selector.currentIndex()]
@@ -3942,11 +4458,11 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             self.text_box_msg.setText("err: calibration not available for integration")
             return
 
-        tth, intens = Calibration.Integrate_DRX(img_data.getframe(self.DRX_selector.currentIndex()).data, self.calib.mask, self.calib.ai, theta_range=self.calib.theta_range)
+        tth, intens = Calibration.Integrate_DRX(img_data.getframe(nb_img).data, self.calib.mask, self.calib.ai, theta_range=self.calib.theta_range)
 
         self.text_box_msg.setText("New integration")
         self.bit_bypass=True
-        self.f_Spectrum_Load(Spectrum=CL.Spectre(np.array(tth),np.array(intens),Gauges=save_gauges))
+        self.f_Spectrum_Load(Spectrum=CL.Spectre(np.array(tth),np.array(intens),Gauges=save_gauges,deg_baseline=int(self.deg_baseline_entry.value())))
         self.bit_bypass=False
 
     def SAVE_CEDd(self):
@@ -4876,7 +5392,8 @@ def main() -> int:
     app.setStyleSheet(style)
 
     window = MainWindow(folder_start, config_path)
-    window.show()
+    window.showMaximized()
+    #window.setFixedSize(window.sizeHint())
     return app.exec_()
 
 

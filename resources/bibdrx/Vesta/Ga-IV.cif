@@ -219,4 +219,4 @@ loop_
    _atom_site_adp_type
    _atom_site_U_iso_or_equiv
    _atom_site_type_symbol
-   XX         1.0     0.000000     0.000000     0.000000    Uiso  ? Ga
+   Ga         1.0     0.000000     0.000000     0.000000    Uiso  ? Ga

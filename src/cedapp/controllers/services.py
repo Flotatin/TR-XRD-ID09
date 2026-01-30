@@ -60,12 +60,29 @@ class FileSelectionController:
                 if first_part + number_after_underscore == "water01":
                     dos = "_0002"
 
-                self.host.loaded_file_DRX = os.path.join(
+                drx_path = os.path.join(
                     self.host.dict_folders["DRX"],
                     rf"{first_part}{number_after_underscore}\{first_part}{number_after_underscore}{dos}\scan{number_after_scan.zfill(4) }\scan_jf1m_0000.h5",
                 )
+                if os.path.isfile(drx_path):
+                    self.host.set_loaded_drx_file(drx_path)
+                else:
+                    self.host.text_box_msg.setText(f"no file DRX for : \n {file_item.text()} \n oscilloscope")
             else:
                 self.host.text_box_msg.setText(f"no file DRX for : \n {file_item.text()} \n oscilloscope")
+
+        elif file_type == self.host.type_folder[2]:
+            selected_path = os.path.join(self.host.dict_folders[file_type], file_item.text())
+            drx_path = ""
+            if os.path.isdir(selected_path):
+                drx_path = self._find_scan_h5(selected_path)
+            elif selected_path.lower().endswith(".h5"):
+                drx_path = selected_path
+
+            if drx_path:
+                self.host.set_loaded_drx_file(drx_path)
+            else:
+                self.host.text_box_msg.setText(f"no h5 file found in : \n {selected_path}")
 
         elif file_type == self.host.type_folder[0]:
             self.host.bit_bypass = True
@@ -82,3 +99,20 @@ class FileSelectionController:
         self.host.file_label_oscilo.setText(
             f"OSC: {os.path.basename(self.host.loaded_file_OSC) if self.host.loaded_file_OSC else 'None'}"
         )
+    def _find_scan_h5(self, scan_folder: str) -> str:
+        try:
+            entries = os.listdir(scan_folder)
+        except OSError:
+            return ""
+
+        preferred = "scan_jf1m_0000.h5"
+        if preferred in entries:
+            return os.path.join(scan_folder, preferred)
+
+        candidates = sorted(
+            [name for name in entries if name.lower().endswith(".h5")],
+            key=str.lower,
+        )
+        if candidates:
+            return os.path.join(scan_folder, candidates[0])
+        return ""

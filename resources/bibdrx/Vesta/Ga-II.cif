@@ -2,69 +2,31 @@
 #======================================================================
 # CRYSTAL DATA
 #----------------------------------------------------------------------
-data_VESTA_phase_1
-
-_chemical_name_common                  'Ga-II'
-_cell_length_a                         5.951000
-_cell_length_b                         5.951000
-_cell_length_c                         5.951000
-_cell_angle_alpha                      90.000000
-_cell_angle_beta                       90.000000
-_cell_angle_gamma                      90.000000
-_cell_volume                           210.751123
-_space_group_name_H-M_alt              'I -4 3 d'
-_space_group_IT_number                 220
+data_Ga_II_2p8GPa_RT
+_chemical_name_common           "Gallium (Ga-II)"
+_cell_length_a                   5.976
+_cell_length_b                   8.576
+_cell_length_c                   35.758
+_cell_angle_alpha                90
+_cell_angle_beta                 90
+_cell_angle_gamma                90
+_symmetry_space_group_name_H-M   "C 2 2 21"
+_symmetry_Int_Tables_number      20
 
 loop_
 _space_group_symop_operation_xyz
-   'x, y, z'
-   '-x+1/2t, -y, z+1/2t'
-   '-x, y+1/2t, -z+1/2t'
-   'x+1/2t, -y+1/2t, -z'
-   'z, x, y'
-   'z+1/2t, -x+1/2t, -y'
-   '-z+1/2t, -x, y+1/2t'
-   '-z, x+1/2t, -y+1/2t'
-   'y, z, x'
-   '-y, z+1/2t, -x+1/2t'
-   'y+1/2t, -z+1/2t, -x'
-   '-y+1/2t, -z, x+1/2t'
-   'y+1/4t, x+1/4t, z+1/4t'
-   '-y+1/4t, -x+3/4t, z+3/4t'
-   'y+3/4t, -x+1/4t, -z+3/4t'
-   '-y+3/4t, x+3/4t, -z+1/4t'
-   'x+1/4t, z+1/4t, y+1/4t'
-   '-x+3/4t, z+3/4t, -y+1/4t'
-   '-x+1/4t, -z+3/4t, y+3/4t'
-   'x+3/4t, -z+1/4t, -y+3/4t'
-   'z+1/4t, y+1/4t, x+1/4t'
-   'z+3/4t, -y+1/4t, -x+3/4t'
-   '-z+3/4t, y+3/4t, -x+1/4t'
-   '-z+1/4t, -y+3/4t, x+3/4t'
-   'x+1/2t, y+1/2t, z+1/2t'
-   '-x, -y+1/2t, z'
-   '-x+1/2t, y, -z'
-   'x, -y, -z+1/2t'
-   'z+1/2t, x+1/2t, y+1/2t'
-   'z, -x, -y+1/2t'
-   '-z, -x+1/2t, y'
-   '-z+1/2t, x, -y'
-   'y+1/2t, z+1/2t, x+1/2t'
-   '-y+1/2t, z, -x'
-   'y, -z, -x+1/2t'
-   '-y, -z+1/2t, x'
-   'y+3/4t, x+3/4t, z+3/4t'
-   '-y+3/4t, -x+1/4t, z+1/4t'
-   'y+1/4t, -x+3/4t, -z+1/4t'
-   '-y+1/4t, x+1/4t, -z+3/4t'
-   'x+3/4t, z+3/4t, y+3/4t'
-   '-x+1/4t, z+1/4t, -y+3/4t'
-   '-x+3/4t, -z+1/4t, y+1/4t'
-   'x+1/4t, -z+3/4t, -y+1/4t'
-   'z+3/4t, y+3/4t, x+3/4t'
-   'z+1/4t, -y+3/4t, -x+1/4t'
-   '-z+1/4t, y+1/4t, -x+3/4t'
-   '-z+3/4t, -y+1/4t, x+1/4t'
+   'x,  y,  z'
+   'x, -y, -z'
+   '-x,  y, 1/2-z'
+   '-x, -y, 1/2+z'
+   'x,  y+1/2,  z+1/2'
+   'x, -y+1/2, -z+1/2'
+   '-x,  y+1/2, 1/2-z+1/2'
+   '-x, -y+1/2, 1/2+z+1/2'
+
+# Note: last two lines can be simplified modulo 1:
+# -x,  y+1/2,  -z
+# -x, -y+1/2,   z
 
 loop_
    _atom_site_label
@@ -75,4 +37,17 @@ loop_
    _atom_site_adp_type
    _atom_site_U_iso_or_equiv
    _atom_site_type_symbol
-   XX         1.0     0.000000     0.000000     0.000000    Uiso  ? Ga
+   Ga1		4	0.5000	0.1802	0.2500	Uiso	?	Ga
+   Ga2    	8   	0.6956	0.4684  0.2716	Uiso	?	Ga
+   Ga3    	8   	0.5804	0.7858  0.2861	Uiso	?	Ga
+   Ga4    	8   	0.2772	0.5622  0.3081	Uiso	?	Ga
+   Ga5	 	8   	0.9659	0.7809  0.3292	Uiso	?	Ga
+   Ga6	 	8   	0.8482	0.4567  0.3430	Uiso	?	Ga
+   Ga7	 	8   	0.5632	0.6919  0.3666	Uiso	?	Ga
+   Ga8	 	8   	0.2324	0.4838  0.3851	Uiso	?	Ga
+   Ga9    	8   	0.6129	0.2914  0.4003	Uiso	?	Ga
+   Ga10   	8   	0.8276	0.5660  0.4250	Uiso	?	Ga
+   Ga11   	8   	0.9970	0.2613  0.4435	Uiso	?	Ga
+   Ga12   	4   	0.2460	0.0000  0.5000	Uiso	?	Ga
+   Ga13   	8   	0.1052	0.3090  0.5170	Uiso	?	Ga
+   Ga14   	8   	0.3574	0.5518  0.5409	Uiso	?	Ga

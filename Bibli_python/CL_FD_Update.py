@@ -18,7 +18,6 @@ from math import sqrt , log
 import lecroyscope
 import copy
 import re
-from pathlib import Path
 from scipy.optimize import minimize
 from scipy.special import gamma , beta
 from pynverse import inversefunc
@@ -499,6 +498,7 @@ class DRX():
             index_peaks = np.array(index_peaks[-number_peak_max:])
         else:
             index_peaks = np.array([])
+
 
         return index_peaks, x[index_peaks], result
 
@@ -2011,7 +2011,7 @@ class CEDd:
         print("sorry")
 
 class CED_DRX:
-    def __init__(self,data_drx,calib,E,data_oscillo=None,time_index=None,flip_axis=None,param_f=[9,2],deg_baseline=1):
+    def __init__(self,data_drx,calib,E,data_oscillo=None,time_index=None,flip_axis=None):
         self.Spectra=[]
         self.Summary=pd.DataFrame()
         self.time_index=time_index
@@ -2041,7 +2041,7 @@ class CED_DRX:
                     data, self.calib.mask, self.calib.ai,
                     theta_range=self.calib.theta_range
                 )
-                self.Spectra.append(Spectre(tth, intens, E=E,param_f=param_f,deg_baseline=deg_baseline))
+                self.Spectra.append(Spectre(tth, intens, E=E))
 
         elif os.path.isdir(data_drx):
             # Cas : dossier contenant des fichiers
@@ -2066,58 +2066,39 @@ class CED_DRX:
                 )
                 self.Spectra.append(Spectre(tth, intens, E=E))
 
+        if self.data_oscillo != None:
+            self.data_oscillo = pd.read_csv(data_oscillo, sep='\s+', skipfooter=0, engine='python')
 
 
-        if data_oscillo is None:
-            self.data_oscillo = None
-            self.Time_spectrum = None
-            print("No Oscillo Data")
-        else:
-            if isinstance(data_oscillo, pd.DataFrame):
-                df = data_oscillo.copy()
+            # La première colonne sera toujours le temps
+            time_col = self.data_oscillo.columns[0]
 
-            elif isinstance(data_oscillo, (str, Path)):
-                df = pd.read_csv(str(data_oscillo), sep=r"\s+", skipfooter=0, engine="python")
-
-            elif isinstance(data_oscillo, dict):
-                df = pd.DataFrame(data_oscillo)
-
-            else:
-                raise TypeError(
-                    "data_oscillo doit être None, un chemin (str/Path), un pandas.DataFrame, ou un dict de colonnes."
-                )
-
-            if df.shape[1] < 1:
-                raise ValueError("data_oscillo ne contient aucune colonne (temps manquant).")
-
-            self.data_oscillo = df
-
-            time_col = df.columns[0]
-            temps = df[time_col].to_numpy()
-
+            # Si tu veux récupérer une autre colonne comme signal
             if time_index is None:
                 sig = None
             elif isinstance(time_index, int):
-                sig = df.iloc[:, time_index].to_numpy()
+                sig = self.data_oscillo.iloc[:, time_index].to_numpy()
             else:
-            # time_index censé être un nom de colonne
-                if time_index not in df.columns:
-                    raise KeyError(f"Colonne '{time_index}' introuvable. Colonnes dispo: {list(df.columns)}")
-                sig = df[time_index].to_numpy()
+                # time_index est censé être un nom de colonne
+                sig = self.data_oscillo[time_index].to_numpy()
 
+            # Appel avec la première colonne pour le temps
+            self.Temps_Pression(temps=self.data_oscillo[time_col].to_numpy(),signale_spec=sig )
 
-            self.Temps_Pression(temps=temps, signale_spec=sig)
-            print("Oscillo DONE nb time:", len(self.Time_spectrum))
-
+            print("Oscillo DONE nb time:",len(self.Time_spectrum))
+        else:
+            self.data_oscillo = None
+            self.Time_spectrum = None
+            print("No Oscillo Data")
 
     def Print(self,num_spec=0,data=[],Oscilo=False):
         if data ==[] and Oscilo ==False:
             self.Spectra[num_spec].Print()
         elif Oscilo ==True:
-            #plt.plot(self.data_oscillo["Time"],savgol_filter(self.data_oscillo["Channel1"],9,2),"darkorange",label="Channel1")
+            plt.plot(self.data_oscillo["Time"],savgol_filter(self.data_oscillo["Channel1"],9,2),"darkorange",label="Channel1")
             plt.plot(self.data_oscillo["Time"],savgol_filter(self.data_oscillo["Channel2"],9,2),"darkred",label="Channel2")
             plt.plot(self.data_oscillo["Time"],savgol_filter(self.data_oscillo["Channel3"],9,2),"darkblue",label="Channel3")
-            #plt.plot(self.data_oscillo["Time"],savgol_filter(self.data_oscillo["Channel4"],9,2),"darkgreen",label="Channel4")
+            plt.plot(self.data_oscillo["Time"],savgol_filter(self.data_oscillo["Channel4"],9,2),"darkgreen",label="Channel4")
             for t in self.Time_spectrum:
                 # trouver l’index du point X le plus proche de t
                 idx = np.argmin(np.abs(self.data_oscillo["Time"] - t))
@@ -2323,7 +2304,7 @@ class CED_DRX:
         if type(temps) !=type(None) and type(signale_spec) !=type(None):
             marche_spec=max(signale_spec)/4
 
-            taille=len(signale_spec)-1
+            taille=len(signale_spec)
             delais=taille/10
             stop = False
             up = 0

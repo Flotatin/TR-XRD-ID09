@@ -55,7 +55,7 @@ def get_bibdrx_dir(require: bool = True) -> Path:
 def get_default_config_path() -> Path:
     """Return the default configuration file path."""
 
-    return get_config_dir(require=False) / "config_ESRF2024.txt"
+    return get_config_dir(require=False) / "config_21012025.txt"
 
 
 def resolve_config_path(config_path: str | Path) -> Path:

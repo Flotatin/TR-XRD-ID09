@@ -68,18 +68,26 @@ class SpectrumController:
     # ------------------------------------------------------------------
     # Region handling
     # ------------------------------------------------------------------
-    def toggle_regions_visibility(self) -> None:
+    def toggle_regions_visibility(self,visible: bool) -> None:
         """Toggle the visibility of every registered region."""
 
         for region in self.zones:
             spectrum = self._get_spectrum()
             max_level = max(spectrum.y_corr) if spectrum else 1
             region.setZValue(max_level)
-            region.setVisible(not region.isVisible())
+            region.setVisible(visible)
+            
+    def set_regions_visible(self, visible: bool) -> None:
+        """Show or hide every registered region without altering their ranges."""
+
+        for region in self.zones:
+            spectrum = self._get_spectrum()
+            max_level = max(spectrum.y_corr) if spectrum else 1
+            region.setZValue(max_level)
+            region.setVisible(visible)
 
     def add_zone(self, region: Optional[pg.LinearRegionItem] = None) -> pg.LinearRegionItem:
         """Register a new region on the spectrum plot.
-
         When *region* is ``None`` a new :class:`LinearRegionItem` spanning the
         current spectrum range is created.
         """

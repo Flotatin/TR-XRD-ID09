@@ -40,6 +40,7 @@ class UIState:
 
     settings_button: QToolButton | None = None
     help_toggle_btn: QPushButton | None = None
+    live_toggle_btn: QPushButton | None = None
     clear_btn: QPushButton | None = None
     help_widget: QWidget | None = None
     CommandeLayout: QVBoxLayout | None = None
@@ -116,6 +117,17 @@ def build_command_panel(window) -> None:
     state.help_toggle_btn = QPushButton("Help", window)
     state.help_toggle_btn.clicked.connect(window.toggle_help_box)
     layout.addWidget(state.help_toggle_btn)
+    
+    state.live_toggle_btn = QPushButton("Live", window)
+    state.live_toggle_btn.setCheckable(True)
+    state.live_toggle_btn.toggled.connect(window.toggle_live_mode)
+    layout.addWidget(state.live_toggle_btn)
+
+    state.jungfrau_mode_box = QComboBox(window)
+    state.jungfrau_mode_box.addItems(["Burst","Continue", "Oscillo"])
+    state.jungfrau_mode_box.currentTextChanged.connect(window.set_jungfrau_mode)
+    layout.addWidget(state.jungfrau_mode_box)
+
 
     state.clear_btn = QPushButton("SAVE Summary")
     state.clear_btn.clicked.connect(window.save_summary_CED)
@@ -176,7 +188,7 @@ def build_command_panel(window) -> None:
     layout.addWidget(state.help_widget)
 
     box.setLayout(layout)
-    window.grid_layout.addWidget(box, 0, 5, 5, 1)
+    window.grid_layout.addWidget(box, 0, 5, 2, 1)
 
     state.help_tab_index = None
     state.help_tab_visible = False
@@ -308,7 +320,7 @@ def build_tools_panel(window) -> None:
     layout.addWidget(state.tab_section_widget)
 
     param_box.setLayout(layout)
-    window.grid_layout.addWidget(param_box, 0, 0, 2, 2)
+    window.grid_layout.addWidget(param_box, 0, 0, 3, 1)
 
 
 def build_message_label(window) -> None:
@@ -352,7 +364,7 @@ def build_model_peak_section(window) -> None:
     state.ParampicLayout.addLayout(creat_spin_label(state.spinbox_sigma, "σ :"))
 
     parampic_box.setLayout(state.ParampicLayout)
-    window.grid_layout.addWidget(parampic_box, 2, 0, 1, 2)
+    window.grid_layout.addWidget(parampic_box, 2, 5, 1, 2)
 
     window.bit_bypass = True
     window.f_model_pic_type()

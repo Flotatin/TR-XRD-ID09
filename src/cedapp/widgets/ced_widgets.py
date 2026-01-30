@@ -46,9 +46,12 @@ class DdacWidget:
         host.ax_P.vb.sigResized.connect(host._update_piezo_view_geometry)
         host._update_piezo_view_geometry()
 
-        host.ax_dPdt = host.fig_DRX_dynamic.addPlot(row=1, col=0, title="dP/dt (GPa/ms) & T (K)")
+        host.ax_dPdt = host.fig_DRX_dynamic.addPlot(row=1, col=0)
+        host.ax_dPdt.setLabel("left", "dP/dt ", units="GPa/ms")
         host.ax_dPdt.addLegend()
-        host.ax_diff_int = host.fig_DRX_dynamic.addPlot(row=2, col=0, title="Sigma (nm)")
+        host.ax_diff_int = host.fig_DRX_dynamic.addPlot(row=2, col=0)
+        host.ax_diff_int.setLabel("left", r"$2\theta$", units="°")
+        host.ax_diff_int.setLabel("bottom", "time", units="ms")
 
     def _create_drx_persistent_items(self) -> None:
         host = self._drx_container
@@ -142,4 +145,4 @@ class DdacWidget:
 
     def add_to_layout(self, grid_layout) -> None:
         """Add the ddac widgets to the provided grid layout."""
-        grid_layout.addWidget(self._drx_container.ddac_box, 0, 4, 4, 1)
+        grid_layout.addWidget(self._drx_container.ddac_box, 0, 3, 4, 2)

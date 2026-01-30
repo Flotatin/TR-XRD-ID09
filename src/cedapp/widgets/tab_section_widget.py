@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from PyQt5.QtWidgets import (
+    QCheckBox,
     QTabWidget,
     QToolBar,
     QVBoxLayout,
@@ -17,6 +18,7 @@ from PyQt5.QtWidgets import (
 
 from PyQt5.QtGui import QColor
 from PyQt5.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QHBoxLayout,
@@ -45,8 +47,8 @@ class SampleWidget(QWidget):
     def __init__(self, main):
         super().__init__()
         layout = QVBoxLayout()
-        name = QLabel("Gauge section - - -")
-        layout.addWidget(name)
+        #name = QLabel("Gauge section - - -")
+        #layout.addWidget(name)
 
         main.folder_bib_gauge = QPushButton("Add element", main)
         main.folder_bib_gauge.clicked.connect(main.f_select_bib_gauge)
@@ -89,15 +91,13 @@ class BaselineWidget(QWidget):
         super().__init__()
         self.main = main
         layout = QVBoxLayout()
-        name = QLabel("baseline section - - -")
-        layout.addWidget(name)
 
         main.deg_baseline_entry = QSpinBox()
         main.deg_baseline_entry.valueChanged.connect(main.setFocus)
         main.deg_baseline_entry.setSingleStep(1)
         main.deg_baseline_entry.setRange(0, 50)
         main.deg_baseline_entry.setValue(0)
-        layout.addLayout(creat_spin_label(main.deg_baseline_entry, "°Poly basline"))
+        layout.addLayout(creat_spin_label(main.deg_baseline_entry, "°bline"))
 
         self.setLayout(layout)
         self.setVisible(False)
@@ -109,8 +109,8 @@ class FiltreWidget(QWidget):
     def __init__(self, main):
         super().__init__()
         layout = QVBoxLayout()
-        name = QLabel("filtre data section - - -")
-        layout.addWidget(name)
+        #name = QLabel("filtre data section - - -")
+        #layout.addWidget(name)
 
         main.filtre_type_selector = QComboBox(main)
         liste_type_filtre = ["svg", "fft", "No filtre"]
@@ -147,8 +147,8 @@ class FindCompoWidget(QWidget):
     def __init__(self, main):
         super().__init__()
         layout = QVBoxLayout()
-        name = QLabel("find_compo section - - -")
-        layout.addWidget(name)
+        #name = QLabel("find_compo section - - -")
+        #layout.addWidget(name)
 
         main.NGEN_entry = QSpinBox()
         main.NGEN_entry.setSingleStep(1)
@@ -183,21 +183,21 @@ class FindCompoWidget(QWidget):
         main.tolerance_entry.setValue(0.1)
         main.tolerance_entry.setSingleStep(0.05)
         main.tolerance_entry.valueChanged.connect(main.setFocus)
-        layout.addLayout(creat_spin_label(main.tolerance_entry, "tolerance"))
+        layout.addLayout(creat_spin_label(main.tolerance_entry, "%"))
 
         main.p_range_entry = QSpinBox()
         main.p_range_entry.setRange(1, 100)
         main.p_range_entry.setValue(15)
         main.p_range_entry.setSingleStep(1)
         main.p_range_entry.valueChanged.connect(main.setFocus)
-        layout.addLayout(creat_spin_label(main.p_range_entry, "P range"))
+        layout.addLayout(creat_spin_label(main.p_range_entry, "P rg"))
 
         main.nb_max_element_entry = QSpinBox()
         main.nb_max_element_entry.setRange(1, 100)
-        main.nb_max_element_entry.setValue(2)
+        main.nb_max_element_entry.setValue(3)
         main.nb_max_element_entry.setSingleStep(1)
         main.nb_max_element_entry.valueChanged.connect(main.setFocus)
-        layout.addLayout(creat_spin_label(main.nb_max_element_entry, "Nb max element"))
+        layout.addLayout(creat_spin_label(main.nb_max_element_entry, "nb max"))
 
         self.setLayout(layout)
         self.setVisible(False)
@@ -209,47 +209,58 @@ class FindPeaksWidget(QWidget):
     def __init__(self, main):
         super().__init__()
         layout = QVBoxLayout()
-        name = QLabel("find_peaks section - - -")
+        #name = QLabel("find_peaks section - - -")
+        #layout.addWidget(name)
+        
+        name = QLabel("height")
         layout.addWidget(name)
-
         main.height_entry = QDoubleSpinBox()
         main.height_entry.setDecimals(2)
         main.height_entry.setSingleStep(0.01)
         main.height_entry.setRange(0, 1)
         main.height_entry.setValue(0.15)
         main.height_entry.valueChanged.connect(main.setFocus)
-        layout.addLayout(creat_spin_label(main.height_entry, "height", "%Imax"))
-
+        layout.addLayout(creat_spin_label(main.height_entry, "", "%Imax"))
+        
+        
+        name = QLabel("distance")
+        layout.addWidget(name)
         main.distance_entry = QDoubleSpinBox()
         main.distance_entry.setDecimals(1)
         main.distance_entry.setSingleStep(0.1)
         main.distance_entry.setRange(1, 10)
         main.distance_entry.setValue(1)
         main.distance_entry.valueChanged.connect(main.setFocus)
-        layout.addLayout(creat_spin_label(main.distance_entry, "distance"))
+        layout.addLayout(creat_spin_label(main.distance_entry, ""))
 
+        name = QLabel("prominence")
+        layout.addWidget(name)
         main.prominence_entry = QDoubleSpinBox()
         main.prominence_entry.setDecimals(2)
         main.prominence_entry.setSingleStep(0.01)
         main.prominence_entry.setRange(0, 1)
         main.prominence_entry.setValue(0.15)
         main.prominence_entry.valueChanged.connect(main.setFocus)
-        layout.addLayout(creat_spin_label(main.prominence_entry, "prominence", "%Imax"))
+        layout.addLayout(creat_spin_label(main.prominence_entry, "", "%Imax"))
 
+        name = QLabel("width")
+        layout.addWidget(name)
         main.width_entry = QDoubleSpinBox()
         main.width_entry.setDecimals(1)
         main.width_entry.setSingleStep(0.1)
         main.width_entry.setRange(0.0, 1000)
         main.width_entry.setValue(5)
         main.width_entry.valueChanged.connect(main.setFocus)
-        layout.addLayout(creat_spin_label(main.width_entry, "width"))
+        layout.addLayout(creat_spin_label(main.width_entry, ""))
 
+        name = QLabel("Max nb peaks")
+        layout.addWidget(name)
         main.nb_peak_entry = QSpinBox()
         main.nb_peak_entry.setRange(1, 100)
         main.nb_peak_entry.setValue(10)
         main.nb_peak_entry.setSingleStep(1)
         main.nb_peak_entry.valueChanged.connect(main.setFocus)
-        layout.addLayout(creat_spin_label(main.nb_peak_entry, "Max nb peaks"))
+        layout.addLayout(creat_spin_label(main.nb_peak_entry, ""))
 
         self.setLayout(layout)
         self.setVisible(False)
@@ -261,15 +272,13 @@ class FitParamWidget(QWidget):
     def __init__(self, main):
         super().__init__()
         layout = QVBoxLayout()
-        # name = QLabel("fit param section - - -")
-        # layout.addWidget(name)
 
         main.spinbox_cycle = QSpinBox()
         main.spinbox_cycle.valueChanged.connect(main.setFocus)
         main.spinbox_cycle.setRange(0, 10)
         main.spinbox_cycle.setSingleStep(1)
         main.spinbox_cycle.setValue(1)
-        layout.addLayout(creat_spin_label(main.spinbox_cycle, "nb<sub>cycle</sub> (Y):"))
+        layout.addLayout(creat_spin_label(main.spinbox_cycle, "?(Y)"))
 
         main.sigma_pic_fit_entry = QSpinBox()
         main.sigma_pic_fit_entry.valueChanged.connect(main.setFocus)
@@ -279,7 +288,7 @@ class FitParamWidget(QWidget):
         main.sigma_pic_fit_entry.setRange(1, 20)
         main.sigma_pic_fit_entry.setSingleStep(1)
         main.sigma_pic_fit_entry.setValue(5)
-        layout.addLayout(creat_spin_label(main.sigma_pic_fit_entry, "nb σ (R)"))
+        layout.addLayout(creat_spin_label(main.sigma_pic_fit_entry, "nσ(R)"))
 
         main.inter_entry = QDoubleSpinBox()
         main.inter_entry.setDecimals(1)
@@ -288,12 +297,9 @@ class FitParamWidget(QWidget):
         main.inter_entry.setRange(1.0, 500.0)
         main.inter_entry.setSingleStep(1.0)
         main.inter_entry.setValue(120.0)
-        layout.addLayout(creat_spin_label(main.inter_entry, "Variation fit"))
-        name = QLabel("- - -")
-        layout.addWidget(name)
+        layout.addLayout(creat_spin_label(main.inter_entry, "Var"))
         self.setLayout(layout)
         self.setVisible(True)
-
 
 class FitSelectWidget(QWidget):
     """Widget for selecting ranges to fit spectra."""
@@ -301,27 +307,31 @@ class FitSelectWidget(QWidget):
     def __init__(self, main):
         super().__init__()
         layout = QVBoxLayout()
-        name = QLabel("fit_selected_spectra section - - -")
-        layout.addWidget(name)
-
-        main.add_btn = QPushButton("Ajouter une zone")
+        
+        main.add_btn = QPushButton("add")
         main.add_btn.clicked.connect(main.ajouter_zone)
         layout.addWidget(main.add_btn)
 
-        main.remove_btn = QPushButton("Supprimer la zone sélectionnée")
+        main.remove_btn = QPushButton("dell")
         main.remove_btn.clicked.connect(main.supprimer_zone)
         main.remove_btn.setEnabled(False)
         layout.addWidget(main.remove_btn)
+        
+        main.show_find_peaks_zones_check = QCheckBox("print")
+        main.show_find_peaks_zones_check.setChecked(False)
+        main.show_find_peaks_zones_check.toggled.connect(main.set_find_peaks_zones_visibility)
+        layout.addWidget(main.show_find_peaks_zones_check)
+
 
         main.index_start_entry = QSpinBox()
         main.index_start_entry.setRange(0, 2000)
         main.index_start_entry.setValue(1)
-        layout.addLayout(creat_spin_label(main.index_start_entry, "Index start"))
+        layout.addLayout(creat_spin_label(main.index_start_entry, "idx start"))
 
         main.index_stop_entry = QSpinBox()
         main.index_stop_entry.setRange(0, 2000)
         main.index_stop_entry.setValue(10)
-        layout.addLayout(creat_spin_label(main.index_stop_entry, "Index stop"))
+        layout.addLayout(creat_spin_label(main.index_stop_entry, "idx stop"))
 
         main.fit_select_button = QPushButton("Find Compo")
         main.fit_select_button.clicked.connect(main._CEDX_auto_compo)
@@ -330,6 +340,19 @@ class FitSelectWidget(QWidget):
         main.multi_fit_button = QPushButton("Multi fit")
         main.multi_fit_button.clicked.connect(main._CEDX_multi_fit)
         layout.addWidget(main.multi_fit_button)
+
+        main.skip_ui_update_checkbox = QCheckBox(
+            "no refresh"
+        )
+        main.skip_ui_update_checkbox.setToolTip(
+            "Exécute l'action sur la CED sans recharger ni afficher chaque spectre."
+        )
+        layout.addWidget(main.skip_ui_update_checkbox)
+
+        main.clear_gauges_button = QPushButton("remove gauges")
+        main.clear_gauges_button.clicked.connect(main.clear_gauges_range)
+        layout.addWidget(main.clear_gauges_button)
+
 
         self.setLayout(layout)
         self.setVisible(True)
@@ -343,13 +366,13 @@ class TabSectionWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
 
         main.spectrum_toolbar = QToolBar()
-        main.act_show_raw = main.spectrum_toolbar.addAction("Voir brut")
+        main.act_show_raw = main.spectrum_toolbar.addAction("brut")
         main.act_show_raw.setCheckable(True)
-        main.act_show_raw.setChecked(True)
-        main.act_show_filtered = main.spectrum_toolbar.addAction("Voir filtré")
+        main.act_show_raw.setChecked(False)
+        main.act_show_filtered = main.spectrum_toolbar.addAction("filtré")
         main.act_show_filtered.setCheckable(True)
         main.act_show_filtered.setChecked(False)
-        main.act_show_baseline = main.spectrum_toolbar.addAction("Voir baseline")
+        main.act_show_baseline = main.spectrum_toolbar.addAction("baseline")
         main.act_show_baseline.setCheckable(True)
         main.act_show_baseline.setChecked(False)
         main.act_show_raw.triggered.connect(main.update_spectrum_overlays)

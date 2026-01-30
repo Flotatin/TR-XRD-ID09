@@ -27,7 +27,7 @@ class SpectrumSectionWidget:
         self.spectrum_container = QWidget()
         container_layout = QVBoxLayout(self.spectrum_container)
         container_layout.setContentsMargins(0, 0, 0, 0)
-        container_layout.setSpacing(2)
+        container_layout.setSpacing(0)
 
         top_layout = QVBoxLayout()
         container_layout.addLayout(top_layout)
@@ -47,7 +47,6 @@ class SpectrumSectionWidget:
         main.ax_spectrum.scene().sigMouseClicked.connect(main.f_cross_spectrum)
 
         main.ax_dy = main.graph_layout.addPlot(row=1, col=0)
-        main.ax_dy.setTitle("DY")
         main.ax_dy.setXLink(main.ax_spectrum)
 
         main.graph_layout.ci.setContentsMargins(0, 0, 0, 0)
@@ -182,7 +181,7 @@ class SpectrumSectionWidget:
         """Add the spectrum widgets to the provided grid layout."""
 
         grid_layout.addWidget(self.spectrum_box, 0, 2, 4, 1)
-        grid_layout.addWidget(self.dhkl_box, 0, 3, 4, 1)
+        grid_layout.addWidget(self.dhkl_box, 0, 1, 3, 1)
 
     def add_right_widget(self, widget) -> None:
         """Insert a widget on the right side of the spectrum section."""

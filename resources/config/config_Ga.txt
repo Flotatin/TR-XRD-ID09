@@ -1,0 +1,11 @@
+folder_DRX=/data/visitor/hc6664/id09/20260121/RAW_DATA/Ga03/Ga03_0001
+folder_OSC=
+folder_CED=/data/visitor/hc6664/id09/20260121/CED_File
+loaded_file_DRX=/data/visitor/hc6664/id09/20260121/RAW_DATA/Ga03/Ga03_0001/scan0011/scan_jf1m_0000.h5
+loaded_file_OSC=
+calib_file_mask=None
+calib_file_poni=None
+zone=None
+energie_DRX=19001.41
+bib_files=["/home/opid09/cedapp/TR-XRD-ID09-main/resources/bibdrx/Ga/Ga-III.jcpds", "/home/opid09/cedapp/TR-XRD-ID09-main/resources/bibdrx/Ga/Ga-I.jcpds", "/home/opid09/cedapp/TR-XRD-ID09-main/resources/bibdrx/KCl/KCl_B1.jcpds", "/home/opid09/cedapp/TR-XRD-ID09-main/resources/bibdrx/KCl/kcl-b2.jcpds"]
+date=2026-01-24 18:06:34

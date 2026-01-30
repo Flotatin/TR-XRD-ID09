@@ -1,0 +1,11 @@
+folder_DRX=/data/visitor/hc6664/id09/20260121/RAW_DATA/Bi02/Bi02_0001
+folder_OSC=
+folder_CED=/data/visitor/hc6664/id09/20260121/CED_File
+loaded_file_DRX=/data/visitor/hc6664/id09/20260121/RAW_DATA/Bi02/Bi02_0001/scan0006/scan_jf1m_0000.h5
+loaded_file_OSC=
+calib_file_mask=/data/visitor/hc6664/id09/20260121/dioptas_files/scan_jf1m_0000.mask
+calib_file_poni=/data/visitor/hc6664/id09/20260121/dioptas_files/calib_THT7_correc_vendredit.poni
+zone=None
+energie_DRX=19001.41
+bib_files=["/home/opid09/cedapp/TR-XRD-ID09-main/resources/bibdrx/Bi/Bi-V.jcpds", "/home/opid09/cedapp/TR-XRD-ID09-main/resources/bibdrx/Bi/Bi-IV.jcpds", "/home/opid09/cedapp/TR-XRD-ID09-main/resources/bibdrx/Bi/Bi-II.jcpds", "/home/opid09/cedapp/TR-XRD-ID09-main/resources/bibdrx/Bi/Bi-I.jcpds", "/home/opid09/cedapp/TR-XRD-ID09-main/resources/bibdrx/Bi/Bi-BetaSn.jcpds", "/home/opid09/cedapp/TR-XRD-ID09-main/resources/bibdrx/KCl/kcl_b2_Dewaele.jcpds", "/home/opid09/cedapp/TR-XRD-ID09-main/resources/bibdrx/KCl/KCl-B1.jcpds"]
+date=2026-01-24 00:24:37
