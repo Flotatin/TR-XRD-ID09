@@ -165,10 +165,12 @@ class SpectrumSectionWidget:
 
         main.zone_spectrum_box = QCheckBox("Zone Fit Spectrum (Z)", main)
         main.zone_spectrum_box.setChecked(True)
+        main.zone_spectrum_box.toggled.connect(main._refresh_fit_context_cache)
         layout_check.addWidget(main.zone_spectrum_box)
 
         main.vslmfit = QCheckBox("vslmfit", main)
         main.vslmfit.setChecked(False)
+        main.vslmfit.toggled.connect(main._refresh_fit_context_cache)
         layout_check.addWidget(main.vslmfit)
 
         spectra_layout.addLayout(layout_check)
