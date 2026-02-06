@@ -13,6 +13,7 @@ from PyQt5.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QVBoxLayout,
+    QSpinBox,
 )
 
 
@@ -73,6 +74,31 @@ class DdacWidget:
         )
         host.ax_diff_int.addItem(host.zone_diff_int)
 
+        host.zone_multi_P = pg.LinearRegionItem(
+            values=[0, 0],
+            orientation=pg.LinearRegionItem.Vertical,
+            brush=pg.mkBrush(0, 120, 255, 40),
+            movable=True,
+        )
+        host.ax_P.addItem(host.zone_multi_P)
+        host.zone_multi_dPdt = pg.LinearRegionItem(
+            values=[0, 0],
+            orientation=pg.LinearRegionItem.Vertical,
+            brush=pg.mkBrush(0, 120, 255, 40),
+            movable=True,
+        )
+        host.ax_dPdt.addItem(host.zone_multi_dPdt)
+        host.zone_multi_diff_int = pg.LinearRegionItem(
+            values=[0, 0],
+            orientation=pg.LinearRegionItem.Vertical,
+            brush=pg.mkBrush(0, 120, 255, 40),
+            movable=True,
+        )
+        host.ax_diff_int.addItem(host.zone_multi_diff_int)
+        host.zone_multi_P.setVisible(False)
+        host.zone_multi_dPdt.setVisible(False)
+        host.zone_multi_diff_int.setVisible(False)
+
     def _init_drx_state(self) -> None:
         host = self._drx_container
         host.list_index_file_CED_Load = []
@@ -108,6 +134,25 @@ class DdacWidget:
 
         host.spectrum_select_box = QCheckBox("clic spectrum (h)", self._drx_container )
         host.spectrum_select_box.setChecked(True)
+        
+        host.analysis_toggle = None
+
+        host.label_dpdt_points = QLabel("Pts glissants dP/dt :", self._drx_container)
+        host.spinbox_dpdt_points = QSpinBox(self._drx_container)
+        host.spinbox_dpdt_points.setRange(1, 100)
+        host.spinbox_dpdt_points.setSingleStep(1)
+        host.spinbox_dpdt_points.setValue(2)
+        host.spinbox_dpdt_points.setToolTip("n_points-+ dP/dt ")
+        
+        host.label_dpdt_smooth = QLabel("smooth dP/dt :", self._drx_container)
+        host.spinbox_dpdt_smooth = QSpinBox(self._drx_container)
+        host.spinbox_dpdt_smooth.setRange(0, 50)
+        host.spinbox_dpdt_smooth.setSingleStep(1)
+        host.spinbox_dpdt_smooth.setValue(1)
+        host.spinbox_dpdt_smooth.setToolTip(
+            "UnivariateSpline(time,pressures,s=smooth) pour lisser la courbe moyenne dP/dt."
+        )
+
 
     def _connect_drx_events(self) -> None:
         host = self._drx_container
@@ -120,6 +165,9 @@ class DdacWidget:
         host.ax_diff_int.scene().sigMouseClicked.connect(
             lambda evt: host._on_drx_plot_clicked(evt, axis_role="image")
         )
+        host.spinbox_dpdt_points.valueChanged.connect(host._on_dpdt_points_changed)
+        host.spinbox_dpdt_smooth.valueChanged.connect(host._on_dpdt_points_changed)
+
 
     def _configure_drx_layout(self) -> None:
         host = self._drx_container
@@ -139,10 +187,26 @@ class DdacWidget:
         layhrun = QHBoxLayout()
         layhrun.addWidget(host.label_CED)
         layhrun.addWidget(host.spectrum_select_box)
+        layhrun.addWidget(host.label_dpdt_points)
+        layhrun.addWidget(host.spinbox_dpdt_points)
+        layhrun.addWidget(host.label_dpdt_smooth)
+        layhrun.addWidget(host.spinbox_dpdt_smooth)
+        if getattr(host, "analysis_toggle", None) is not None:
+            layhrun.addWidget(host.analysis_toggle)
         ddac_layout.addLayout(layhrun)
+        self._controls_layout = layhrun
 
         host.setLayout(ddac_layout)
 
     def add_to_layout(self, grid_layout) -> None:
         """Add the ddac widgets to the provided grid layout."""
         grid_layout.addWidget(self._drx_container.ddac_box, 0, 3, 4, 2)
+
+    def add_control_widget(self, widget) -> None:
+        """Append a control widget to the ddac control row."""
+        if widget is None:
+            return
+        layout = getattr(self, "_controls_layout", None)
+        if layout is None:
+            return
+        layout.addWidget(widget)

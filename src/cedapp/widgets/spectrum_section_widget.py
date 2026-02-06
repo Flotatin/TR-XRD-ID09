@@ -117,7 +117,7 @@ class SpectrumSectionWidget:
             brush=pg.mkBrush("#00ff00"),
         )
         main.ax_spectrum.addItem(main.plot_pic_select)
-        main.plot_data_pic_solo = pg.PlotDataItem([], [], pen=pg.mkPen("k", width=2))
+        main.plot_data_pic_solo = pg.PlotDataItem([], [], pen=pg.mkPen("r", width=2))
         main.ax_zoom.addItem(main.plot_data_pic_solo)
 
         main.axV = pg.InfiniteLine(angle=90, movable=False, pen="g")

@@ -5,6 +5,7 @@ import os
 import sys
 import dill
 import traceback
+from scipy.signal import find_peaks
 import json
 import numpy as np
 import ast
@@ -141,6 +142,15 @@ Setup_mode = True
 DEFAULT_THETA_RANGE = [8, 25]
 DEFAULT_ENERGY = 19000
 
+BIBLI_PLIM = {
+    "H2O_Ice_Ih": None,
+    "H2O_Ice_VI": [0.96, 2.064],
+    "H2O_Ice_VII": [2.064, 100],
+    "Sn_Beta": [-0.5, 12],
+    "Sn_gamma": [12, 80],
+}
+
+
 _DEBUG_ENV = os.getenv("DRX_DEBUG", "").strip().lower() in {"1", "true", "yes", "on"}
 setup_logging(debug=_DEBUG_ENV)
 logger = logging.getLogger(__name__)
@@ -164,12 +174,15 @@ from cedapp.drx.gauge import Gauge, Element
 from cedapp.drx import Oscilloscope_LeCroy_QTinterface as Oscilo
 
 from cedapp.controllers import (
+    ANALYSE_COLUMNS,
+    AnalysisController,
     ConfigurationMixin,
     DdacController,
     FileSelectionController,
     GaugeController,
     GaugeLibraryMixin,
     SpectrumController,
+    ensure_analyse_dataframe,
 )
 
 from cedapp.widgets import (
@@ -368,6 +381,10 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         self.RUN=None
         self._gauge_clipboard: Optional[List[Gauge]] = None
         self._gauge_clipboard_zone: Optional[pg.LinearRegionItem] = None
+        self._gauge_clipboard_zone_linked: List[pg.LinearRegionItem] = []
+        self._gauge_copy_zone: Optional[pg.LinearRegionItem] = None
+        self._gauge_copy_zone_linked: List[pg.LinearRegionItem] = []
+        
         self.config_file = paths.resolve_config_path(config_file).expanduser()
         self.folder_start = folder_start or ""
         self.DEFAULT_THETA_RANGE = DEFAULT_THETA_RANGE
@@ -603,6 +620,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             self.index_stop_entry.setValue(10)
 
         self._CEDX_auto_compo()
+        self._CEDX_multi_fit()
         self.REFRESH()
 
     def _warn_missing_resources(self) -> None:
@@ -779,6 +797,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             ax_spectrum=self.ax_spectrum,
             remove_button=getattr(self, "remove_btn", None),
         )
+        self._connect_ddac_multi_zone_signals()
         self.gauge_controller = GaugeController(
             spectrum_getter=lambda: self.Spectrum,
             gauge_getter=lambda: self.gauge_select,
@@ -804,6 +823,325 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         self.bit_load_jauge = False
         self.bit_modif_jauge = False
 
+        self._analysis_overlays = []
+        self.analysis_ctl = None
+        if getattr(self, "ax_P", None) is not None:
+            self.analysis_ctl = AnalysisController(
+                self,
+                self.ax_P,
+                dpdt_plot=getattr(self, "ax_dPdt", None),
+                x_axis="time_ms",
+            )
+            ddac_widget = getattr(self.ui_state, "ddac_widget", None)
+            if ddac_widget is not None:
+                ddac_widget.add_control_widget(self.analysis_ctl.cb_analysis)
+            else:
+                logger.debug("dDAC widget unavailable for analysis toggle placement.")
+        else:
+            logger.debug("Analysis controller not created: ax_P not available.")
+
+    def _set_analysis_overlays_visible(self, visible: bool) -> None:
+        """Hook to toggle visibility of additional analysis overlays."""
+        for item in self._analysis_overlays:
+            try:
+                item.setVisible(visible)
+            except Exception:
+                logger.debug("Failed to toggle overlay visibility", exc_info=True)
+
+    def _update_analysis_from_cedx_data(self, run, n_J, l_P, l_t, gauge_indices) -> None:
+        df = ensure_analyse_dataframe(run)
+        if df is None:
+            return
+
+        rows = []
+        dpdt_ref_time, dpdt_ref_values = self._compute_mean_dp_curve(self._cedx_gauge_series)
+        for idx, (name, _symbol, _color) in enumerate(n_J):
+            pressures = l_P[idx] if idx < len(l_P) else []
+            times = l_t[idx] if idx < len(l_t) else []
+            indices = gauge_indices[idx] if idx < len(gauge_indices) else []
+            color = self._get_gauge_color(name)
+            summary_df = self._build_summary_for_analysis(run, name, pressures, times)
+            pressure_limit = self._select_analysis_pressure_limit(name, pressures)
+            if pressure_limit is None:
+                continue
+
+            dpdt_data = self._compute_dpdt_mean_from_limit_allgauges(
+                summary_df=summary_df,
+                gauge_name=name,
+                pressure_limit=pressure_limit,
+                inter_frame_times=self._estimate_inter_frame_times(run, len(summary_df)),
+                idx_end=self._get_last_valid_index(pressures),
+                dP_dt_mean=dpdt_ref_values,
+                dP_dt_time=dpdt_ref_time,
+            )
+            if dpdt_data is None:
+                continue
+
+            dpdt_moyen, t_lim, dt, t_inter_f, _t_fine, _P_fine = dpdt_data
+            rows.append(
+                {
+                    "id": f"auto-{name}-curve",
+                    "kind": "analysis_curve",
+                    "label": f"{name}:curve",
+                    "spec_idx": int(self._nearest_spectrum_index_from_time_ms(run, float(_t_fine[0]) if len(_t_fine) else 0.0)),
+                    "time_s": float(_t_fine[0]) / 1000.0 if len(_t_fine) else 0.0,
+                    "P_GPa": float(_P_fine[0]) if len(_P_fine) else 0.0,
+                    "x": float(_t_fine[0]) if len(_t_fine) else 0.0,
+                    "y": float(_P_fine[0]) if len(_P_fine) else 0.0,
+                    "source": "auto",
+                    "locked": False,
+                    "meta": {
+                        "gauge": str(name),
+                        "color": color,
+                        "t_fine": np.asarray(_t_fine, dtype=float).tolist(),
+                        "P_fine": np.asarray(_P_fine, dtype=float).tolist(),
+                    },
+                }
+            )
+            key_points = [
+                ("t_lim", t_lim, "-"),
+                ("t_lim_dt", t_lim + dt, "-."),
+                ("t_lim_dt_inter", t_lim + dt + t_inter_f, "--"),
+            ]
+            for suffix, time_ms, linestyle in key_points:
+                pressure_at_point = self._interpolate_pressure_at_time(pressures, times, time_ms)
+                spec_idx = self._nearest_spectrum_index_from_time_ms(run, time_ms)
+                rows.append(
+                    {
+                        "id": f"auto-{name}-{suffix}",
+                        "kind": "analysis_marker",
+                        "label": f"{name}:{suffix}",
+                        "spec_idx": int(spec_idx),
+                        "time_s": float(time_ms) / 1000.0,
+                        "P_GPa": float(pressure_at_point),
+                        "x": float(time_ms),
+                        "y": float(pressure_at_point),
+                        "source": "auto",
+                        "locked": False,
+                        "meta": {
+                            "gauge": str(name),
+                            "color": color,
+                            "dpdt": float(dpdt_moyen) if np.isfinite(dpdt_moyen) else np.nan,
+                            "line_style": linestyle,
+                            "dt_ms": float(dt),
+                        },
+                    }
+                )
+
+        auto_df = pd.DataFrame(rows, columns=ANALYSE_COLUMNS)
+        source_series = df.get("source")
+        if source_series is None:
+            manual_df = df.copy()
+        else:
+            manual_df = df[source_series.fillna("manual") != "auto"].copy()
+        run.analyse = pd.concat([manual_df, auto_df], ignore_index=True)
+
+    def _build_summary_for_analysis(self, run, gauge_name, pressures, times_ms):
+        summary = getattr(run, "Summary", None)
+        if isinstance(summary, pd.DataFrame):
+            summary_df = summary.copy().reset_index(drop=True)
+        else:
+            summary_df = pd.DataFrame()
+        pressure_col = f"P_{gauge_name}"
+        if pressure_col not in summary_df.columns:
+            summary_df[pressure_col] = pd.Series(np.asarray(pressures, dtype=float))
+        if "Time_spectrum" not in summary_df.columns:
+            summary_df["Time_spectrum"] = pd.Series(np.asarray(times_ms, dtype=float))
+        return summary_df
+
+    def _estimate_inter_frame_times(self, run, n_points):
+        osc = getattr(run, "data_oscillo", None)
+        if not isinstance(osc, pd.DataFrame) or osc.empty:
+            return [1e-3] * max(int(n_points), 1)
+        if "Time" not in osc.columns:
+            return [1e-3] * max(int(n_points), 1)
+        time = np.asarray(osc["Time"], dtype=float) * 1e3
+        channel_key = getattr(run, "time_index", None)
+        if channel_key not in osc.columns:
+            return [1e-3] * max(int(n_points), 1)
+        signal = np.asarray(osc[channel_key], dtype=float)
+        if signal.size < 3 or time.size != signal.size:
+            return [1e-3] * max(int(n_points), 1)
+        threshold = (np.nanmax(signal) + np.nanmin(signal)) / 2.0
+        binary = signal > threshold
+        edges = np.where(np.diff(binary.astype(int)) != 0)[0]
+        if edges.size < 2:
+            return [1e-3] * max(int(n_points), 1)
+        start_idx = edges[0::2]
+        end_idx = edges[1::2]
+        t_start = time[start_idx]
+        t_end = time[end_idx]
+        n = min(len(t_start) - 1, len(t_end))
+        if n <= 0:
+            return [1e-3] * max(int(n_points), 1)
+        return list(np.asarray(t_start[1 : n + 1] - t_end[:n], dtype=float))
+
+    def _compute_dpdt_mean_from_limit_allgauges(
+        self,
+        *,
+        summary_df,
+        gauge_name,
+        pressure_limit,
+        inter_frame_times,
+        idx_end,
+        dP_dt_mean,
+        dP_dt_time,
+    ):
+        pressure_col = f"P_{gauge_name}"
+        if pressure_col not in summary_df.columns or "Time_spectrum" not in summary_df.columns:
+            return None
+        pressure = np.asarray(summary_df[pressure_col], dtype=float)
+        time = np.asarray(summary_df["Time_spectrum"], dtype=float)
+        mask = np.isfinite(pressure) & np.isfinite(time)
+        t = time[mask]
+        p = pressure[mask]
+        if t.size == 0:
+            return None
+
+        idx_end = int(np.clip(idx_end, 0, max(len(time) - 1, 0)))
+        if idx_end >= len(inter_frame_times):
+            t_inter_f = float(inter_frame_times[-1]) if inter_frame_times else 1e-3
+        else:
+            t_inter_f = float(inter_frame_times[idx_end])
+
+        if t.size < 4:
+            t_fine = np.linspace(t.min(), t.max(), max(len(t) * 50, 2))
+            p_fine = np.interp(t_fine, t, p)
+            spline = None
+        else:
+            noise = float(np.nanstd(p))
+            s = (noise**2) * len(p)
+            spline = UnivariateSpline(t, p, s=s)
+            t_fine = np.linspace(t.min(), t.max(), len(t) * 50)
+            p_fine = spline(t_fine)
+
+        p_start = float(p[0])
+        p_last = float(p[-1])
+        is_decompression = p_last < p_start
+
+        crossing_idx = np.where(p_fine <= pressure_limit)[0] if is_decompression else np.where(p_fine >= pressure_limit)[0]
+
+        if crossing_idx.size == 0 and t.size:
+            # Fallback: phase observed out of declared domain without explicit crossing.
+            # Take first out-of-domain appearance as t_lim.
+            if is_decompression:
+                outside_idx = np.where(p_fine < pressure_limit)[0]
+            else:
+                outside_idx = np.where(p_fine > pressure_limit)[0]
+            if outside_idx.size:
+                t_lim = float(t_fine[outside_idx[0]])
+                p_lim = float(p_fine[outside_idx[0]])
+                t_end = float(time[idx_end])
+                p_end = float(np.interp(t_end, t, p)) if spline is None else float(spline(t_end))
+                dt = float(t_end - t_lim)
+                dpdt_moyen = np.nan if dt <= 0 else float((p_end - p_lim) / dt)
+                return dpdt_moyen, t_lim, dt, t_inter_f, t_fine, p_fine
+
+        if crossing_idx.size == 0:
+            t_lim = float(t_fine[-1])
+            dt = 0.0
+            dpdt_moyen = self._dpdt_at_time_ms(t_lim, dP_dt_time, dP_dt_mean)
+            return dpdt_moyen, t_lim, dt, t_inter_f, t_fine, p_fine
+
+        t_lim = float(t_fine[crossing_idx[0]])
+        p_lim = float(p_fine[crossing_idx[0]])
+        t_end = float(time[idx_end])
+        if spline is None:
+            p_end = float(np.interp(t_end, t, p))
+        else:
+            p_end = float(spline(t_end))
+        dt = float(t_end - t_lim)
+        if dt <= 0:
+            dpdt_moyen = np.nan
+        else:
+            dpdt_moyen = float((p_end - p_lim) / dt)
+        return dpdt_moyen, t_lim, dt, t_inter_f, t_fine, p_fine
+
+    def _dpdt_at_time_ms(self, time_ms, ref_time, ref_dpdt):
+        x = np.asarray(ref_time, dtype=float)
+        y = np.asarray(ref_dpdt, dtype=float)
+        if x.size == 0 or y.size == 0:
+            return np.nan
+        return float(np.interp(float(time_ms), x, y))
+
+    def _select_analysis_pressure_limit(self, gauge_name, pressures):
+        """Return analysis pressure threshold using relaxed phase-domain rules.
+
+        A phase is analysed iff it is out of its domain at any point.
+        t_lim comes from crossing when available; otherwise first out-of-domain point.
+        """
+        domain = BIBLI_PLIM.get(gauge_name)
+        if domain is None:
+            return None
+        if not isinstance(domain, (list, tuple)) or len(domain) != 2:
+            return None
+
+        values = np.asarray(pressures, dtype=float)
+        valid = values[np.isfinite(values)]
+        if valid.size == 0:
+            return None
+
+        p_low = float(min(domain))
+        p_high = float(max(domain))
+        out_low = np.any(valid < p_low)
+        out_high = np.any(valid > p_high)
+        if not out_low and not out_high:
+            return None
+
+        p_start = float(valid[0])
+        p_end = float(valid[-1])
+        is_decompression = p_end < p_start
+        if is_decompression:
+            if out_low:
+                return p_low
+            if out_high:
+                return p_high
+            return None
+
+        if out_high:
+            return p_high
+        if out_low:
+            return p_low
+        return None
+
+    def _find_gauge_by_name(self, gauge_name):
+        run = getattr(self, "RUN", None)
+        spectra = getattr(run, "Spectra", []) if run is not None else []
+        for spectrum in spectra:
+            for gauge in getattr(spectrum, "Gauges", []):
+                if getattr(gauge, "name", None) == gauge_name:
+                    return gauge
+        return None
+
+    def _get_last_valid_index(self, pressures):
+        arr = np.asarray(pressures, dtype=float)
+        valid = np.where(np.isfinite(arr))[0]
+        if valid.size == 0:
+            return 0
+        return int(valid[-1])
+
+    def _interpolate_pressure_at_time(self, pressures, times_ms, target_time_ms):
+        p = np.asarray(pressures, dtype=float)
+        t = np.asarray(times_ms, dtype=float)
+        mask = np.isfinite(p) & np.isfinite(t)
+        if np.count_nonzero(mask) == 0:
+            return 0.0
+        t_valid = t[mask]
+        p_valid = p[mask]
+        if t_valid.size == 1:
+            return float(p_valid[0])
+        return float(np.interp(float(target_time_ms), t_valid, p_valid))
+
+    def _nearest_spectrum_index_from_time_ms(self, run, time_ms):
+        time_spectrum = np.asarray(getattr(run, "Time_spectrum", []), dtype=float)
+        if time_spectrum.size == 0:
+            return 0
+        return int(np.argmin(np.abs(time_spectrum * 1e3 - float(time_ms))))
+
+    def _refresh_analysis_from_run(self) -> None:
+        if self.analysis_ctl is None:
+            return
+        self.analysis_ctl.refresh_from_run()
     def _finalize_layout(self) -> None:
         """Apply stretch factors to the main grid layout."""
 
@@ -1009,7 +1347,148 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         if not hasattr(self, "inter_entry"):
             return 1.0
         return float(self.inter_entry.value()) / 100.0
+    
+    def _init_batch_caches(self) -> None:
+        self.skip_ui_update = bool(
+            getattr(self, "skip_ui_update_checkbox", None).isChecked()
+        ) if hasattr(self, "skip_ui_update_checkbox") else False
+        self._batch_index_start = 0
+        self._batch_index_stop = 0
+        self._ddac_multi_zone_visible = False
+        self._ddac_multi_zone_range = None
+        self._theta2_range_cache: Optional[Sequence[Sequence[float]]] = None
+        self._refresh_batch_range_cache()
+        self._refresh_fit_context_cache()
+        self._refresh_auto_compo_settings_cache()
 
+    def _set_skip_ui_update(self, checked: bool) -> None:
+        self.skip_ui_update = bool(checked)
+
+    def _refresh_batch_range_cache(self) -> None:
+        if hasattr(self, "index_start_entry"):
+            self._batch_index_start = int(self.index_start_entry.value())
+        if hasattr(self, "index_stop_entry"):
+            self._batch_index_stop = int(self.index_stop_entry.value())
+        self._update_ddac_multi_zone_range()
+
+    def _compute_ddac_multi_zone_range(self) -> Optional[Tuple[float, float]]:
+        if not hasattr(self, "index_start_entry") or not hasattr(self, "index_stop_entry"):
+            return None
+        start_index = int(self.index_start_entry.value())
+        stop_index = int(self.index_stop_entry.value())
+        if start_index > stop_index:
+            start_index, stop_index = stop_index, start_index
+        time_values = getattr(self, "time", None)
+        if time_values is None or len(time_values) == 0:
+            start_time = float(start_index)
+            stop_time = float(stop_index)
+            if start_time == stop_time:
+                stop_time = start_time + 1.0
+            return (start_time, stop_time)
+        start_time = float(self._get_cedx_time_value(start_index))
+        stop_time = float(self._get_cedx_time_value(stop_index))
+        if stop_index + 1 < len(time_values):
+            stop_time = float(self._get_cedx_time_value(stop_index + 1))
+        else:
+            dt = self._get_cedx_dt(stop_index)
+            if dt is None and stop_index > 0:
+                dt = self._get_cedx_dt(stop_index - 1)
+            if dt is None:
+                dt = 1.0
+            stop_time = stop_time + float(dt)
+        if start_time > stop_time:
+            start_time, stop_time = stop_time, start_time
+        return (start_time, stop_time)
+
+    def _update_ddac_multi_zone_range(self) -> None:
+        if getattr(self, "_ddac_multi_zone_syncing", False):
+            return
+        zone_range = self._compute_ddac_multi_zone_range()
+        self._ddac_multi_zone_range = zone_range
+        if zone_range is None:
+            return
+        for attr in ("zone_multi_P", "zone_multi_dPdt", "zone_multi_diff_int"):
+            zone = getattr(self, attr, None)
+            if zone is not None:
+                zone.setRegion(zone_range)
+
+    def _apply_ddac_multi_zone_visibility(self) -> None:
+        visible = bool(getattr(self, "_ddac_multi_zone_visible", False))
+        for attr in ("zone_multi_P", "zone_multi_dPdt", "zone_multi_diff_int"):
+            zone = getattr(self, attr, None)
+            if zone is not None:
+                zone.setVisible(visible)
+
+    def set_ddac_multi_zone_visibility(self, checked: bool) -> None:
+        self._ddac_multi_zone_visible = bool(checked)
+        self._update_ddac_multi_zone_range()
+        self._apply_ddac_multi_zone_visibility()
+
+    def _connect_ddac_multi_zone_signals(self) -> None:
+        for attr in ("zone_multi_P", "zone_multi_dPdt", "zone_multi_diff_int"):
+            zone = getattr(self, attr, None)
+            if zone is None:
+                continue
+            try:
+                zone.sigRegionChangeFinished.connect(self._on_ddac_multi_zone_changed)
+            except Exception:
+                continue
+
+    def _on_ddac_multi_zone_changed(self) -> None:
+        if getattr(self, "_ddac_multi_zone_syncing", False):
+            return
+        sender = self.sender()
+        region = None
+        if sender is not None and hasattr(sender, "getRegion"):
+            region = sender.getRegion()
+        if region is None:
+            zone = getattr(self, "zone_multi_P", None)
+            if zone is not None:
+                region = zone.getRegion()
+        if region is None:
+            return
+        start, stop = sorted(map(float, region))
+        self._ddac_multi_zone_range = (start, stop)
+        self._ddac_multi_zone_syncing = True
+        try:
+            for attr in ("zone_multi_P", "zone_multi_dPdt", "zone_multi_diff_int"):
+                zone = getattr(self, attr, None)
+                if zone is None or zone is sender:
+                    continue
+                zone.setRegion((start, stop))
+            start_index, stop_index = self._indices_from_ddac_range(start, stop)
+            self._set_batch_indices_from_zone(start_index, stop_index)
+            self._refresh_batch_range_cache()
+        finally:
+            self._ddac_multi_zone_syncing = False
+
+    def _indices_from_ddac_range(self, start: float, stop: float) -> Tuple[int, int]:
+        time_values = getattr(self, "time", None)
+        if time_values is None or len(time_values) == 0:
+            start_index = int(round(start))
+            stop_index = int(round(stop))
+            if start_index > stop_index:
+                start_index, stop_index = stop_index, start_index
+            return (start_index, stop_index)
+        time_array = np.asarray(time_values, dtype=float)
+        start_index = int(np.nanargmin(np.abs(time_array - start)))
+        stop_index = int(np.nanargmin(np.abs(time_array - stop)))
+        if start_index > stop_index:
+            start_index, stop_index = stop_index, start_index
+        return (start_index, stop_index)
+
+    def _set_batch_indices_from_zone(self, start_index: int, stop_index: int) -> None:
+        if start_index > stop_index:
+            start_index, stop_index = stop_index, start_index
+        if hasattr(self, "index_start_entry"):
+            self.index_start_entry.blockSignals(True)
+            self.index_start_entry.setValue(start_index)
+            self.index_start_entry.blockSignals(False)
+        if hasattr(self, "index_stop_entry"):
+            self.index_stop_entry.blockSignals(True)
+            self.index_stop_entry.setValue(stop_index)
+            self.index_stop_entry.blockSignals(False)
+        
     def _selection_highlight_color(self, alpha: int = 100) -> QColor:
         """Return the highlight colour used when a peak is selected."""
         color = QColor("lightgreen")
@@ -1224,6 +1703,13 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             if zone is not None and zone_range:
                 zone.setRegion(zone_range)
 
+            multi_range = getattr(self, "_ddac_multi_zone_range", None)
+            if multi_range:
+                for attr in ("zone_multi_P", "zone_multi_dPdt", "zone_multi_diff_int"):
+                    zone = getattr(self, attr, None)
+                    if zone is not None:
+                        zone.setRegion(multi_range)
+
             image = getattr(self, "_cedx_image_cache", None)
             if image is not None and hasattr(self, "img_diff_int_item"):
                 self._update_image_safe(
@@ -1342,7 +1828,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         self.bit_bypass = True
         self.f_Spectrum_Load(Spectrum=self.RUN.Spectra[self.index_spec])
         self.bit_bypass = False
-        self._refresh_drx_view()
+        #self._refresh_drx_view()
 #########################################################################################################################################################################################
 #? COMMANDE FILE
    
@@ -1477,8 +1963,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         )
         if file_path:
             self.set_loaded_drx_file(file_path)
-
-                
+              
     def select_file_oscilo(self):
         options = QFileDialog.Options()
         self.loaded_file_OSC,_ = QFileDialog.getOpenFileName(self, "F_Oscilo", options=options,directory=self.loaded_file_OSC)
@@ -1551,6 +2036,113 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
 
 #########################################################################################################################################################################################
 #? COMMANDE AUTO DIF
+    def _get_peak_height_fraction(self) -> float:
+        if not hasattr(self, "height_entry"):
+            return 0.0
+        return max(0.0, float(self.height_entry.value()) / 100.0)
+
+    def _get_peak_prominence_fraction(self) -> float:
+        if not hasattr(self, "prominence_entry"):
+            return 0.0
+        return max(0.0, float(self.prominence_entry.value()) / 100.0)
+
+    def _compute_peak_height_threshold(self) -> Optional[float]:
+        spectrum = getattr(self, "Spectrum", None)
+        if spectrum is None or getattr(spectrum, "wnb", None) is None:
+            return None
+        x_values = spectrum.wnb
+        y_values = spectrum.y_corr
+        if x_values is None or y_values is None or len(x_values) == 0:
+            return None
+        theta2_range = None
+        if hasattr(self, "spectrum_controller"):
+            theta2_range = self.spectrum_controller.update_theta2_range()
+        if not theta2_range:
+            theta2_range = [(float(x_values[0]), float(x_values[-1]))]
+        y_mask = self.mask_spectrum_values(x_values, y_values, theta2_range)
+        if y_mask.size == 0:
+            return None
+        max_level = float(np.nanmax(y_mask))
+        if max_level <= 0:
+            return None
+        return self._get_peak_height_fraction() * max_level
+
+    def _ensure_find_peaks_exclusion_line(self) -> Optional[pg.InfiniteLine]:
+        if not hasattr(self, "ax_spectrum"):
+            return None
+        if self.find_peaks_exclusion_line is None:
+            existing = []
+            for item in getattr(self.ax_spectrum, "items", []):
+                if isinstance(item, pg.InfiniteLine) and getattr(
+                    item, "_find_peaks_exclusion_line", False
+                ):
+                    existing.append(item)
+            if existing:
+                self.find_peaks_exclusion_line = existing[0]
+                for extra in existing[1:]:
+                    try:
+                        self.ax_spectrum.removeItem(extra)
+                    except Exception:
+                        pass
+                return self.find_peaks_exclusion_line
+        if self.find_peaks_exclusion_line is None:
+            line = pg.InfiniteLine(
+                angle=0,
+                movable=True,
+                pen=pg.mkPen((255, 140, 0), width=2),
+            )
+            line._find_peaks_exclusion_line = True
+            line.setZValue(30)
+            line.setVisible(False)
+            line.sigPositionChangeFinished.connect(
+                self._sync_height_from_exclusion_line
+            )
+            self.ax_spectrum.addItem(line)
+            self.find_peaks_exclusion_line = line
+        return self.find_peaks_exclusion_line
+
+    def toggle_find_peaks_exclusion_region(self, checked: bool) -> None:
+        line = self._ensure_find_peaks_exclusion_line()
+        if line is None:
+            return
+        line.setVisible(bool(checked))
+        if checked:
+            self._update_find_peaks_exclusion_region()
+
+    def _update_find_peaks_exclusion_region(self, *args) -> None:
+        line = self._ensure_find_peaks_exclusion_line()
+        if line is None or not line.isVisible():
+            return
+        threshold = self._compute_peak_height_threshold()
+        if threshold is None:
+            return
+        line.setValue(threshold)
+
+    def _sync_height_from_exclusion_line(self) -> None:
+        line = self.find_peaks_exclusion_line
+        if line is None or not hasattr(self, "height_entry"):
+            return
+        spectrum = getattr(self, "Spectrum", None)
+        if spectrum is None or getattr(spectrum, "wnb", None) is None:
+            return
+        x_values = spectrum.wnb
+        y_values = spectrum.y_corr
+        theta2_range = None
+        if hasattr(self, "spectrum_controller"):
+            theta2_range = self.spectrum_controller.update_theta2_range()
+        if not theta2_range:
+            theta2_range = [(float(x_values[0]), float(x_values[-1]))]
+        y_mask = self.mask_spectrum_values(x_values, y_values, theta2_range)
+        if y_mask.size == 0:
+            return
+        max_level = float(np.nanmax(y_mask))
+        if max_level <= 0:
+            return
+        percent_value = max(0.0, min(100.0, float(line.value()) / max_level * 100.0))
+        block_state = self.height_entry.blockSignals(True)
+        self.height_entry.setValue(percent_value)
+        self.height_entry.blockSignals(block_state)
+        self._refresh_auto_compo_settings_cache()
     def f_print_region(self):
         self.spectrum_controller.toggle_regions_visibility()
 
@@ -1574,9 +2166,9 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             max_elements=self.nb_max_element_entry.value(),
             tolerance=self.tolerance_entry.value(),
             custom_peak_params={
-                "height": self.height_entry.value(),
+                "height": self._get_peak_height_fraction(),
                 "distance": self.distance_entry.value(),
-                "prominence": self.prominence_entry.value(),
+                "prominence": self._get_peak_prominence_fraction(),
                 "width": self.width_entry.value(),
                 "number_peak_max": self.nb_peak_entry.value(),
             },
@@ -2123,6 +2715,25 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                     params_f = p.model.make_params()
                     self.list_y_fit_start[i][j] = p.model.eval(params_f, x=self.Spectrum.wnb)
 
+        if getattr(self.Spectrum, "dY", None) is None:
+            try:
+                # modèle actuel à partir des gauges/pics (sans baseline)
+                y_ref = np.zeros_like(self.Spectrum.y_corr, dtype=float)
+                for g in self.Spectrum.Gauges:
+                    for p in g.pics:
+                        params_f = p.model.make_params()
+                        y_ref += p.model.eval(params_f, x=self.Spectrum.wnb)
+
+                # référence sur la même fenêtre x_sub/y_sub
+                if self.Spectrum.indexX is not None and len(self.Spectrum.indexX) == len(x_sub):
+                    self.Spectrum.dY = self.Spectrum.y_corr[self.Spectrum.indexX] - y_ref[self.Spectrum.indexX]
+                else:
+                    self.Spectrum.dY = self.Spectrum.y_corr - y_ref
+            except Exception:
+                # si ça foire, on laisse None et on retombera sur best=True
+                self.Spectrum.dY = None
+
+        
         # Fit curve_fit
         sum_function = CL.Gen_sum_F(list_F)
         try:
@@ -2130,8 +2741,12 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             params_sigma = np.sqrt(np.diag(params_covar))
         except Exception as e:
             self.Spectrum.bit_fit = self.bit_fit_T = True
-            self.text_box_msg.setText(f"FIT ERROR {e}")
-            return
+            if not skip_ui:
+                self.text_box_msg.setText(f"FIT ERROR {e}")
+                return
+            else:
+                print("FIT ERROR", e)
+                return
 
         fit = sum_function(x_sub, *params)
         best = (np.sum((fit - y_sub) ** 2) < np.sum(self.Spectrum.dY ** 2))
@@ -2141,7 +2756,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             # Affichage fit
             self.plot_curv_fit.setData(x_sub, fit)
             self.plot_curv_dY.setData(x_sub, y_sub - fit)
-            self.Print_fit_start(skip_ui=skip_ui)
+            self.Print_fit_start()
 
         # Interaction validation
         go = True
@@ -2242,7 +2857,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             self.index_jauge = save_jauge
             self.index_pic_select = save_pic
             self.f_Gauge_Load()
-            self.Print_fit_start(skip_ui=skip_ui)
+            self.Print_fit_start()
 
     def _apply_bad_fit(self, save_jauge,skip_ui=False):
         """Applique les résultats si le fit est rejeté ou moins bon"""
@@ -2349,25 +2964,27 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         if spectrum is not None:
             self._apply_spectrum_limits(include_overlays=True)
 
-    
     def _CEDX_multi_fit(self):
         if self.RUN is None:
-            return print("no CED X LOAD")
-        self.RUN.Spectra[self.index_spec] = self.Spectrum
+            print("no CED X LOAD")
+            return
 
-        index_start = self.index_start_entry.value()
-        index_stop = self.index_stop_entry.value()
+        # Sauvegarde le spectre courant dans RUN
+        if getattr(self, "Spectrum", None) is not None and getattr(self, "index_spec", None) is not None:
+            self.RUN.Spectra[self.index_spec] = self.Spectrum
 
-        # Vérification et ajustement des indices
-        index_start = max(0, index_start)
-        index_stop = min(len(self.RUN.Spectra) - 1, index_stop)
+        index_start = max(0, int(self.index_start_entry.value()))
+        index_stop  = min(len(self.RUN.Spectra) - 1, int(self.index_stop_entry.value()))
 
         if index_start > index_stop:
             print("Index start must be less than or equal to index stop.")
             return
-        skip_ui=self.skip_ui_update_checkbox.isChecked()
+
+        skip_ui = bool(self.skip_ui_update_checkbox.isChecked())
+
         total_steps = max(0, index_stop - index_start)
         progress_dialog = None
+
         if total_steps > 0:
             progress_dialog = ProgressDialog(
                 "Ajustement des spectres en cours...",
@@ -2381,60 +2998,130 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             progress_dialog.setAutoClose(True)
             progress_dialog.show()
             QApplication.processEvents()
+
         try:
             for step, i in enumerate(range(index_start, index_stop), start=1):
                 if progress_dialog is not None:
                     if progress_dialog.wasCanceled():
                         break
-                    progress_dialog.setLabelText(
-                        f"Spectre {i + 1} ({step}/{total_steps})"
-                    )
+                    progress_dialog.setLabelText(f"Spectre {i + 1} ({step}/{total_steps})")
                     QApplication.processEvents()
 
-                self.bit_bypass = False
-                if skip_ui:
-                    self.Spectrum = self.RUN.Spectra[i]
-                    self._last_spectrum_load_bypass = True
-                    self._rebuild_fit_state(skip_ui=skip_ui)
-                else:
-                    self.f_Spectrum_Load(Spectrum=self.RUN.Spectra[i])
                 try:
                     self.bit_bypass = True
-                    self.FIT_lmfitVScurvfit(skip_ui=skip_ui)
-                except Exception as e:
-                    print("Error_fit:", e)
-                self.bit_bypass = False
-                self.RUN.Spectra[i] = self.Spectrum
+                    if skip_ui:
+                        # mode batch rapide : pas de UI, pas de rebuild UI-state
+                        self.Spectrum = self.RUN.Spectra[i]
+                        self._last_spectrum_load_bypass = True
+                        self._rebuild_fit_state(skip_ui=skip_ui)
+                        
+                    else:
+                        self.f_Spectrum_Load(Spectrum=self.RUN.Spectra[i])
 
+                    self.bit_bypass=True
+                    self.FIT_lmfitVScurvfit(skip_ui=skip_ui)
+                    self.bit_bypass=False
+
+                except Exception:
+                    print(f"[multi_fit] Error_fit spectrum index={i}")
+                    traceback.print_exc()
+
+                finally:
+                    self.bit_bypass = False
+
+                # ---- sauvegarde dans RUN
+                self.RUN.Spectra[i] = self.Spectrum
 
                 if progress_dialog is not None:
                     progress_dialog.setValue(step)
                     QApplication.processEvents()
+
         finally:
             if progress_dialog is not None:
                 if not progress_dialog.wasCanceled():
                     progress_dialog.setValue(total_steps)
                 progress_dialog.close()
 
-        self.Spectrum=self.RUN.Spectra[self.index_spec]
+        # Recharge spectre initial + refresh UI
+        self.Spectrum = self.RUN.Spectra[self.index_spec]
         self.REFRESH()
 
-    def _ensure_gauge_clipboard_zone(self) -> Optional[pg.LinearRegionItem]:
+    def _create_ddac_zone_group(self, brush: pg.QtGui.QBrush) -> Tuple[Optional[pg.LinearRegionItem], List[pg.LinearRegionItem]]:
         if not hasattr(self, "ax_diff_int"):
-            return None
-        if self._gauge_clipboard_zone is None:
+            return None, []
+        def make_zone() -> pg.LinearRegionItem:
             zone = pg.LinearRegionItem(
                 values=[0, 0],
                 orientation=pg.LinearRegionItem.Vertical,
-                brush=pg.mkBrush(0, 120, 255, 40),
+                brush=brush,
                 movable=True,
             )
             zone.setZValue(10)
-            self.ax_diff_int.addItem(zone)
-            zone.setVisible(False)
-            self._gauge_clipboard_zone = zone
-        return self._gauge_clipboard_zone
 
+            zone.setVisible(False)
+            return zone
+
+        master = make_zone()
+        self.ax_diff_int.addItem(master)
+        linked: List[pg.LinearRegionItem] = []
+        for axis in (getattr(self, "ax_P", None), getattr(self, "ax_dPdt", None)):
+            if axis is None:
+                continue
+            zone = make_zone()
+            axis.addItem(zone)
+            linked.append(zone)
+
+        zones = [master] + linked
+        updating = {"active": False}
+
+        def sync_regions(source: pg.LinearRegionItem) -> None:
+            if updating["active"]:
+                return
+            updating["active"] = True
+            region = source.getRegion()
+            for zone in zones:
+                if zone is source:
+                    continue
+                zone.blockSignals(True)
+                zone.setRegion(region)
+                zone.blockSignals(False)
+            updating["active"] = False
+
+        for zone in zones:
+            zone.sigRegionChanged.connect(lambda _, z=zone: sync_regions(z))
+
+        return master, linked
+
+    def _set_ddac_zone_group_visible(
+        self,
+        master: Optional[pg.LinearRegionItem],
+        linked: List[pg.LinearRegionItem],
+        visible: bool,
+    ) -> None:
+        if master is None:
+            return
+        master.setVisible(visible)
+        for zone in linked:
+            zone.setVisible(visible)
+
+    def _ensure_gauge_clipboard_zone(self) -> Optional[pg.LinearRegionItem]:
+        if self._gauge_clipboard_zone is None:
+            master, linked = self._create_ddac_zone_group(pg.mkBrush(255, 0, 0, 40))
+            if master is None:
+                return None
+            self._gauge_clipboard_zone = master
+            self._gauge_clipboard_zone_linked = linked
+        return self._gauge_clipboard_zone
+    
+    def _ensure_gauge_copy_zone(self) -> Optional[pg.LinearRegionItem]:
+        if self._gauge_copy_zone is None:
+            master, linked = self._create_ddac_zone_group(pg.mkBrush(0, 200, 0, 40))
+            if master is None:
+                return None
+            self._gauge_copy_zone = master
+            self._gauge_copy_zone_linked = linked
+        return self._gauge_copy_zone
+    
     def _default_gauge_zone_range(self) -> Optional[Tuple[float, float]]:
         if self.RUN is None:
             return None
@@ -2452,10 +3139,9 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         end = start + dt
         return (start, end) if start <= end else (end, start)
 
-    def _get_gauge_selection_indices(self) -> List[int]:
+    def _get_gauge_selection_indices(self,zone) -> List[int]:
         if self.RUN is None:
             return []
-        zone = self._gauge_clipboard_zone
         if zone is None or not zone.isVisible():
             return []
         start, end = sorted(map(float, zone.getRegion()))
@@ -2489,12 +3175,14 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             self.text_box_msg.setText("No gauge model to copy.")
             return
         self._gauge_clipboard = copy.deepcopy(gauges)
-        zone = self._ensure_gauge_clipboard_zone()
+        zone = self._ensure_gauge_copy_zone()
         if zone is not None:
             default_range = self._default_gauge_zone_range()
             if default_range is not None:
                 zone.setRegion(default_range)
-            zone.setVisible(True)
+            self._set_ddac_zone_group_visible(
+                zone, self._gauge_copy_zone_linked, True
+            )
         self.text_box_msg.setText(f"Gauge model copied ({len(gauges)}).")
 
     def show_gauge_selection_zone(self) -> None:
@@ -2505,14 +3193,22 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             default_range = self._default_gauge_zone_range()
             if default_range is not None:
                 zone.setRegion(default_range)
-        zone.setVisible(True)
+        self._set_ddac_zone_group_visible(
+            zone, self._gauge_clipboard_zone_linked, True
+        )
         self.text_box_msg.setText("Zone de sélection active.")
 
     def hide_gauge_selection_zone(self) -> None:
         zone = self._gauge_clipboard_zone
         if zone is not None:
-            zone.setVisible(False)
-            self.text_box_msg.setText("Zone de sélection masquée.")
+            self._set_ddac_zone_group_visible(
+                zone, self._gauge_clipboard_zone_linked, False
+            )
+        if self._gauge_copy_zone is not None:
+            self._set_ddac_zone_group_visible(
+                self._gauge_copy_zone, self._gauge_copy_zone_linked, False
+            )
+        self.text_box_msg.setText("Zone de sélection masquée.")
 
     def paste_gauge_models_from_clipboard(self) -> None:
         if self.RUN is None:
@@ -2521,7 +3217,8 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         if not self._gauge_clipboard:
             self.text_box_msg.setText("No gauge model copied.")
             return
-        indices = self._get_gauge_selection_indices()
+        indices = self._get_gauge_selection_indices(self._gauge_copy_zone)
+
         if not indices:
             self.text_box_msg.setText("No spectrum in selection zone.")
             return
@@ -2569,7 +3266,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         if self.RUN is None:
             self.text_box_msg.setText("No RUN loaded.")
             return
-        indices = self._get_gauge_selection_indices()
+        indices = self._get_gauge_selection_indices(self._gauge_clipboard_zone)
         if not indices:
             self.text_box_msg.setText("No spectrum in selection zone.")
             return
@@ -2787,7 +3484,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         if update_listbox and gauge_index == self.index_jauge:
             self._replace_listbox_item(pic_index, label)
 
-    def _refresh_gauge_views(self, spectrum=None):
+    def _refresh_gauge_views(self, spectrum=None,skip_ui=False):
         spectrum = spectrum or self.Spectrum
         gauges = getattr(spectrum, "Gauges", []) or []
 
@@ -2798,7 +3495,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         self.J = [0 for _ in range(nb_j)]
         self.list_y_fit_start = [[] for _ in range(nb_j)]
         self.list_name_gauges = []
-
+        skip_ui
         self._clear_pic_fills()
         self.plot_pic_fit = [[] for _ in range(nb_j)]
         self.plot_pic_fit_curves = [[] for _ in range(nb_j)]
@@ -2926,7 +3623,8 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                 study = getattr(spec, "study", pd.DataFrame())
                 column_name = "P_" + name
                 if column_name in study.columns:
-                    p = float(study[column_name])
+                    series = study[column_name]
+                    p = float(series.iloc[0]) if not series.empty else 0
                     l_sigma_P[index].append(abs(p * 0.1 + 0.1))
                 else:
                     p = 0
@@ -3432,6 +4130,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             }
         self._cedx_gauge_series = gauge_series
         self._update_cedx_mean_curve()
+        self._update_analysis_from_cedx_data(run, n_J, l_P, l_t, gauge_indices)
 
         time_amp_arr = np.asarray(time_amp, dtype=float) if time_amp is not None else None
         amp_arr = np.asarray(amp, dtype=float) if amp is not None else None
@@ -3474,10 +4173,12 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             mean_curve=self._cedx_mean_curve_data,
         )
         self._refresh_gauge_library_if_needed()
+        self._refresh_analysis_from_run()
 
     def _update_cedx_plots_from_run(self, reset_legend=False):
         if self.RUN is None:
             return
+        ensure_analyse_dataframe(self.RUN)
         (
             l_P,
             l_sigma_P,
@@ -3494,6 +4195,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         Time = np.asarray(Time, dtype=float)
         self.time = Time
         self.spectre_number = spectre_number
+        self._update_ddac_multi_zone_range()
         self._update_cedx_plot_items(
             run=self.RUN,
             Time=Time,
@@ -3523,6 +4225,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         if type(objet_run) is CL.CED_DRX:
             print("PRINT CEDd objet_run", objet_run)
             self.RUN = objet_run
+            ensure_analyse_dataframe(self.RUN)
             try:
                 name_select = os.path.basename(self.RUN.CEDd_path)
             except:
@@ -3548,6 +4251,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             Time = np.asarray(Time, dtype=float)
             self.time = Time
             self.spectre_number = spectre_number
+            self._update_ddac_multi_zone_range()
             self._update_cedx_plot_items(
                 run=self.RUN,
                 Time=Time,
@@ -3561,15 +4265,11 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                 reset_legend=True,
             )
 
-            #print("LOAD id_select:",index,"list_id",self.list_index_file_CED_Load)
-            #self.axc2l2.clear()
-            #self.axc2l2=self.RUN.Spectra[0].Print(ax=#self.axc2l2)
-            #self.CLEAR_ALL()
-            #self.RUN=objet_run
             self.DRX_selector.clear()
             for i in range(len(self.RUN.Spectra)):
                 self.DRX_selector.addItem(f"drx_{i}")
-            self.index_spec=0
+            if self.index_spec > len(self.RUN.Spectra):
+                self.index_spec=0
             self.DRX_selector.setCurrentIndex(self.index_spec)
             self.bit_bypass=True
             self.f_Spectrum_Load()
@@ -3627,7 +4327,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         bypass = False
         light_clone = getattr(current_spec, "light_copy", None)
         if getattr(current_spec, "bit_fit", False):
-            logger.info("→ Référence directe du spectre RUN (bit_fit=True)")
+            #logger.info("→ Référence directe du spectre RUN (bit_fit=True)")
             self.Spectrum = current_spec
         else:
             cloned_spec = light_clone() if callable(light_clone) else copy.copy(current_spec)
@@ -3640,10 +4340,46 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                 self.Spectrum.model = getattr(previous_spectrum, "model", None)
                 bypass = True
             else:
-                logger.info("→ Remplacement du spectre courant par celui du RUN")
+                #logger.info("→ Remplacement du spectre courant par celui du RUN")
                 self.Spectrum = cloned_spec
 
         return bypass
+
+    def _refresh_gauge_state_no_ui(self, spectrum=None):
+        spectrum = spectrum or self.Spectrum
+        gauges = getattr(spectrum, "Gauges", []) or []
+        nb_j = len(gauges)
+
+        self.Nom_pic = [[] for _ in range(nb_j)]
+        self.list_text_pic = [[] for _ in range(nb_j)]
+        self.Param0 = [[] for _ in range(nb_j)]
+        self.J = [0 for _ in range(nb_j)]
+        self.list_y_fit_start = [[] for _ in range(nb_j)]
+
+        # baseline "fake" pour list_y_fit_start (pas d'objets graphiques)
+        for i, gauge in enumerate(gauges):
+            for pic in gauge.pics:
+                self.Nom_pic[i].append(pic.name)
+
+                # Source de vérité : Out_model() te donne [ctr, ampH, sigma, coef]
+                new_P0, _ = pic.Out_model()  # -> [ctr, ampH, sigma, coef_spe]
+                # On stocke aussi le model_fit comme avant
+                self.Param0[i].append(new_P0 + [pic.model_fit])
+
+                # list_y_fit_start sert parfois à réafficher; on la garde cohérente
+                params_f = pic.model.make_params()
+                y_plot = pic.model.eval(params_f, x=spectrum.wnb)
+                self.list_y_fit_start[i].append(y_plot)
+
+                self.J[i] += 1
+                self.list_text_pic[i].append(f"{pic.name}")
+
+            gauge.Update_model() #¥ pas sur que se sois utile 
+
+        # modèle total (comme dans _rebuild_fit_state)
+        if spectrum.model is None and gauges:
+            spectrum.model = sum((g.model for g in gauges[1:]), gauges[0].model)
+
 
     def _rebuild_fit_state(self,skip_ui=False):
         if getattr(self, "Spectrum", None) is None:
@@ -3714,12 +4450,16 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                     self.Spectrum.model = gauge.model
                 else:
                     self.Spectrum.model += gauge.model
-        if not skip_ui:
-            self._refresh_gauge_views()
-            self.Print_fit_start(skip_ui=skip_ui)
 
-        if hasattr(self, "plot_raw_spectrum"):
-            self._update_spectrum_overlay_data()
+        # ✅ IMPORTANT: reconstruire l'état fit même sans UI
+        if skip_ui:
+            self._refresh_gauge_state_no_ui(spectrum=self.Spectrum)
+        else:
+            self._refresh_gauge_views()
+            self.Print_fit_start()
+            if hasattr(self, "plot_raw_spectrum"):
+                self._update_spectrum_overlay_data()
+
 
     def _sync_filter_controls(self):
         if getattr(self, "Spectrum", None) is None:
@@ -3733,7 +4473,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         self.param_filtre_1_entry.setText(str(self.Spectrum.param_f[0]))
         self.param_filtre_2_entry.setText(str(self.Spectrum.param_f[1]))
         self.deg_baseline_entry.setValue(self.Spectrum.deg_baseline)
-        self.Baseline_spectrum()
+        self.Baseline_spectrum() #inutile car on charge la baselien est deja fait 
 
     def _select_first_gauge(self):
         if getattr(self, "Spectrum", None) is None:
@@ -3759,7 +4499,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         self._refresh_gauge_library_if_needed()
 
     def f_Spectrum_Load(self, item=None, Spectrum=None):  # - - - LOAD SPEC (r) - - - #
-        logger.info("DEBUT chargement du spectre")
+        #logger.info("DEBUT chargement du spectre")
 
         previous_spectrum = self.Spectrum
         nb_j_old = (
@@ -3767,21 +4507,19 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             if getattr(previous_spectrum, "Gauges", None)
             else 0
         )
-        logger.info("Nombre de jauges précédentes : %s", nb_j_old)
+        #logger.info("Nombre de jauges précédentes : %s", nb_j_old)
 
         bypass = False
         if Spectrum is None:
-            logger.debug("Aucun spectre passé en argument")
+            #logger.debug("Aucun spectre passé en argument")
             if not self._save_current_spectrum_to_run():
                 return
 
             if not getattr(self, "bit_bypass", False):
                 selected_index = self.DRX_selector.currentIndex()
-                logger.debug("Index sélectionné dans DRX_selector : %s", selected_index)
+                #logger.debug("Index sélectionné dans DRX_selector : %s", selected_index)
                 if selected_index != -1 and selected_index != self.index_spec:
-                    logger.debug(
-                        "Changement index_spec : %s → %s", self.index_spec, selected_index
-                    )
+                    #logger.debug("Changement index_spec : %s → %s", self.index_spec, selected_index)
                     self.index_spec = selected_index
                     self.DRX_selector.setCurrentIndex(self.index_spec)
 
@@ -3792,7 +4530,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             except Exception:
                 return
         else:
-            logger.info("Un spectre a été passé en argument → mise à jour directe")
+            #logger.info("Un spectre a été passé en argument → mise à jour directe")
             self.Spectrum = Spectrum
             bypass = True
             self.bit_bypass = False
@@ -3801,8 +4539,9 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         self._rebuild_fit_state()
         self._sync_filter_controls()
         self._select_first_gauge()
+        self._update_find_peaks_exclusion_region()
 
-        logger.info("FIN chargement du spectre")
+        #logger.info("FIN chargement du spectre")
 
     def f_Gauge_Load(self): # - - - SELECET JAUGE - - -#
         required_attrs = (
@@ -3997,10 +4736,12 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         self.plot_pic_fit = []
         self.plot_pic_fit_curves = []
 
+        self.find_peaks_exclusion_line = None
+
     def CLEAR_ALL(self,empty=False): 
         self.gauge_controller.clear_var_widgets()
-        self.index_spec=0
-        self.DRX_selector.setCurrentIndex(self.index_spec)
+        #self.index_spec=0
+        #self.DRX_selector.setCurrentIndex(self.index_spec)
        
 
         if (type(self.Spectrum) is CL.Spectre) and (empty==False):
@@ -4063,14 +4804,25 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         self.bit_bypass=False
 #########################################################################################################################################################################################
 #? COMMANDE SAVE
+    def mask_spectrum_values(self,x_values, y_values, theta2_range):
+        y_mask=[]
+        last_valid = None
+        for yi, xi in zip(y_values, x_values):
+            if any(a <= xi <= b for a, b in theta2_range):
+                last_valid = yi
+                y_mask.append(yi)
+            else:
+                y_mask.append(last_valid if last_valid is not None else 0)
+        return np.array(y_mask)
+    
     def try_find_peak(self):
         x = self.Spectrum.wnb
         y = copy.deepcopy(self.Spectrum.y_corr)
 
         # Lire les valeurs des entrées Qt
-        height = self.height_entry.value()
+        height = self._get_peak_height_fraction()
         distance = self.distance_entry.value()
-        prominence = self.prominence_entry.value()
+        prominence = self._get_peak_prominence_fraction()
         width = self.width_entry.value()
         number_peak_max = self.nb_peak_entry.value() if hasattr(self, "nb_peak_entry") else 10
 
@@ -4181,7 +4933,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         if self.jungfrau_mode !="oscillo":
             try:
                 scan_f_name=self.listbox_file.currentItem().text()
-                h5name=os.path.dirname(self.loaded_file_DRX).replace('/'+scan_f_name,"").split("/")[-1] + '.h5'
+                h5name=os.path.dirname(self.loaded_file_DRX).replace('\\'+scan_f_name,"").split("/")[-1] + '.h5'
                 path_file_h5=os.path.dirname(self.loaded_file_DRX).replace(scan_f_name,"") +h5name 
                 
                 scan_lbl = str(int(scan_f_name.replace("scan", ""))) + ".1"
@@ -4230,6 +4982,158 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         print(f"CED vide créé avec {len(CEDX.Spectra)} spectres. Pas de recherche de compos effectué.")
         self.f_CEDX_Load(objet_run=self.RUN, item=None)
 
+
+
+    def _match_peaks_expected_observed(self, expected, observed, *, delta=0.15):
+        expected = np.asarray(expected, dtype=float)
+        observed = np.asarray(observed, dtype=float)
+
+        if expected.size == 0:
+            return {}, set(), False, int(observed.size), 0
+        if observed.size == 0:
+            return {}, set(), False, 0, int(expected.size)
+
+        # tri + garder indices d’origine
+        e_order = np.argsort(expected)
+        o_order = np.argsort(observed)
+        e_sorted = expected[e_order]
+        o_sorted = observed[o_order]
+
+        match = {}
+        used_o_sorted = set()
+        fusion = False  # ici restera False car on force l’unicité
+
+        oi = 0
+        for epos, xe in enumerate(e_sorted):
+            # avancer oi tant que o < xe - delta
+            while oi < len(o_sorted) and o_sorted[oi] < xe - delta:
+                oi += 1
+
+            # candidats dans [xe-delta, xe+delta]
+            cand = []
+            oj = oi
+            while oj < len(o_sorted) and o_sorted[oj] <= xe + delta:
+                if oj not in used_o_sorted:
+                    cand.append(oj)
+                oj += 1
+
+            if not cand:
+                continue
+
+            # choisir le plus proche
+            best = min(cand, key=lambda jj: abs(o_sorted[jj] - xe))
+            used_o_sorted.add(best)
+
+            # indices originaux
+            ei = int(e_order[epos])
+            oj_orig = int(o_order[best])
+            match[ei] = oj_orig
+
+        used_o = set(match.values())
+        lost_count = int(expected.size - len(match))
+        new_count = int(observed.size - len(used_o))
+        return match, used_o, fusion, new_count, lost_count
+
+
+    def _update_gauges_from_matched_peaks(self, prev_gauges, match_e2o, observed_peaks, *,
+                                      x_grid=None, y_signal=None):
+        new_gauges = copy.deepcopy(prev_gauges)
+
+        # liste linéaire des pics DRX dans le même ordre
+        drx_pics = []
+        for g in new_gauges:
+            if getattr(g, "name_spe", "") != "DRX":
+                continue
+            for p in getattr(g, "pics", []):
+                drx_pics.append((g, p))
+
+        observed_peaks = np.asarray(observed_peaks, dtype=float)
+        if x_grid is not None:
+            x_grid = np.asarray(x_grid, dtype=float)
+        if y_signal is not None:
+            y_signal = np.asarray(y_signal, dtype=float)
+
+        for ei, oj in match_e2o.items():
+            if not (0 <= ei < len(drx_pics)): 
+                continue
+            if not (0 <= oj < len(observed_peaks)):
+                continue
+
+            g, p = drx_pics[ei]
+            xpk = float(observed_peaks[oj])
+            p.ctr[0] = xpk
+
+            # ✅ amplitude robuste = relue dans le signal
+            if (x_grid is not None) and (y_signal is not None) and hasattr(p, "ampH") and len(p.ampH) > 0:
+                m = int(np.argmin(np.abs(x_grid - xpk)))
+                p.ampH[0] = round(float(y_signal[m]), 3)
+
+            try:
+                p.Update()  # cohérence bornes/hints
+            except Exception:
+                pass
+
+        # rebuild
+        for g in new_gauges:
+            if getattr(g, "name_spe", "") != "DRX":
+                continue
+            try:
+                g.Update_model()
+            except Exception:
+                pass
+            g.bit_fit = True
+            try:
+                g.lamb_fit = g.pics[0].ctr[0]
+            except Exception:
+                pass
+
+        return new_gauges
+
+    def _try_accept_continuity_from_findpeaks(
+        self, X, prev_gauges, detected_peaks, result,
+        *, delta_match=0.15, lost_threshold=0.35, height_min_rel=0.0
+    ):
+        """
+        Retourne (ok, new_gauges, info)
+        """
+        # expected centres
+        expected = []
+        for g in prev_gauges or []:
+            if getattr(g, "name_spe", "") != "DRX":
+                continue
+            for p in getattr(g, "pics", []):
+                try:
+                    expected.append(float(p.ctr[0]))
+                except Exception:
+                    pass
+
+        observed = np.asarray(detected_peaks, dtype=float)
+
+        match, used_o, fusion, new_count, lost_count = self._match_peaks_expected_observed(
+            expected, observed, delta=delta_match
+        )
+
+        lost_fraction = 1.0 if len(expected) == 0 else (lost_count / max(1, len(expected)))
+        ok = (lost_fraction <= float(lost_threshold)) and (new_count == 0) and (not fusion)
+
+        info = {
+            "n_expected": int(len(expected)),
+            "n_observed": int(len(observed)),
+            "lost": int(lost_count),
+            "new": int(new_count),
+            "fusion": bool(fusion),
+            "lost_fraction": float(lost_fraction),
+        }
+
+        if not ok:
+            return False, None, info
+
+        new_gauges = self._update_gauges_from_matched_peaks(
+            prev_gauges, match, observed,
+            x_grid=X.wnb, y_signal=X.y_corr   # <= y_mask ou X.y_corr selon ce que tu veux
+        )
+        return True, new_gauges, info
+
     def _CEDX_auto_compo(self):
         if not hasattr(self, "RUN") or self.RUN is None:
             print("Aucun RUN chargé.")
@@ -4249,9 +5153,9 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                 return
 
             # Paramètres find_peaks
-            height = self.height_entry.value()
+            height = self._get_peak_height_fraction()
             distance = self.distance_entry.value()
-            prominence = self.prominence_entry.value()
+            prominence = self._get_peak_prominence_fraction()
             width = self.width_entry.value()
             number_peak_max = self.nb_peak_entry.value()
 
@@ -4297,14 +5201,20 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             QApplication.processEvents()
 
         try:
+            ok=False
             for step, i in enumerate(spectra_indices, start=1):
                 if progress_dialog is not None:
                     if progress_dialog.wasCanceled():
                         print("Annulé par l'utilisateur !")
                         break
-                    progress_dialog.setLabelText(
-                        f"bibDRX:{[elem for elem in self.ClassDRX.Bibli_elements]} \n Spectre {i + 1} ({step}/{len(spectra_indices)}) \n Compo de départ : {[(ind,p) for ind,p in best_ind] if best_ind is not None else None} \n P{[last_pressure * 0.75 - 2, last_pressure * 1.25 + 2] if last_pressure is not None else [-0.5, p_range] }"
-                    )
+                    if not ok:
+                        progress_dialog.setLabelText(
+                            f"bibDRX:{[elem for elem in self.ClassDRX.Bibli_elements]} \n Spectre {i + 1} ({step}/{len(spectra_indices)}) \n Compo de départ : {[(ind,p) for ind,p in best_ind] if best_ind is not None else None} \n P $\in$ {(round(last_pressure * 0.75 - 2,1) , round(last_pressure * 1.25 + 2,1)) if last_pressure is not None else (-0.5, p_range) }"
+                        )
+                    else:
+                        progress_dialog.setLabelText(
+                            f"bibDRX:{[elem for elem in self.ClassDRX.Bibli_elements]} \n Spectre {i + 1} ({step}/{len(spectra_indices)}) \n skip compo: {[(ind,p) for ind,p in best_ind] if best_ind is not None else None}"
+                        )
                     QApplication.processEvents()
 
                 X = self.RUN.Spectra[i]
@@ -4329,8 +5239,10 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                         y_mask.append(yi)
                     else:
                         y_mask.append(last_valid if last_valid is not None else 0)
-
+                # --- tentative continuité temporelle (si on a déjà une solution précédente) ---
+                use_tracking = (best_ind is not None) and (i > index_start) and self.RUN.Spectra[i-1].Gauges
                 try:
+                    # 1) find peaks (une seule fois)
                     _, detected_peaks, result = self.ClassDRX.F_Find_peaks(
                         X.wnb, y_mask,
                         height=height*max(y_mask),
@@ -4339,11 +5251,29 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                         width=width,
                         number_peak_max=number_peak_max
                     )
-                    #print(f"[DRX {i}] Peaks found: {[f'th2:{pic} I:{i}' for pic,i in zip(detected_peaks,result['peak_heights'])]}")
-
-                except Exception as e:
-                    print("ERROR find peak :",e)
-                    break
+                except  Exception  as e:
+                    print("ERROR find pea k",e)
+                    continue
+                # 2) continuité depuis ces peaks
+                if use_tracking:
+                    prev_gauges = self.RUN.Spectra[i-1].Gauges
+                    ok, tracked_gauges, info = self._try_accept_continuity_from_findpeaks(
+                        X, prev_gauges, detected_peaks, result,
+                        delta_match=0.15,
+                        lost_threshold=0.1,
+                        height_min_rel=height,   # tu peux mettre 0.02 si tu veux ignorer des micro pics
+                    )
+                    if ok:
+                        X.Gauges = tracked_gauges
+                        X.bit_fit = True
+                        X.Calcul_study(mini=True)
+                        best_ind = [(G.name, G.P) for G in tracked_gauges]
+                        last_pressure = np.mean([g.P for g in tracked_gauges])
+                        # summary + continue
+                        progress_dialog.setValue(step)
+                        QApplication.processEvents()
+                        continue
+                
                 if not skip_ui:
                     if hasattr(self, "peak_plot_item") and self.peak_plot_item is not None:
                         self.ax_spectrum.removeItem(self.peak_plot_item)
@@ -4834,17 +5764,72 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             self._safe_remove_plot_item(piezo_axis, self.plot_piezo)
             self.plot_piezo = None
 
+    def _get_dpdt_mean_points(self) -> int:
+        """Return the number of points used for the mean dP/dt curve."""
+        spinbox = getattr(self, "spinbox_dpdt_points", None)
+        try:
+            value = int(spinbox.value()) if spinbox is not None else 1
+        except Exception:
+            value = 1
+        return max(1, value)
+    
+    def _get_dpdt_mean_smooth(self) -> int:
+        """Return the number of points used for the mean dP/dt curve."""
+        spinbox = getattr(self, "spinbox_dpdt_smooth", None)
+        try:
+            value = int(spinbox.value()) if spinbox is not None else 0
+        except Exception:
+            value = 0
+        return max(0, value)
+    
 
+    def _local_linear_slope(self, t: np.ndarray, p: np.ndarray, half_window: int) -> np.ndarray:
+        """
+        Derivative dP/dt estimated by local linear regression over a window +/- half_window.
+        Returns an array same size as t (NaN at edges if window doesn't fit).
+        """
+        n = len(t)
+        if n < 3:
+            return np.asarray([])
 
-    def _compute_mean_dp_curve(self, gauge_series, smooth=1, n_points=500):
-        """Compute dP/dt by extrapolating the mean pressure path with a spline fit."""
+        hw = int(max(1, half_window))
+        out = np.full(n, np.nan, dtype=float)
+
+        for i in range(n):
+            lo = max(0, i - hw)
+            hi = min(n, i + hw + 1)
+            if hi - lo < 3:
+                continue
+
+            tt = t[lo:hi]
+            pp = p[lo:hi]
+
+            # sécurité si temps constants / mal triés
+            t0 = tt.mean()
+            denom = np.sum((tt - t0) ** 2)
+            if denom <= 0:
+                continue
+
+            # pente = cov(t,p)/var(t)
+            out[i] = np.sum((tt - t0) * (pp - pp.mean())) / denom
+
+        return out
+
+    def _moving_average(self, y: np.ndarray, win: int) -> np.ndarray:
+        win = int(max(1, win))
+        if win == 1:
+            return y
+        kernel = np.ones(win, dtype=float) / win
+        # mode='same' garde la longueur
+        return np.convolve(y, kernel, mode='same')
+
+    def _compute_mean_dp_curve(self, gauge_series):
         if not gauge_series:
             return np.asarray([]), np.asarray([])
 
-        aggregated_pressures: Dict[int, List[float]] = defaultdict(list)
-        time_by_index: Dict[int, float] = {}
+        aggregated_pressures = defaultdict(list)
+        time_by_index = {}
 
-        # Collecte des pressions et temps par index de spectre
         for series in gauge_series.values():
             pressures = series.get("pressure", []) or []
             times = series.get("time", []) or []
@@ -4856,6 +5841,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                     continue
                 spec_index = indices[pos]
                 aggregated_pressures[spec_index].append(float(pressure))
+
                 if pos < len(times):
                     time_value = times[pos]
                 else:
@@ -4867,8 +5853,8 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         if not aggregated_pressures:
             return np.asarray([]), np.asarray([])
 
-        time_values: List[float] = []
-        mean_pressures: List[float] = []
+        time_values = []
+        mean_pressures = []
         for spec_index in sorted(aggregated_pressures):
             vals = [v for v in aggregated_pressures[spec_index] if not np.isnan(v)]
             if not vals:
@@ -4876,21 +5862,29 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             time_values.append(time_by_index.get(spec_index, float(spec_index)))
             mean_pressures.append(np.mean(vals))
 
-        # Sécurité : trop peu de points pour spline
         if len(mean_pressures) < 3:
             return np.asarray(time_values, dtype=float), np.asarray([])
 
-        time_array = np.asarray(time_values, dtype=float)
-        mean_array = np.asarray(mean_pressures, dtype=float)
+        t = np.asarray(time_values, dtype=float)
+        p = np.asarray(mean_pressures, dtype=float)
 
-        # Fit spline lissée (smooth=0 => interpolation exacte)
-        spline = UnivariateSpline(time_array, mean_array, s=smooth)
+        # IMPORTANT : trier par temps si jamais ça arrive désordonné
+        order = np.argsort(t)
+        t = t[order]
+        p = p[order]
 
-        # Génération d'une grille régulière de temps
-        t_new = np.linspace(time_array.min(), time_array.max(), n_points)
-        dpdt = spline.derivative()(t_new)
+        # --- LISSAGE DE LA PRESSION MOYENNE ---
+        smooth_win = self._get_dpdt_mean_smooth()  # 0 ou 1 => pas de lissage
+        if smooth_win > 1:
+            p = self._moving_average(p, smooth_win)
 
-        return t_new, dpdt
+        # --- DÉRIVÉE LOCALE ---
+        half_window = self._get_dpdt_mean_points()
+        dpdt = self._local_linear_slope(t, p, half_window=half_window)
+
+        mask = np.isfinite(dpdt)
+        return t[mask], dpdt[mask]
+
 
     def _update_cedx_mean_curve(self):
         """Update the average dP/dt curve plotted on the derivative axis."""
@@ -4909,6 +5903,8 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                     name="Moyenne dP/dt",
                 )
                 self.ax_dPdt.addItem(self._cedx_mean_curve_item)
+            else:
+                self._cedx_mean_curve_item.setData(x_mean, y_mean)
         else:
             self._cedx_mean_curve_data = (np.asarray([]), np.asarray([]))
             if self._cedx_mean_curve_item is not None:
@@ -4919,6 +5915,30 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                         pass
                 self._safe_remove_plot_item(self.ax_dPdt, self._cedx_mean_curve_item)
                 self._cedx_mean_curve_item = None
+    
+    def _on_dpdt_points_changed(self, _value: int) -> None:
+        """Refresh the mean dP/dt curve when the sampling changes."""
+        self._update_cedx_mean_curve()
+
+        pressure_series = [
+            np.asarray(series.get("pressure", []), dtype=float)
+            for series in self._cedx_gauge_series.values()
+        ]
+        deriv_series = [
+            np.asarray(series.get("deriv", []), dtype=float)
+            for series in self._cedx_gauge_series.values()
+        ]
+        time_attr = getattr(self, "time", None)
+        time_display = np.asarray(time_attr, dtype=float) if time_attr is not None else np.asarray([])
+
+        self._reset_cedx_plot_limits(
+            time_display,
+            time_display,
+            pressure_series,
+            deriv_series,
+            theta_range=self._cedx_theta_bounds,
+            mean_curve=self._cedx_mean_curve_data,
+        )
 
     def _reset_cedx_plot_limits(
         self,

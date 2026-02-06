@@ -520,6 +520,13 @@ class DRX():
         theta2_inf, theta2_sup = min(a for a, b in theta2_range), max(b for a, b in theta2_range)
         detected_peaks = np.array([pt for pt in detected_peaks if any(a <= pt <= b for a, b in theta2_range)])
         limite_ecart_pression = max_ecart_pressure / 5
+        
+        def element_root(name: str) -> str:
+            try:
+                return str(name).split("_", 1)[0]
+            except Exception:
+                return str(name)
+
 
         def extract_best_indiv(best_ind):
             # ---- reconstruire tous les pics théoriques de l'individu ----
@@ -647,6 +654,32 @@ class DRX():
             penalite = sum(1.5 * weights[idx] for idx in range(len(weights)) if idx not in th_indices_matches)
 
             score_total = (score_distance + score_diff + score_pression + penalite) * coef_element
+            if prev_roots:
+                cand_roots = {element_root(elem) for elem, _ in individual}
+                missing_roots = prev_roots - cand_roots     # racines perdues
+                new_roots = cand_roots - prev_roots         # nouvelles racines
+
+                # facteur de relâchement si peu de pics observés
+                # (moins il y a de pics, plus on autorise des disparitions)
+                n_dp = int(len(detected_peaks))
+                relax = min(n_dp*1.5,10)
+    
+
+                # poids : à ajuster
+                w_missing = 2.0   # pénalité racine perdue (forte)
+                w_new     = 1.0   # pénalité racine nouvelle (plus faible)
+
+                score_prior_roots = relax * (w_missing * len(missing_roots) + w_new * len(new_roots))
+
+                # bonus léger si on conserve au moins une racine (stabilise Sn + H2O vs “Sn seul”)
+                keep_count = len(prev_roots & cand_roots)
+                score_prior_roots -= relax * 0.3 * keep_count
+
+                # optionnel : favoriser le même nombre d'éléments que précédemment (très léger)
+                score_prior_roots += relax * 0.2 * abs(len(cand_roots) - len(prev_roots))
+
+                score_total += score_prior_roots
+
             return (score_total,)
 
         # ---- init plus léger ----
@@ -739,6 +772,12 @@ class DRX():
             ind1[cxpoint1:cxpoint2], ind2[cxpoint1:cxpoint2] = add_in1, add_in2
 
             return ind1, ind2
+
+        prev_names = []
+        prev_roots = set()
+        if indiv_start is not None:
+            prev_names = [str(n) for n, _ in indiv_start]
+            prev_roots = {element_root(n) for n in prev_names}
 
         # ---- DEAP setup ----
         _ensure_deap_creator()
@@ -2423,7 +2462,6 @@ note_version="CL_FD_Update:"
 
 
 print(note_version+ last_modified_date)
-
 
 
 

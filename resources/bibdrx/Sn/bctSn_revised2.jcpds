@@ -1,5 +1,5 @@
-VERSION:   4
-COMMENT:  Sn Gamma, I4/mmm
+VERSION:   4 , I4/mmm
+COMMENT:  Sn Gamma /T[0,1000]/P[9,100]/Z=51 
 K0:       62.0
 K0P:      4.0
 DK0DT:    4.88

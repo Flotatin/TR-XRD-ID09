@@ -216,11 +216,20 @@ class FindPeaksWidget(QWidget):
         layout.addWidget(name)
         main.height_entry = QDoubleSpinBox()
         main.height_entry.setDecimals(2)
-        main.height_entry.setSingleStep(0.01)
-        main.height_entry.setRange(0, 1)
-        main.height_entry.setValue(0.15)
+        main.height_entry.setSingleStep(0.1)
+        main.height_entry.setRange(0, 100)
+        main.height_entry.setValue(15)
+        main.height_entry.setSuffix(" %")
         main.height_entry.valueChanged.connect(main.setFocus)
-        layout.addLayout(creat_spin_label(main.height_entry, "", "%Imax"))
+        main.height_entry.valueChanged.connect(main._update_find_peaks_exclusion_region)
+        layout.addLayout(creat_spin_label(main.height_entry, "", "% Imax"))
+
+        main.print_exclusion_checkbox = QCheckBox("exclusion line")
+        main.print_exclusion_checkbox.setChecked(False)
+        main.print_exclusion_checkbox.toggled.connect(
+            main.toggle_find_peaks_exclusion_region
+        )
+        layout.addWidget(main.print_exclusion_checkbox)
         
         
         name = QLabel("distance")
@@ -237,11 +246,12 @@ class FindPeaksWidget(QWidget):
         layout.addWidget(name)
         main.prominence_entry = QDoubleSpinBox()
         main.prominence_entry.setDecimals(2)
-        main.prominence_entry.setSingleStep(0.01)
-        main.prominence_entry.setRange(0, 1)
-        main.prominence_entry.setValue(0.15)
+        main.prominence_entry.setSingleStep(0.1)
+        main.prominence_entry.setRange(0, 100)
+        main.prominence_entry.setValue(5)
+        main.prominence_entry.setSuffix(" %")
         main.prominence_entry.valueChanged.connect(main.setFocus)
-        layout.addLayout(creat_spin_label(main.prominence_entry, "", "%Imax"))
+        layout.addLayout(creat_spin_label(main.prominence_entry, "", "% Imax"))
 
         name = QLabel("width")
         layout.addWidget(name)
@@ -317,10 +327,16 @@ class FitSelectWidget(QWidget):
         main.remove_btn.setEnabled(False)
         layout.addWidget(main.remove_btn)
         
-        main.show_find_peaks_zones_check = QCheckBox("print")
-        main.show_find_peaks_zones_check.setChecked(False)
-        main.show_find_peaks_zones_check.toggled.connect(main.set_find_peaks_zones_visibility)
-        layout.addWidget(main.show_find_peaks_zones_check)
+        main.multi_spec_toolbar = QToolBar()
+        main.multi_spec_action = main.multi_spec_toolbar.addAction("Multi")
+        main.multi_spec_action.setCheckable(True)
+        main.multi_spec_action.setChecked(False)
+        main.multi_spec_action.toggled.connect(main.set_ddac_multi_zone_visibility)
+        main.spec_zone_action = main.multi_spec_toolbar.addAction("Spec")
+        main.spec_zone_action.setCheckable(True)
+        main.spec_zone_action.setChecked(False)
+        main.spec_zone_action.toggled.connect(main.set_find_peaks_zones_visibility)
+        layout.addWidget(main.multi_spec_toolbar)
 
 
         main.index_start_entry = QSpinBox()
