@@ -166,6 +166,15 @@ file_variables = text_dir / "Variables.txt"
 folder_Bib_DRX = paths.get_bibdrx_dir(require=False)
 
 from cedapp.drx import Calibration
+from cedapp.drx.batch import (
+    AutoCompoSettings,
+    BatchRange,
+    build_batch_range,
+    mask_spectrum_values,
+    resolve_theta2_range,
+)
+from cedapp.drx.fit import FitContext, select_fit_region
+from cedapp.drx.ui_adapters import update_progress_dialog
 
 from cedapp.drx import CL_FD_Update as CL
 from cedapp.drx.pic import Pics
@@ -410,6 +419,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
 #? Param treatement section
 
         self._build_tools_panel()
+        self._init_batch_caches()
 
 #? text box section
         self._build_message_label()
@@ -2649,8 +2659,10 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             self.Spectrum.Calcul_study(mini=True)
             self.text_box_msg.setText('BAD FIT r^2 INCREAS')
 
-    def FIT_lmfitVScurvfit(self,skip_ui=False):
+    def FIT_lmfitVScurvfit(self, skip_ui=False, fit_context: Optional[FitContext] = None):
         """Fit avec comparaison lmfit vs curve_fit"""
+        fit_context = fit_context or self._get_fit_context(skip_ui)
+        skip_ui = fit_context.skip_ui_update
         save_jauge, save_pic = self.index_jauge, self.index_pic_select
         self.Param_FIT, list_F, initial_guess = [], [], []
         bounds_min, bounds_max = [], []
@@ -2665,9 +2677,12 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                 x_max = max(x_max, float(ctr) + float(sigma) * 5)
 
                 gauge.pics[i].Update(
-                    ctr=float(ctr), ampH=float(ampH), coef_spe=coef_spe,
-                    sigma=float(sigma), model_fit=model_fit,
-                    inter=self.get_fit_variation()
+                    ctr=float(ctr),
+                    ampH=float(ampH),
+                    coef_spe=coef_spe,
+                    sigma=float(sigma),
+                    model_fit=model_fit,
+                    inter=fit_context.fit_variation,
                 )
 
                 list_F.append(gauge.pics[i].f_model)
@@ -2694,21 +2709,22 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
 
         # Sélection zone spectrale
         self.Spectrum.Data_treatement()
-        if self.zone_spectrum_box.isChecked():
-            self.Spectrum.indexX = np.where((self.Spectrum.wnb >= x_min) & (self.Spectrum.wnb <= x_max))[0]
-            x_sub = self.Spectrum.wnb[self.Spectrum.indexX]
-            y_sub, blfit = self.Spectrum.y_corr[self.Spectrum.indexX], self.Spectrum.blfit[self.Spectrum.indexX]
-        elif self.X_e[0] is not None and self.X_s[0] is not None and self.Spectrum.indexX is not None:
-            self.Zone_fit[0] = np.where((self.Spectrum.wnb >= self.X_s[0]) & (self.Spectrum.wnb <= self.X_e[0]))[0]
-            x_sub, self.Spectrum.indexX = self.Spectrum.wnb[self.Zone_fit[0]], self.Zone_fit[0]
-            for gauge in self.Spectrum.Gauges:
-                gauge.indexX = self.Zone_fit[0]
-            y_sub, blfit = self.Spectrum.y_corr[self.Spectrum.indexX], self.Spectrum.blfit[self.Spectrum.indexX]
-        else:
-            x_sub, y_sub, blfit = self.Spectrum.wnb, self.Spectrum.y_corr, self.Spectrum.blfit
+        x_s = self.X_s[0] if self.X_s else None
+        x_e = self.X_e[0] if self.X_e else None
+        x_sub, y_sub, blfit, zone_fit = select_fit_region(
+            self.Spectrum,
+            self.Spectrum.Gauges,
+            fit_context.use_zone_spectrum,
+            x_min,
+            x_max,
+            x_s,
+            x_e,
+        )
+        if zone_fit is not None:
+            self.Zone_fit[0] = zone_fit
 
         # Si lmfit demandé -> préfit
-        if self.vslmfit.isChecked():
+        if fit_context.use_lmfit_prefit:
             self.Spectrum.FIT()
             for i, gauge in enumerate(self.Spectrum.Gauges):
                 for j, p in enumerate(gauge.pics):
@@ -2760,7 +2776,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
 
         # Interaction validation
         go = True
-        if not self.bit_bypass:
+        if not self.bit_bypass and not skip_ui:
             msg_box = QMessageBox(self)
             msg_box.setWindowTitle("CURVE FIT DONE")
             msg_box.setText(text_fit + '\n Save fit Press "v" Cancel Press "c"')
@@ -2779,11 +2795,38 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
 
         # Post-traitement
         if go and best:
-            self._apply_best_fit(params, params_sigma, fit, x_sub, y_sub, blfit, save_jauge, save_pic,skip_ui=skip_ui)
+            self._apply_best_fit(
+                params,
+                params_sigma,
+                fit,
+                x_sub,
+                y_sub,
+                blfit,
+                save_jauge,
+                save_pic,
+                fit_context.fit_variation,
+                skip_ui=skip_ui,
+            )
         else:
-            self._apply_bad_fit(save_jauge,skip_ui=skip_ui)
+            self._apply_bad_fit(
+                save_jauge,
+                use_lmfit_prefit=fit_context.use_lmfit_prefit,
+                skip_ui=skip_ui,
+            )
 
-    def _apply_best_fit(self, params, params_sigma, fit, x_sub, y_sub, blfit, save_jauge, save_pic,skip_ui=False):
+    def _apply_best_fit(
+        self,
+        params,
+        params_sigma,
+        fit,
+        x_sub,
+        y_sub,
+        blfit,
+        save_jauge,
+        save_pic,
+        fit_variation: float,
+        skip_ui=False,
+    ):
         """Applique les résultats quand le fit est validé et meilleur que l'existant"""
         if not skip_ui:
             self.plot_curv_fit.setData([], [])
@@ -2821,7 +2864,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                     ampH=float(self.Param0[i][j][1]),
                     coef_spe=self.Param0[i][j][3],
                     sigma=float(self.Param0[i][j][2]),
-                    inter=self.get_fit_variation()
+                    inter=fit_variation,
                 )
                 params_f = p.model.make_params()
                 y_plot = p.model.eval(params_f, x=self.Spectrum.wnb)
@@ -2859,7 +2902,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             self.f_Gauge_Load()
             self.Print_fit_start()
 
-    def _apply_bad_fit(self, save_jauge,skip_ui=False):
+    def _apply_bad_fit(self, save_jauge, use_lmfit_prefit: bool, skip_ui=False):
         """Applique les résultats si le fit est rejeté ou moins bon"""
         if not skip_ui:
             self.plot_curv_fit.setData([], [])
@@ -2867,7 +2910,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         self.bit_fit_T = True
         for i, gauge in enumerate(self.Spectrum.Gauges):
             gauge.bit_fit = True
-            if self.vslmfit.isChecked():
+            if use_lmfit_prefit:
                 for j, p in enumerate(gauge.pics):
                     y_plot = self.list_y_fit_start[i][j]
                     new_P0, _ = p.Out_model()
@@ -2990,7 +3033,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                 "Ajustement des spectres en cours...",
                 "STOP",
                 0,
-                total_steps,
+                batch_range.total_steps,
                 self,
             )
             progress_dialog.setWindowModality(Qt.WindowModal)
@@ -3000,8 +3043,12 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             QApplication.processEvents()
 
         try:
-            for step, i in enumerate(range(index_start, index_stop), start=1):
+            for step, i in enumerate(batch_range.indices, start=1):
                 if progress_dialog is not None:
+                    update_progress_dialog(
+                        progress_dialog,
+                        f"Spectre {i + 1} ({step}/{batch_range.total_steps})",
+                    )
                     if progress_dialog.wasCanceled():
                         break
                     progress_dialog.setLabelText(f"Spectre {i + 1} ({step}/{total_steps})")
@@ -3039,7 +3086,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         finally:
             if progress_dialog is not None:
                 if not progress_dialog.wasCanceled():
-                    progress_dialog.setValue(total_steps)
+                    progress_dialog.setValue(batch_range.total_steps)
                 progress_dialog.close()
 
         # Recharge spectre initial + refresh UI
@@ -4437,11 +4484,12 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                         self.ax_spectrum.addItem(self.Zspec1)
                         self.ax_spectrum.addItem(self.Zspec2)
 
-                    pg.PlotCurveItem([self.Spectrum.wnb[0], self.X_s[i]], [yM, yM])
-                    pg.PlotCurveItem([self.X_e[i], self.Spectrum.wnb[-1]], [yM, yM])
-                    pg.PlotCurveItem(
-                        self.Spectrum.wnb, np.full_like(self.Spectrum.wnb, ym)
-                    )
+                    if not skip_ui:
+                        pg.PlotCurveItem([self.Spectrum.wnb[0], self.X_s[i]], [yM, yM])
+                        pg.PlotCurveItem([self.X_e[i], self.Spectrum.wnb[-1]], [yM, yM])
+                        pg.PlotCurveItem(
+                            self.Spectrum.wnb, np.full_like(self.Spectrum.wnb, ym)
+                        )
 
         if self.Spectrum.model is None and gauges:
             for j, gauge in enumerate(gauges):
@@ -4817,7 +4865,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
     
     def try_find_peak(self):
         x = self.Spectrum.wnb
-        y = copy.deepcopy(self.Spectrum.y_corr)
+        y = self.Spectrum.y_corr
 
         # Lire les valeurs des entrées Qt
         height = self._get_peak_height_fraction()
@@ -4828,14 +4876,8 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
 
 
         theta2_range = self.spectrum_controller.update_theta2_range()
-        y_mask = []
-        last_valid = None
-        for yi, xi in zip(y, x):
-            if any(a <= xi <= b for a, b in theta2_range):
-                last_valid = yi
-                y_mask.append(yi)
-            else:
-                y_mask.append(last_valid if last_valid is not None else 0)
+        self._theta2_range_cache = theta2_range
+        y_mask = mask_spectrum_values(x, y, theta2_range)
         
         # Appel de la fonction de détection
         _, peak_x, result = self.ClassDRX.F_Find_peaks(
@@ -5178,22 +5220,22 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         # Récupération des Gauges précédents si disponibles
         theta_limits = list(self.calib.theta_range) if self.calib and getattr(self.calib, "theta_range", None) else list(DEFAULT_THETA_RANGE)
 
-        if index_start > 0 and self.RUN.Spectra[index_start - 1].Gauges:
-            best_ind = [(G.name,G.P) for G in self.RUN.Spectra[index_start - 1].Gauges]#[(G.name,G.P,[pic for pic, _, _, _, _ in G.Element_ref.Eos_Pdhkl(G.P, extract=True) if theta_limits[0] < pic < theta_limits[-1]]) for G in self.RUN.Spectra[index_start - 1].Gauges]
-            last_pressure=np.mean([g.P for g in self.RUN.Spectra[index_start - 1].Gauges])
+        if batch_range.start > 0 and self.RUN.Spectra[batch_range.start - 1].Gauges:
+            best_ind = [(G.name, G.P) for G in self.RUN.Spectra[batch_range.start - 1].Gauges]#[(G.name,G.P,[pic for pic, _, _, _, _ in G.Element_ref.Eos_Pdhkl(G.P, extract=True) if theta_limits[0] < pic < theta_limits[-1]]) for G in self.RUN.Spectra[index_start - 1].Gauges]
+            last_pressure = np.mean([g.P for g in self.RUN.Spectra[batch_range.start - 1].Gauges])
         else:
             best_ind = None
-            last_pressure= None
+            last_pressure = None
 
-        spectra_indices = list(range(index_start, index_stop + 1))
-        progress_dialog = ProgressDialog(
-            "Recherche automatique des compositions...",
-            "Annuler",
-            0,
-            len(spectra_indices),
-            self,
-        ) if spectra_indices else None
-        if progress_dialog is not None:
+        progress_dialog = None
+        if not skip_ui and batch_range.total_steps:
+            progress_dialog = ProgressDialog(
+                "Recherche automatique des compositions...",
+                "Annuler",
+                0,
+                batch_range.total_steps,
+                self,
+            )
             progress_dialog.setWindowModality(Qt.WindowModal)
             progress_dialog.setMinimumDuration(0)
             progress_dialog.setAutoClose(True)
@@ -5204,6 +5246,10 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             ok=False
             for step, i in enumerate(spectra_indices, start=1):
                 if progress_dialog is not None:
+                    update_progress_dialog(
+                        progress_dialog,
+                        f"bibDRX:{[elem for elem in self.ClassDRX.Bibli_elements]} \n Spectre {i + 1} ({step}/{batch_range.total_steps}) \n Compo de départ : {[(ind,p) for ind,p in best_ind] if best_ind is not None else None} \n P{[last_pressure * 0.75 - 2, last_pressure * 1.25 + 2] if last_pressure is not None else [-0.5, settings.p_range] }"
+                    )
                     if progress_dialog.wasCanceled():
                         print("Annulé par l'utilisateur !")
                         break
@@ -5227,7 +5273,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                     self.bit_bypass = True
                     self.f_Spectrum_Load(Spectrum=X)
                     self.bit_bypass = False
-                theta2_range = self.spectrum_controller.update_theta2_range()
+                theta2_range = self._get_theta2_range(skip_ui, X)
                 # Détection des pics
                 x=X.wnb
                 y=copy.deepcopy(X.y_corr)
@@ -5245,11 +5291,11 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                     # 1) find peaks (une seule fois)
                     _, detected_peaks, result = self.ClassDRX.F_Find_peaks(
                         X.wnb, y_mask,
-                        height=height*max(y_mask),
-                        distance=distance,
-                        prominence=prominence*max(y_mask),
-                        width=width,
-                        number_peak_max=number_peak_max
+                        height=settings.height * max(y_mask),
+                        distance=settings.distance,
+                        prominence=settings.prominence * max(y_mask),
+                        width=settings.width,
+                        number_peak_max=settings.number_peak_max,
                     )
                 except  Exception  as e:
                     print("ERROR find pea k",e)
@@ -5296,15 +5342,15 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                 
                 best_ind, _, Gauges = self.ClassDRX.F_Find_compo(
                     detected_peaks,
-                    NGEN=ngen,
-                    MUTPB=mutpb,
-                    CXPB=cxpb,
-                    POPINIT=popinit,
-                    pressure_range=[-0.5, p_range] if last_pressure == None else[last_pressure * 0.75 - 2, last_pressure * 1.25 + 2],
+                    NGEN=settings.ngen,
+                    MUTPB=settings.mutpb,
+                    CXPB=settings.cxpb,
+                    POPINIT=settings.popinit,
+                    pressure_range=[-0.5, settings.p_range] if last_pressure == None else[last_pressure * 0.75 - 2, last_pressure * 1.25 + 2],
                     max_ecart_pressure=2,
-                    max_elements=nb_max_element,
+                    max_elements=settings.nb_max_element,
                     theta2_range=theta2_range,
-                    tolerance=tolerance,
+                    tolerance=settings.tolerance,
                     indiv_start=best_ind,
                     print_process=True
                 )
@@ -5335,14 +5381,13 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                     pd.concat([pd.DataFrame({"n°Spec": [int(i)]}), X.study], axis=1)
                 ], ignore_index=True)
                 if progress_dialog is not None:
-                    progress_dialog.setValue(step)
-                    QApplication.processEvents()
+                    update_progress_dialog(progress_dialog, step=step)
 
         # ... (fin de ta méthode) ...
         finally:
             if progress_dialog is not None:
                 if not progress_dialog.wasCanceled():
-                    progress_dialog.setValue(len(spectra_indices))
+                    progress_dialog.setValue(batch_range.total_steps)
                 progress_dialog.close()
         #print(f"RUN mis à jour pour les spectres {index_start} à {index_stop}.")
         self.CLEAR_CEDd()

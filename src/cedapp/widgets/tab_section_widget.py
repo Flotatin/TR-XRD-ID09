@@ -155,6 +155,7 @@ class FindCompoWidget(QWidget):
         main.NGEN_entry.setRange(0, 1000)
         main.NGEN_entry.setValue(100)
         main.NGEN_entry.valueChanged.connect(main.setFocus)
+        main.NGEN_entry.valueChanged.connect(main._refresh_auto_compo_settings_cache)
         layout.addLayout(creat_spin_label(main.NGEN_entry, "NGEN"))
 
         main.MUTPB_entry = QDoubleSpinBox()
@@ -162,6 +163,7 @@ class FindCompoWidget(QWidget):
         main.MUTPB_entry.setRange(0, 1)
         main.MUTPB_entry.setValue(0.5)
         main.MUTPB_entry.valueChanged.connect(main.setFocus)
+        main.MUTPB_entry.valueChanged.connect(main._refresh_auto_compo_settings_cache)
         layout.addLayout(creat_spin_label(main.MUTPB_entry, "MUTPB"))
 
         main.CXPB_entry = QDoubleSpinBox()
@@ -169,6 +171,7 @@ class FindCompoWidget(QWidget):
         main.CXPB_entry.setRange(0, 1)
         main.CXPB_entry.setValue(0.5)
         main.CXPB_entry.valueChanged.connect(main.setFocus)
+        main.CXPB_entry.valueChanged.connect(main._refresh_auto_compo_settings_cache)
         layout.addLayout(creat_spin_label(main.CXPB_entry, "CXPB"))
 
         main.POPINIT_entry = QSpinBox()
@@ -176,6 +179,7 @@ class FindCompoWidget(QWidget):
         main.POPINIT_entry.setRange(0, 500)
         main.POPINIT_entry.setValue(100)
         main.POPINIT_entry.valueChanged.connect(main.setFocus)
+        main.POPINIT_entry.valueChanged.connect(main._refresh_auto_compo_settings_cache)
         layout.addLayout(creat_spin_label(main.POPINIT_entry, "POPINIT"))
 
         main.tolerance_entry = QDoubleSpinBox()
@@ -183,6 +187,7 @@ class FindCompoWidget(QWidget):
         main.tolerance_entry.setValue(0.1)
         main.tolerance_entry.setSingleStep(0.05)
         main.tolerance_entry.valueChanged.connect(main.setFocus)
+        main.tolerance_entry.valueChanged.connect(main._refresh_auto_compo_settings_cache)
         layout.addLayout(creat_spin_label(main.tolerance_entry, "%"))
 
         main.p_range_entry = QSpinBox()
@@ -190,6 +195,7 @@ class FindCompoWidget(QWidget):
         main.p_range_entry.setValue(15)
         main.p_range_entry.setSingleStep(1)
         main.p_range_entry.valueChanged.connect(main.setFocus)
+        main.p_range_entry.valueChanged.connect(main._refresh_auto_compo_settings_cache)
         layout.addLayout(creat_spin_label(main.p_range_entry, "P rg"))
 
         main.nb_max_element_entry = QSpinBox()
@@ -197,6 +203,7 @@ class FindCompoWidget(QWidget):
         main.nb_max_element_entry.setValue(3)
         main.nb_max_element_entry.setSingleStep(1)
         main.nb_max_element_entry.valueChanged.connect(main.setFocus)
+        main.nb_max_element_entry.valueChanged.connect(main._refresh_auto_compo_settings_cache)
         layout.addLayout(creat_spin_label(main.nb_max_element_entry, "nb max"))
 
         self.setLayout(layout)
@@ -240,6 +247,7 @@ class FindPeaksWidget(QWidget):
         main.distance_entry.setRange(1, 10)
         main.distance_entry.setValue(1)
         main.distance_entry.valueChanged.connect(main.setFocus)
+        main.distance_entry.valueChanged.connect(main._refresh_auto_compo_settings_cache)
         layout.addLayout(creat_spin_label(main.distance_entry, ""))
 
         name = QLabel("prominence")
@@ -261,6 +269,7 @@ class FindPeaksWidget(QWidget):
         main.width_entry.setRange(0.0, 1000)
         main.width_entry.setValue(5)
         main.width_entry.valueChanged.connect(main.setFocus)
+        main.width_entry.valueChanged.connect(main._refresh_auto_compo_settings_cache)
         layout.addLayout(creat_spin_label(main.width_entry, ""))
 
         name = QLabel("Max nb peaks")
@@ -270,6 +279,7 @@ class FindPeaksWidget(QWidget):
         main.nb_peak_entry.setValue(10)
         main.nb_peak_entry.setSingleStep(1)
         main.nb_peak_entry.valueChanged.connect(main.setFocus)
+        main.nb_peak_entry.valueChanged.connect(main._refresh_auto_compo_settings_cache)
         layout.addLayout(creat_spin_label(main.nb_peak_entry, ""))
 
         self.setLayout(layout)
@@ -304,6 +314,7 @@ class FitParamWidget(QWidget):
         main.inter_entry.setDecimals(1)
         main.inter_entry.setSuffix(" %")
         main.inter_entry.valueChanged.connect(main.setFocus)
+        main.inter_entry.valueChanged.connect(main._refresh_fit_context_cache)
         main.inter_entry.setRange(1.0, 500.0)
         main.inter_entry.setSingleStep(1.0)
         main.inter_entry.setValue(120.0)
@@ -342,11 +353,13 @@ class FitSelectWidget(QWidget):
         main.index_start_entry = QSpinBox()
         main.index_start_entry.setRange(0, 2000)
         main.index_start_entry.setValue(1)
+        main.index_start_entry.valueChanged.connect(main._refresh_batch_range_cache)
         layout.addLayout(creat_spin_label(main.index_start_entry, "idx start"))
 
         main.index_stop_entry = QSpinBox()
         main.index_stop_entry.setRange(0, 2000)
         main.index_stop_entry.setValue(10)
+        main.index_stop_entry.valueChanged.connect(main._refresh_batch_range_cache)
         layout.addLayout(creat_spin_label(main.index_stop_entry, "idx stop"))
 
         main.fit_select_button = QPushButton("Find Compo")
@@ -363,6 +376,7 @@ class FitSelectWidget(QWidget):
         main.skip_ui_update_checkbox.setToolTip(
             "Exécute l'action sur la CED sans recharger ni afficher chaque spectre."
         )
+        main.skip_ui_update_checkbox.toggled.connect(main._set_skip_ui_update)
         layout.addWidget(main.skip_ui_update_checkbox)
 
         main.clear_gauges_button = QPushButton("remove gauges")
