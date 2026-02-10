@@ -229,6 +229,7 @@ class FindPeaksWidget(QWidget):
         main.height_entry.setSuffix(" %")
         main.height_entry.valueChanged.connect(main.setFocus)
         main.height_entry.valueChanged.connect(main._update_find_peaks_exclusion_region)
+        main.height_entry.valueChanged.connect(main._refresh_auto_compo_settings_cache)
         layout.addLayout(creat_spin_label(main.height_entry, "", "% Imax"))
 
         main.print_exclusion_checkbox = QCheckBox("exclusion line")
@@ -259,6 +260,7 @@ class FindPeaksWidget(QWidget):
         main.prominence_entry.setValue(5)
         main.prominence_entry.setSuffix(" %")
         main.prominence_entry.valueChanged.connect(main.setFocus)
+        main.prominence_entry.valueChanged.connect(main._refresh_auto_compo_settings_cache)
         layout.addLayout(creat_spin_label(main.prominence_entry, "", "% Imax"))
 
         name = QLabel("width")

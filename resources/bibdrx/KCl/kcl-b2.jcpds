@@ -1,9 +1,10 @@
 VERSION: 4 (EOS from Campbell and Heinz, 1991)
-COMMENT: KCl  B2 
+COMMENT: KCl B2 
 K0:       28.7
 K0P:       4.00000
 SYMMETRY: CUBIC
 A:      3.753
+VOLUME: 52.861
 ALPHAT:      4.26E-5
 DIHKL:   3.753       6.    1.00    0.00    0.00
 DIHKL:   2.6540    100.    1.00    1.00    0.00

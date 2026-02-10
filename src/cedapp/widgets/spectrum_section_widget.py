@@ -21,27 +21,27 @@ class SpectrumSectionWidget:
     def __init__(self, main) -> None:
         self.main = main
         self.spectrum_box = QGroupBox("Spectrum")
-        spectra_layout = QVBoxLayout()
-        self.spectrum_box.setLayout(spectra_layout)
+        main.spectra_layout = QVBoxLayout()
+        self.spectrum_box.setLayout(main.spectra_layout)
 
         self.spectrum_container = QWidget()
         container_layout = QVBoxLayout(self.spectrum_container)
         container_layout.setContentsMargins(0, 0, 0, 0)
         container_layout.setSpacing(0)
 
-        top_layout = QVBoxLayout()
-        container_layout.addLayout(top_layout)
-        spectra_layout.addWidget(self.spectrum_container)
+        main.top_layout = QVBoxLayout()
+        container_layout.addLayout(main.top_layout)
+        main.spectra_layout.addWidget(self.spectrum_container)
 
         main.graph_layout = GraphicsLayoutWidget()
-        main.graph_layout.ci.layout.setRowStretchFactor(0, 4)
+        main.graph_layout.ci.layout.setRowStretchFactor(0, 5)
         main.graph_layout.ci.layout.setRowStretchFactor(1, 1)
         main.graph_layout.ci.layout.setColumnStretchFactor(0, 1)
         size_policy = QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
         size_policy.setHorizontalStretch(3)
         size_policy.setVerticalStretch(1)
         main.graph_layout.setSizePolicy(size_policy)
-        top_layout.addWidget(main.graph_layout, 2)
+        main.top_layout.addWidget(main.graph_layout, 2)
 
         main.ax_spectrum = main.graph_layout.addPlot(row=0, col=0)
         main.ax_spectrum.scene().sigMouseClicked.connect(main.f_cross_spectrum)
@@ -56,7 +56,7 @@ class SpectrumSectionWidget:
         self.right_layout = QHBoxLayout(right_container)
         self.right_layout.setContentsMargins(0, 0, 0, 0)
         self.right_layout.setSpacing(2)
-        top_layout.addWidget(right_container, 1)
+        main.top_layout.addWidget(right_container, 1)
 
         main.zoom_widget = pg.PlotWidget()
         main.ax_zoom = main.zoom_widget.getPlotItem()
@@ -173,7 +173,7 @@ class SpectrumSectionWidget:
         main.vslmfit.toggled.connect(main._refresh_fit_context_cache)
         layout_check.addWidget(main.vslmfit)
 
-        spectra_layout.addLayout(layout_check)
+        main.spectra_layout.addLayout(layout_check)
 
         self.dhkl_box = QGroupBox("dhkl")
         main.layout_dhkl = QVBoxLayout()

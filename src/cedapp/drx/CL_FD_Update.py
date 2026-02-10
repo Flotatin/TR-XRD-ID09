@@ -2143,8 +2143,6 @@ class CED_DRX:
                 if time_index not in df.columns:
                     raise KeyError(f"Colonne '{time_index}' introuvable. Colonnes dispo: {list(df.columns)}")
                 sig = df[time_index].to_numpy()
-
-
             self.Temps_Pression(temps=temps, signale_spec=sig)
             print("Oscillo DONE nb time:", len(self.Time_spectrum))
 

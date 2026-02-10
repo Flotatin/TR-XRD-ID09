@@ -66,6 +66,7 @@ class UIState:
     plot_fit_toggle: QPushButton | None = None
     setup_mode_button: QPushButton | None = None
     DRX_selector: QComboBox | None = None
+    print_plate_button: QPushButton | None = None
     type_selector: QComboBox | None = None
     listbox_file: QListWidget | None = None
     search_bar: QLineEdit | None = None
@@ -258,6 +259,11 @@ def build_file_section(window) -> None:
         for i in range(len(window.RUN.Spectra)):
             state.DRX_selector.addItem(f"drx_{i}")
     layout_fichiers.addWidget(state.DRX_selector)
+    state.DRX_selector.currentIndexChanged.connect(window._update_print_plate_from_selector)
+
+    state.print_plate_button = QPushButton("Print", window)
+    state.print_plate_button.clicked.connect(window.show_print_plate)
+    layout_fichiers.addWidget(state.print_plate_button)
 
     state.type_selector = QComboBox()
     window.type_folder = ["CED", "Oscilloscope", "DRX"]
