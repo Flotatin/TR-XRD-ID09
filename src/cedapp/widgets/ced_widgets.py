@@ -34,7 +34,7 @@ class DdacWidget:
     def _create_drx_plots(self) -> None:
         host = self._drx_container
         host.fig_DRX_dynamic = GraphicsLayoutWidget()
-        host.ax_P = host.fig_DRX_dynamic.addPlot(row=0, col=0, title="Pressure (GPa)")
+        host.ax_P = host.fig_DRX_dynamic.addPlot(row=0, col=0)#, title="Pressure (GPa)")
         host.ax_P.setLabel("left", "Pressure", units="GPa")
         host.ax_P.showAxis("right")
         host.ax_P.getAxis("right").setLabel("Piezo", units="V")
@@ -51,8 +51,11 @@ class DdacWidget:
         host.ax_dPdt.setLabel("left", "dP/dt ", units="GPa/ms")
         host.ax_dPdt.addLegend()
         host.ax_diff_int = host.fig_DRX_dynamic.addPlot(row=2, col=0)
-        host.ax_diff_int.setLabel("left", r"$2\theta$", units="°")
-        host.ax_diff_int.setLabel("bottom", "time", units="ms")
+        host.ax_diff_int.setLabel("left", '2<font>&theta<font>', units="°")
+        host.ax_diff_int.setLabel("bottom", "Time", units="ms")
+        #host.fig_DRX_dynamic.ci.layout.setRowStretchFactor(0, 2)
+        #host.fig_DRX_dynamic.ci.layout.setRowStretchFactor(1, 1)
+        #host.fig_DRX_dynamic.ci.layout.setRowStretchFactor(2, 2)
 
     def _create_drx_persistent_items(self) -> None:
         host = self._drx_container
@@ -61,8 +64,10 @@ class DdacWidget:
 
         host.line_P = pg.InfiniteLine(angle=90, movable=False, pen="r")
         host.line_dPdt = pg.InfiniteLine(angle=90, movable=False, pen="r")
+        host.line_theta_diff = pg.InfiniteLine(angle=0, movable=False, pen=pg.mkPen("g", width=2))
         host.ax_P.addItem(host.line_P)
         host.ax_dPdt.addItem(host.line_dPdt)
+        host.ax_diff_int.addItem(host.line_theta_diff)
 
     def _create_drx_selection_items(self) -> None:
         host = self._drx_container

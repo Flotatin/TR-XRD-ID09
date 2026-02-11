@@ -49,7 +49,7 @@ except ImportError:  # pragma: no cover - fallback for headless tests
 
 from PyQt5 import QtWidgets
 from PyQt5.QtCore import QAbstractTableModel, Qt, QModelIndex, QTimer, pyqtSignal
-
+from PyQt5 import QtCore
 from PyQt5.QtGui import QColor, QFont
 
 if hasattr(QtWidgets, "QTabWidget"):
@@ -417,13 +417,13 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         self.print_plate_circle_item = None
         self.print_plate_shape = None
         self._print_plate_theta_cache = {}
-        self._print_plate_rotation = 3
-        self._print_plate_scale_x = 1.0
-        self._print_plate_scale_y = 1.0
         self._print_plate_levels = None
         self._print_plate_hist_region = None
         self._print_plate_hist_curve = None
         self._print_plate_hist_updating = False
+        self._print_plate_level_fraction = (0.10, 0.90)
+        self._print_plate_mode = "image"
+        self._print_plate_cake_theta_line = None
 #########################################################################################################################################################################################
 #? Setup Main window parameters
 
@@ -439,7 +439,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         self._build_message_label()
 
 #? PAram FIT section
-        self._build_model_peak_section()
+        #self._build_model_peak_section()
 
 #? Plot Spectrum section section
         self._init_plot_widgets()
@@ -704,11 +704,11 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
     def _build_message_label(self) -> None:
         """Display a status message label."""
         ui_sections.build_message_label(self)
-
+    '''
     def _build_model_peak_section(self) -> None:
         """Configure the model peak parameter widgets."""
         ui_sections.build_model_peak_section(self)
-
+    '''
     def _init_plot_widgets(self) -> None:
         """Initialise the main spectrum plot area and related items."""
         ui_sections.init_plot_widgets(self)
@@ -849,6 +849,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
 
         self._analysis_overlays = []
         self.analysis_ctl = None
+        self.cb_piezo_consigne = None
         if getattr(self, "ax_P", None) is not None:
             self.analysis_ctl = AnalysisController(
                 self,
@@ -856,9 +857,13 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                 dpdt_plot=getattr(self, "ax_dPdt", None),
                 x_axis="time_ms",
             )
+            self.cb_piezo_consigne = QCheckBox("piézo")
+            self.cb_piezo_consigne.setChecked(True)
+            self.cb_piezo_consigne.toggled.connect(self._set_piezo_setpoint_visible)
             ddac_widget = getattr(self.ui_state, "ddac_widget", None)
             if ddac_widget is not None:
                 ddac_widget.add_control_widget(self.analysis_ctl.cb_analysis)
+                ddac_widget.add_control_widget(self.cb_piezo_consigne)
             else:
                 logger.debug("dDAC widget unavailable for analysis toggle placement.")
         else:
@@ -871,6 +876,20 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                 item.setVisible(visible)
             except Exception:
                 logger.debug("Failed to toggle overlay visibility", exc_info=True)
+    
+    def _set_piezo_setpoint_visible(self, visible: bool) -> None:
+        """Show or hide piezo setpoint curve and right-hand axis."""
+        if getattr(self, "plot_piezo", None) is not None:
+            self.plot_piezo.setVisible(bool(visible))
+        if getattr(self, "ax_P", None) is not None:
+            try:
+                self.ax_P.showAxis("right", show=bool(visible))
+            except TypeError:
+                # Backward compatibility for older pyqtgraph versions.
+                if visible:
+                    self.ax_P.showAxis("right")
+                else:
+                    self.ax_P.hideAxis("right")
 
     def _update_analysis_from_cedx_data(self, run, n_J, l_P, l_t, gauge_indices) -> None:
         df = ensure_analyse_dataframe(run)
@@ -1172,7 +1191,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         self.grid_layout.setColumnStretch(0, 1)
         self.grid_layout.setColumnStretch(1, 1)
         self.grid_layout.setColumnStretch(2, 6)
-        self.grid_layout.setColumnStretch(4, 3)
+        self.grid_layout.setColumnStretch(4, 4)
         self.grid_layout.setRowStretch(0, 5)
         self.grid_layout.setRowStretch(1, 1)
         self.grid_layout.setRowStretch(2, 1)
@@ -2506,59 +2525,39 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             self.ParampicLayout.addLayout(layh)
             self.coef_dynamic_label.append(coef_label)
             self.coef_dynamic_spinbox.append(spinbox_coef)
-
+    
     def _resolve_drx_file_for_print(self) -> str:
-        run_data = getattr(getattr(self, "RUN", None), "data_drx", None)
-        run_file = getattr(run_data, "loaded_file_DRX", None)
-        if run_file and os.path.exists(run_file):
-            return run_file
-        return getattr(self, "loaded_file_DRX", "")
+        run = getattr(self, "RUN", None)
+        run_data = getattr(run, "data_drx", None)
+        if run_data is not None:
+            run_file = run_data if isinstance(run_data, str) else getattr(run_data, "loaded_file_DRX", None)
+            if run_file and os.path.exists(run_file):
+                return str(run_file)
+            return ""
+        loaded = getattr(self, "loaded_file_DRX", "")
+        return loaded if loaded and os.path.exists(loaded) else ""
+
+    def _resolve_calib_for_print(self):
+        run = getattr(self, "RUN", None)
+        run_calib = getattr(run, "calib", None)
+        if run_calib is not None:
+            return run_calib
+        return getattr(self, "calib", None)
 
     def _raw_to_display_image(self, image: np.ndarray) -> np.ndarray:
-        return np.rot90(image, self._print_plate_rotation)
+        return np.asarray(image)
 
     def _raw_to_display_xy(self, x_raw: float, y_raw: float) -> tuple[float, float]:
-        if self.print_plate_shape is None:
-            return x_raw, y_raw
-        h, w = self.print_plate_shape
-        k = self._print_plate_rotation % 4
-
-        if k == 0:
-            xd, yd = x_raw, y_raw
-        elif k == 1:  # 90° CCW
-            xd, yd = y_raw, (w - 1) - x_raw
-        elif k == 2:  # 180°
-            xd, yd = (w - 1) - x_raw, (h - 1) - y_raw
-        else:         # k == 3, 90° CW
-            xd, yd = (h - 1) - y_raw, x_raw
-
-        return xd * self._print_plate_scale_x, yd * self._print_plate_scale_y
+        return float(x_raw), float(y_raw)
 
     def _display_to_raw_xy(self, x_disp: float, y_disp: float) -> tuple[int, int]:
         if self.print_plate_shape is None:
             return int(round(x_disp)), int(round(y_disp))
-
         h, w = self.print_plate_shape
-        sx = self._print_plate_scale_x if self._print_plate_scale_x else 1.0
-        sy = self._print_plate_scale_y if self._print_plate_scale_y else 1.0
-
-        xd = x_disp / sx
-        yd = y_disp / sy
-        k = self._print_plate_rotation % 4
-
-        if k == 0:
-            xr, yr = xd, yd
-        elif k == 1:  # inverse de CCW
-            xr, yr = (w - 1) - yd, xd
-        elif k == 2:
-            xr, yr = (w - 1) - xd, (h - 1) - yd
-        else:         # inverse de CW
-            xr, yr = yd, (h - 1) - xd
-
-        xr = int(np.clip(round(xr), 0, w - 1))
-        yr = int(np.clip(round(yr), 0, h - 1))
+        xr = int(np.clip(round(x_disp), 0, w - 1))
+        yr = int(np.clip(round(y_disp), 0, h - 1))
         return xr, yr
-    
+
     def _remove_print_plate_circle(self) -> None:
         if self.print_plate_plot is None or self.print_plate_circle_item is None:
             return
@@ -2569,41 +2568,48 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         self.print_plate_circle_item = None
 
     def _theta_array_for_shape(self, shape):
-        if self.calib is None or getattr(self.calib, "ai", None) is None:
+        calib = self._resolve_calib_for_print()
+        if calib is None or getattr(calib, "ai", None) is None:
             return None
         key = tuple(shape)
-        if key not in self._print_plate_theta_cache:
+        cache_key = (key, id(calib.ai))
+        if cache_key not in self._print_plate_theta_cache:
             try:
-                self._print_plate_theta_cache[key] = np.degrees(self.calib.ai.twoThetaArray(shape))
+                self._print_plate_theta_cache[(key, id(calib.ai))] = np.degrees(calib.ai.twoThetaArray(shape))
             except Exception:
                 return None
-        return self._print_plate_theta_cache.get(key)
+        return self._print_plate_theta_cache.get(cache_key)
 
     def _draw_print_plate_circle(self, theta_deg: float) -> None:
         if self.print_plate_plot is None or self.print_plate_shape is None:
             return
-        if self.calib is None or getattr(self.calib, "ai", None) is None:
+        calib = self._resolve_calib_for_print()
+        if calib is None or getattr(calib, "ai", None) is None:
             return
-
         theta_arr = self._theta_array_for_shape(self.print_plate_shape)
         if theta_arr is None:
             return
+        try:
+            fit2d = calib.ai.getFit2D()
+            cx = float(fit2d.get("centerX", self.print_plate_shape[1] / 2.0))
+            cy = float(fit2d.get("centerY", self.print_plate_shape[0] / 2.0))
+        except Exception:
+            cx, cy = self.print_plate_shape[1] / 2.0, self.print_plate_shape[0] / 2.0
 
-        # tolérance en degré (à ajuster si besoin)
-        tol = 0.01  
-
-        mask = np.abs(theta_arr - float(theta_deg)) < tol
-        if not np.any(mask):
+        row = int(np.clip(round(cy), 0, self.print_plate_shape[0] - 1))
+        theta_row = theta_arr[row, :]
+        x_idx = int(np.argmin(np.abs(theta_row - float(theta_deg))))
+        radius = abs(float(x_idx) - cx)
+        if radius <= 0:
             return
 
-        ys, xs = np.where(mask)
-
-        # transformation raw -> display
-        points = [self._raw_to_display_xy(x, y) for x, y in zip(xs, ys)]
+        angles = np.linspace(0, 2 * np.pi, 360)
+        xs_raw = cx + radius * np.cos(angles)
+        ys_raw = cy + radius * np.sin(angles)
+        points = [self._raw_to_display_xy(xr, yr) for xr, yr in zip(xs_raw, ys_raw)]
         if not points:
             return
-
-        yd, xd = zip(*points)
+        xd, yd = zip(*points)
 
         self._remove_print_plate_circle()
         self.print_plate_circle_item = pg.PlotDataItem(
@@ -2629,9 +2635,25 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
     def _set_print_theta_from_source(self, theta_deg: float, update_spectrum: bool = False) -> None:
         if theta_deg is None or not np.isfinite(theta_deg):
             return
-        self._draw_print_plate_circle(float(theta_deg))
+        theta_val = float(theta_deg)
+        if self._print_plate_mode == "cake":
+            if self.print_plate_plot is not None:
+                if self._print_plate_cake_theta_line is None:
+                    self._print_plate_cake_theta_line = pg.InfiniteLine(angle=90, movable=False, pen=pg.mkPen("y", width=2))
+                    self.print_plate_plot.addItem(self._print_plate_cake_theta_line)
+                self._print_plate_cake_theta_line.setValue(theta_val)
+        else:
+            if self._print_plate_cake_theta_line is not None and self.print_plate_plot is not None:
+                try:
+                    self.print_plate_plot.removeItem(self._print_plate_cake_theta_line)
+                except Exception:
+                    pass
+                self._print_plate_cake_theta_line = None
+            self._draw_print_plate_circle(theta_val)
+        if hasattr(self, "line_theta_diff") and self.line_theta_diff is not None:
+            self.line_theta_diff.setValue(theta_val)
         if update_spectrum:
-            self._sync_spectrum_from_theta(float(theta_deg))
+            self._sync_spectrum_from_theta(theta_val)
 
     def _on_print_plate_clicked(self, event) -> None:
         if self.print_plate_plot is None or self.print_plate_shape is None:
@@ -2640,26 +2662,27 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         if not self.print_plate_plot.sceneBoundingRect().contains(pos):
             return
         mouse_point = self.print_plate_plot.vb.mapSceneToView(pos)
+
+        if self._print_plate_mode == "cake":
+            theta_deg = float(mouse_point.x())
+            self._set_print_theta_from_source(theta_deg, update_spectrum=True)
+            return
+
         x_raw, y_raw = self._display_to_raw_xy(mouse_point.x(), mouse_point.y())
         theta_arr = self._theta_array_for_shape(self.print_plate_shape)
         if theta_arr is None:
             return
-        theta_deg = float(theta_arr[x_raw, y_raw])
+        theta_deg = float(theta_arr[y_raw, x_raw])
         self._set_print_theta_from_source(theta_deg, update_spectrum=True)
+
 
     def _apply_print_plate_view_controls(self) -> None:
         if self.print_plate_image_item is None or self.print_plate_shape is None:
             return
         h, w = self.print_plate_shape
-        if self._print_plate_rotation % 2 == 0:
-            dw, dh = w, h
-        else:
-            dw, dh = h, w
-        x_max = dw * self._print_plate_scale_x
-        y_max = dh * self._print_plate_scale_y
-        self.print_plate_plot.setLimits(xMin=0, xMax=x_max, yMin=0, yMax=y_max)
-        self.print_plate_plot.setXRange(0, x_max)
-        self.print_plate_plot.setYRange(0, y_max)
+        self.print_plate_plot.setLimits(xMin=0, xMax=float(w), yMin=0, yMax=float(h))
+        self.print_plate_plot.setXRange(0, float(w))
+        self.print_plate_plot.setYRange(0, float(h))
 
         if self._print_plate_levels is not None:
             try:
@@ -2668,68 +2691,159 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                 pass
 
     def _update_print_plate_levels_controls(self, image: np.ndarray) -> None:
-        if self._print_plate_hist_curve is None or self._print_plate_hist_region is None:
-            finite = image[np.isfinite(image)]
-            if finite.size:
-                self._print_plate_levels = (float(np.min(finite)), float(np.max(finite)))
-            return
+        # --- pixels valides : ignore NaN, 0, négatifs ---
         finite = image[np.isfinite(image)]
+        finite = finite[finite > 0]
         if finite.size == 0:
             return
-        if finite.size:
-            vmin = float(np.nanpercentile(finite, 1))
-            vmax = float(np.nanpercentile(finite, 99))
 
-        counts, bins = np.histogram(finite, bins=256, range=(vmin, vmax))
-        centers = 0.5 * (bins[:-1] + bins[1:])
-        self._print_plate_hist_curve.setData(centers, counts.astype(float))
+        use_log = bool(getattr(self, "_print_plate_use_log", True))
 
-        prev_levels = self._print_plate_levels
-        if prev_levels is None:
-            levels = (vmin, vmax)
+        # --- base "Dioptas-like" : percentiles robustes ---
+        # (tu peux ajuster 0.5/99.5 si tu veux plus/moins de clipping)
+        p_lo = float(getattr(self, "_print_plate_pct_lo", 1.0))
+        p_hi = float(getattr(self, "_print_plate_pct_hi", 99.0))
+        p_lo = float(np.clip(p_lo, 0.0, 49.0))
+        p_hi = float(np.clip(p_hi, 51.0, 100.0))
+
+        # --- convertit en espace d'affichage (log ou lin) ---
+        if use_log:
+            # éviter log(0) : on est déjà >0
+            vals = np.log10(finite)
         else:
-            levels = (
-                float(np.clip(prev_levels[0], vmin, vmax)),
-                float(np.clip(prev_levels[1], vmin, vmax)),
-            )
-            if levels[1] <= levels[0]:
-                levels = (vmin, vmax)
+            vals = finite.astype(float, copy=False)
 
-        self._print_plate_hist_updating = True
-        self._print_plate_hist_region.setBounds((vmin, vmax))
-        self._print_plate_hist_region.setRegion(levels)
-        self._print_plate_hist_updating = False
+        vmin = float(np.nanpercentile(vals, p_lo))
+        vmax = float(np.nanpercentile(vals, p_hi))
+        if not np.isfinite(vmin) or not np.isfinite(vmax) or vmax <= vmin:
+            vmax = vmin + 1.0
+
+        # --- fractions mémorisées (stables quand l'image change) ---
+        low_frac, high_frac = getattr(self, "_print_plate_level_fraction", (0.10, 0.90))
+        low_frac = float(np.clip(low_frac, 0.0, 1.0))
+        high_frac = float(np.clip(high_frac, 0.0, 1.0))
+        if high_frac <= low_frac:
+            low_frac, high_frac = 0.10, 0.90
+            self._print_plate_level_fraction = (low_frac, high_frac)
+
+        span = max(vmax - vmin, 1e-12)
+        lvl_lo = vmin + low_frac * span
+        lvl_hi = vmin + high_frac * span
+
+        # --- histogram (en espace log/lin cohérent avec les sliders) ---
+        if self._print_plate_hist_curve is not None and self._print_plate_hist_region is not None:
+            counts, bins = np.histogram(vals, bins=256, range=(vmin, vmax))
+            centers = 0.5 * (bins[:-1] + bins[1:])
+            self._print_plate_hist_curve.setData(centers, counts.astype(float))
+
+            self._print_plate_hist_updating = True
+            self._print_plate_hist_region.setBounds((vmin, vmax))
+            self._print_plate_hist_region.setRegion((lvl_lo, lvl_hi))
+            self._print_plate_hist_updating = False
+
+            # IMPORTANT: LinearRegionItem n'a pas .bounds() -> on stocke nous-mêmes
+            self._print_plate_hist_bounds = (vmin, vmax)
+
+        # --- convertir niveaux vers l'espace "image" pour setLevels ---
+        if use_log:
+            levels = (10.0 ** float(lvl_lo), 10.0 ** float(lvl_hi))
+        else:
+            levels = (float(lvl_lo), float(lvl_hi))
+
         self._print_plate_levels = levels
+        self._apply_print_histogram_levels_to_cedx()
+
+    def _apply_print_histogram_levels_to_cedx(self) -> None:
+        levels = getattr(self, "_print_plate_levels", None)
+        if levels is None:
+            return
+        if not hasattr(self, "img_diff_int_item"):
+            return
+        if getattr(self, "_cedx_image_cache", None) is None:
+            return
+        self._cedx_levels = (float(levels[0]), float(levels[1]))
+        try:
+            self.img_diff_int_item.setLevels(self._cedx_levels)
+        except Exception:
+            pass
 
     def _on_print_plate_levels_changed(self, *_args) -> None:
-        if self._print_plate_hist_updating:
+        if getattr(self, "_print_plate_hist_updating", False):
             return
         if self._print_plate_hist_region is None or self.print_plate_image_item is None:
             return
-        region = self._print_plate_hist_region.getRegion()
-        vmin, vmax = float(region[0]), float(region[1])
-        if vmax <= vmin:
-            return
-        self._print_plate_levels = (vmin, vmax)
-        self.print_plate_image_item.setLevels(self._print_plate_levels)
 
-    def _on_print_plate_rotation_changed(self, index: int) -> None:
-        mapping = {0: 0, 1: 1, 2: 3, 3: 2}
-        self._print_plate_rotation = mapping.get(index, 1)
+        low, high = map(float, self._print_plate_hist_region.getRegion())
+        if high <= low:
+            return
+
+        # bornes connues (stockées dans _update_print_plate_levels_controls)
+        b = getattr(self, "_print_plate_hist_bounds", None)
+        if not b or not np.isfinite(b[0]) or not np.isfinite(b[1]) or b[1] <= b[0]:
+            bmin, bmax = low, high
+        else:
+            bmin, bmax = float(b[0]), float(b[1])
+
+        span = max(bmax - bmin, 1e-12)
+        low_frac = float(np.clip((low - bmin) / span, 0.0, 1.0))
+        high_frac = float(np.clip((high - bmin) / span, 0.0, 1.0))
+        if high_frac <= low_frac:
+            return
+
+        self._print_plate_level_fraction = (low_frac, high_frac)
+
+        use_log = bool(getattr(self, "_print_plate_use_log", True))
+        if use_log:
+            levels = (10.0 ** low, 10.0 ** high)
+        else:
+            levels = (low, high)
+
+        self._print_plate_levels = (float(levels[0]), float(levels[1]))
+        self.print_plate_image_item.setLevels(self._print_plate_levels)
+        self._apply_print_histogram_levels_to_cedx()
+
+    def _on_print_plate_mode_toggled(self) -> None:
+        mode_button = getattr(self, "_print_plate_mode_button", None)
+        if mode_button is None:
+            return
+        self._print_plate_mode = "cake" if mode_button.isChecked() else "image"
+        mode_button.setText("Cake" if mode_button.isChecked() else "Image")
+        self._print_plate_levels = None
+        if self._print_plate_mode == "cake":
+            self._remove_print_plate_circle()
+        else:
+            if self._print_plate_cake_theta_line is not None and self.print_plate_plot is not None:
+                try:
+                    self.print_plate_plot.removeItem(self._print_plate_cake_theta_line)
+                except Exception:
+                    pass
+                self._print_plate_cake_theta_line = None
         self._update_print_plate_image()
 
-    def _on_print_plate_scale_changed(self, *_args) -> None:
-        controls = getattr(self, "_print_plate_scale_controls", {})
-        sx_box = controls.get("x")
-        sy_box = controls.get("y")
-        if sx_box is not None:
-            self._print_plate_scale_x = float(sx_box.value())
-        if sy_box is not None:
-            self._print_plate_scale_y = float(sy_box.value())
-        self._apply_print_plate_view_controls()
-        theta = getattr(self, "X0", None)
-        if theta is not None:
-            self._draw_print_plate_circle(float(theta))
+    def _get_print_theta_bounds(self) -> tuple[float, float] | None:
+        spectrum = getattr(self, "Spectrum", None)
+        if spectrum is not None and hasattr(spectrum, "wnb"):
+            try:
+                wnb = np.asarray(spectrum.wnb, dtype=float)
+                finite = wnb[np.isfinite(wnb)]
+                if finite.size >= 2:
+                    lo = float(np.min(finite))
+                    hi = float(np.max(finite))
+                    if hi > lo:
+                        return lo, hi
+            except Exception:
+                pass
+        calib = self._resolve_calib_for_print()
+        theta_range = getattr(calib, "theta_range", None)
+        if theta_range and len(theta_range) >= 2:
+            try:
+                lo = float(min(theta_range[0], theta_range[1]))
+                hi = float(max(theta_range[0], theta_range[1]))
+                if hi > lo:
+                    return lo, hi
+            except Exception:
+                pass
+        return None
 
     def _update_print_plate_image(self) -> None:
         if self.print_plate_image_item is None:
@@ -2741,87 +2855,141 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         try:
             img_data = fabio.open(file_path)
             frame_index = min(self.DRX_selector.currentIndex(), img_data.nframes - 1)
-            frame = img_data.getframe(frame_index).data
+            frame = np.asarray(img_data.getframe(frame_index).data, dtype=float)
         except Exception as exc:
             self.text_box_msg.setText(f"Erreur Print DRX: {exc}")
             return
 
-        image = np.asarray(frame, dtype=float)
-        # --- appliquer mask calib si dispo ---
-        mask = getattr(self.calib, "mask", None) if self.calib is not None else None
-        if mask is not None:
-            mask = np.asarray(mask)
-            if mask.shape == image.shape:
-                # convention la plus courante pyFAI : mask==1 => pixel masqué
-                # (si chez toi c'est l'inverse, inverse la condition)
-                image = image.copy()
-                image[mask.astype(bool)] = np.nan
-        self.print_plate_shape = image.shape
-        display_image = self._raw_to_display_image(image)
-        self._update_image_safe(self.print_plate_image_item, display_image, levels=self._print_plate_levels)
+        masked_frame = frame
+        calib_for_mask = self._resolve_calib_for_print()
+        calib_mask = getattr(calib_for_mask, "mask", None)
+        if calib_mask is not None:
+            try:
+                mask_arr = np.asarray(calib_mask)
+                if mask_arr.shape == frame.shape:
+                    masked_frame = frame.copy()
+                    masked_frame[mask_arr == 1] = np.nan
+            except Exception:
+                masked_frame = frame
+
+        if self._print_plate_mode == "cake":
+            calib = self._resolve_calib_for_print()
+            if calib is None or getattr(calib, "ai", None) is None:
+                self.text_box_msg.setText("Calibration RUN requise pour afficher le cake")
+                return
+            try:
+                mask = getattr(calib, "mask", None)
+                theta_bounds = self._get_print_theta_bounds()
+                integrate_kwargs = {
+                    "unit": "2th_deg",
+                    "mask": mask,
+                    "method": "bbox",
+                }
+                if theta_bounds is not None:
+                    integrate_kwargs["radial_range"] = theta_bounds
+                result = calib.ai.integrate2d(
+                    frame,
+                    600,
+                    360,
+                    **integrate_kwargs,
+                )
+                if hasattr(result, "intensity"):
+                    cake_img = np.asarray(result.intensity, dtype=float)
+                    radial = np.asarray(result.radial, dtype=float)
+                    azimuth = np.asarray(result.azimuthal, dtype=float)
+                else:
+                    cake_img = np.asarray(result[0], dtype=float)
+                    radial = np.asarray(result[1], dtype=float)
+                    azimuth = np.asarray(result[2], dtype=float)
+            except Exception as exc:
+                self.text_box_msg.setText(f"Erreur cake DRX: {exc}")
+                return
+
+            self.print_plate_shape = cake_img.shape
+            self._update_image_safe(self.print_plate_image_item, np.rot90(cake_img,-1), levels=self._print_plate_levels)
+            x_min, x_max = float(np.min(radial)), float(np.max(radial))
+            theta_bounds = self._get_print_theta_bounds()
+            if theta_bounds is not None:
+                x_min = max(x_min, theta_bounds[0])
+                x_max = min(x_max, theta_bounds[1])
+            y_min, y_max = float(np.min(azimuth)), float(np.max(azimuth))
+            self.print_plate_plot.setLabel("left", "Azimuth", units="°")
+            self.print_plate_plot.setLabel("bottom", "2θ", units="°")
+            self.print_plate_plot.invertY(False)
+            self.print_plate_plot.setLimits(xMin=x_min, xMax=x_max, yMin=y_min, yMax=y_max)
+            self.print_plate_plot.setXRange(x_min, x_max)
+            self.print_plate_plot.setYRange(y_min, y_max)
+            self.print_plate_image_item.setRect(QtCore.QRectF(x_min, y_min, max(1e-9, x_max - x_min), max(1e-9, y_max - y_min)))
+            self._update_print_plate_levels_controls(cake_img)
+            self._remove_print_plate_circle()
+            theta = getattr(self, "X0", None)
+            if theta is not None:
+                self._set_print_theta_from_source(float(theta), update_spectrum=False)
+            return
+
+        self.print_plate_shape = masked_frame.shape
+        display_image = self._raw_to_display_image(masked_frame)
+        self._update_image_safe(self.print_plate_image_item, np.rot90(display_image,-1), levels=self._print_plate_levels)
+        self.print_plate_plot.setLabel("left", "pixel Y")
+        self.print_plate_plot.setLabel("bottom", "pixel X")
+        if self._print_plate_cake_theta_line is not None and self.print_plate_plot is not None:
+            try:
+                self.print_plate_plot.removeItem(self._print_plate_cake_theta_line)
+            except Exception:
+                pass
+            self._print_plate_cake_theta_line = None
+        self.print_plate_plot.invertY(True)
+        h_disp, w_disp = display_image.shape
+        self.print_plate_image_item.setRect(QtCore.QRectF(0.0, 0.0, float(w_disp), float(h_disp)))
         self._apply_print_plate_view_controls()
-        self._update_print_plate_levels_controls(image)
+        self._update_print_plate_levels_controls(masked_frame)
 
         theta = getattr(self, "X0", None)
         if theta is not None:
             self._draw_print_plate_circle(float(theta))
 
     def _update_print_plate_from_selector(self, *_args) -> None:
-        if self.print_plate_window is None:
-            return
-        if hasattr(self.print_plate_window, "isVisible") and not self.print_plate_window.isVisible():
+        if not self.print_plate_active:
             return
         self._update_print_plate_image()
-   
+
     def show_print_plate(self) -> None:
         if self.print_plate_active:
             if self.print_plate_window is not None:
                 self.print_plate_window.hide()
             if hasattr(self, "zoom_widget"):
                 self.zoom_widget.show()
-            self.print_plate_active = False
             self.top_layout.setStretch(0, 3)
             self.top_layout.setStretch(1, 1)
+            self.ui_state.spectrum_section_widget.right_layout.setStretch(0, 1)
+            self.ui_state.spectrum_section_widget.right_layout.setStretch(1, 1)
+            self.print_plate_active = False
             return
 
         if self.print_plate_window is None:
             self.print_plate_window = QWidget(self)
             layout = QVBoxLayout(self.print_plate_window)
+            tabs = QTabWidget(self.print_plate_window)
             tab_print = QWidget()
             tab_layout = QVBoxLayout(tab_print)
 
             controls_layout = QHBoxLayout()
-            rotation_box = QComboBox(self.print_plate_window)
-            rotation_box.addItems(["0°", "90° anti-horaire", "90° horaire", "180°"])
-            rotation_box.setCurrentIndex(2)
-            rotation_box.currentIndexChanged.connect(self._on_print_plate_rotation_changed)
-            controls_layout.addWidget(QLabel("Rotation"))
-            controls_layout.addWidget(rotation_box)
-
-            self._print_plate_scale_controls = {
-                "x": QDoubleSpinBox(self.print_plate_window),
-                "y": QDoubleSpinBox(self.print_plate_window),
-            }
-            for key, lbl in (("x", "Scale X"), ("y", "Scale Y")):
-                box = self._print_plate_scale_controls[key]
-                box.setRange(0.1, 10.0)
-                box.setSingleStep(0.1)
-                box.setValue(1.0)
-                box.valueChanged.connect(self._on_print_plate_scale_changed)
-                controls_layout.addWidget(QLabel(lbl))
-                controls_layout.addWidget(box)
+            self._print_plate_mode_button = QPushButton("Image", self.print_plate_window)
+            self._print_plate_mode_button.setCheckable(True)
+            self._print_plate_mode_button.clicked.connect(self._on_print_plate_mode_toggled)
+            controls_layout.addWidget(self._print_plate_mode_button)
             tab_layout.addLayout(controls_layout)
 
             hist_widget = pg.PlotWidget()
             hist_plot = hist_widget.getPlotItem()
             hist_plot.setLabel("left", "Counts")
             hist_plot.setLabel("bottom", "Pixel value")
-            self._print_plate_hist_curve = pg.PlotDataItem([], [], pen=pg.mkPen("w", width=1))
+            self._print_plate_hist_curve = pg.PlotDataItem([], [], pen=pg.mkPen("k", width=1))
             hist_plot.addItem(self._print_plate_hist_curve)
             self._print_plate_hist_region = pg.LinearRegionItem(values=(0, 1), orientation=pg.LinearRegionItem.Vertical)
             self._print_plate_hist_region.sigRegionChanged.connect(self._on_print_plate_levels_changed)
             hist_plot.addItem(self._print_plate_hist_region)
-            tab_layout.addWidget(hist_widget)
+            tab_layout.addWidget(hist_widget, 1)
 
             plate_widget = pg.PlotWidget()
             self.print_plate_plot = plate_widget.getPlotItem()
@@ -2831,11 +2999,9 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             self.print_plate_image_item = pg.ImageItem(np.zeros((1, 1), dtype=float))
             self.print_plate_plot.addItem(self.print_plate_image_item)
             self.print_plate_plot.scene().sigMouseClicked.connect(self._on_print_plate_clicked)
-            tab_layout.addWidget(plate_widget)
-            tab_layout.setStretch(0, 1)  # graph1
-            tab_layout.setStretch(1, 3)  # graph2
-   
-            layout.addWidget(tab_print)
+            tab_layout.addWidget(plate_widget, 4)
+            tabs.addTab(tab_print, "Plaque DRX")
+            layout.addWidget(tabs)
 
             right_layout = getattr(getattr(self.ui_state, "spectrum_section_widget", None), "right_layout", None)
             if right_layout is not None:
@@ -2843,10 +3009,18 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
 
         if hasattr(self, "zoom_widget"):
             self.zoom_widget.hide()
+        mode_button = getattr(self, "_print_plate_mode_button", None)
+        if mode_button is not None:
+            mode_button.blockSignals(True)
+            mode_button.setChecked(self._print_plate_mode == "cake")
+            mode_button.setText("Cake" if self._print_plate_mode == "cake" else "Image")
+            mode_button.blockSignals(False)
         self.print_plate_window.show()
         self.print_plate_active = True
         self.top_layout.setStretch(0, 1)
-        self.top_layout.setStretch(1, 1)
+        self.top_layout.setStretch(1, 2)
+        self.ui_state.spectrum_section_widget.right_layout.setStretch(1, 1)
+        self.ui_state.spectrum_section_widget.right_layout.setStretch(0, 2)
         self._update_print_plate_image()
 
     def f_cross_spectrum(self,event):
@@ -2925,196 +3099,6 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
 
 #########################################################################################################################################################################################
 #? COMMANDE Treateamnt Spectrummfit
-    def FIT_lmfitVScurvfitOLD(self): # Fonction pour fit
-        save_jauge=self.index_jauge
-        save_pic=self.index_pic_select
-
-        self.Param_FIT=[]
-        list_F=[]
-        initial_guess=[]
-        bounds_min,bounds_max=[],[]
-        #self.nb_jauges=len(self.Spectrum.Gauges)
-        x_min, x_max=float(self.Param0[0][0][0]),float(self.Param0[0][0][0])
-        for j in range(len(self.Spectrum.Gauges)):
-            for i in range(self.J[j]):
-                x_min,x_max=min(x_min,float(self.Param0[j][i][0])-float(self.Param0[j][i][2])*5),max(x_max,float(self.Param0[j][i][0])+float(self.Param0[j][i][2])*5)
-                self.Spectrum.Gauges[j].pics[i].Update(ctr=float(self.Param0[j][i][0]),ampH=float(self.Param0[j][i][1]),coef_spe=self.Param0[j][i][3],sigma=float(self.Param0[j][i][2]),model_fit=self.Param0[j][i][4],inter=self.get_fit_variation())
-                params_f=self.Spectrum.Gauges[j].pics[i].model.make_params()
-                list_F.append(self.Spectrum.Gauges[j].pics[i].f_model)
-                initial_guess+= self.Param0[j][i][:3]
-                for c in self.Param0[j][i][3]:
-                    initial_guess+=[c]
-                bounds_min+=[self.Spectrum.Gauges[j].pics[i].ctr[1][0],self.Spectrum.Gauges[j].pics[i].ampH[1][0],self.Spectrum.Gauges[j].pics[i].sigma[1][0]]
-                bounds_max+=[self.Spectrum.Gauges[j].pics[i].ctr[1][1],self.Spectrum.Gauges[j].pics[i].ampH[1][1],self.Spectrum.Gauges[j].pics[i].sigma[1][1]]
-                
-                for c in self.Spectrum.Gauges[j].pics[i].coef_spe:
-                    bounds_min+=[c[1][0]]
-                    bounds_max+=[c[1][1]]
-            self.Spectrum.Gauges[j].Update_model()
-        bounds=[bounds_min,bounds_max]
-        print( [[guest,sig] for guest,sig in zip(initial_guess, np.array(bounds_max)-np.array(bounds_min))])
- 
-        for j in range(len(self.Spectrum.Gauges)):
-            if j ==0:
-                self.Spectrum.model = self.Spectrum.Gauges[0].model
-            else:
-                self.Spectrum.model+=self.Spectrum.Gauges[j].model
-       
-        self.Spectrum.Data_treatement()
-        if self.zone_spectrum_box.isChecked():
-            self.Spectrum.indexX=np.where((self.Spectrum.wnb >= x_min) & (self.Spectrum.wnb <= x_max))[0]
-            x_sub=self.Spectrum.wnb[self.Spectrum.indexX]
-            y_sub = self.Spectrum.y_corr[self.Spectrum.indexX]
-            blfit = self.Spectrum.blfit[self.Spectrum.indexX]
-        else:
-            if self.X_e[0]!=None and self.X_s[0]!=None and self.Spectrum.indexX is not None:
-                self.Zone_fit[0] = np.where((self.Spectrum.wnb >= self.X_s[0]) & (self.Spectrum.wnb <= self.X_e[0]))[0]
-                x_sub=self.Spectrum.wnb[self.Zone_fit[0]]
-                self.Spectrum.indexX=self.Zone_fit[0]
-                for J in self.Spectrum.Gauges:
-                    J.indexX=self.Zone_fit[0]
-                y_sub = self.Spectrum.y_corr[self.Spectrum.indexX]
-                blfit = self.Spectrum.blfit[self.Spectrum.indexX]
-            else:
-                y_sub=self.Spectrum.y_corr
-                blfit=self.Spectrum.blfit
-
-
-        if self.vslmfit.isChecked():
-            self.Spectrum.FIT()
-            for i, J in enumerate(self.Spectrum.Gauges):
-                for j , p in enumerate(J.pics):
-                    params_f=p.model.make_params()
-                    y_plot=p.model.eval(params_f,x=self.Spectrum.wnb)
-                    self.list_y_fit_start[i][j]=y_plot
-            
-
-
-        sum_function = CL.Gen_sum_F(list_F)
-
-        try :
-            params , params_covar = curve_fit(sum_function,x_sub,y_sub,p0=initial_guess,bounds=bounds)
-            params_sigma = np.sqrt(np.diag(params_covar))
-            param_print=[[str(round(init,3))+f"+-"+str(round(init-bound,3))] for init,bound in zip(initial_guess,bounds_min)]
-        except Exception as e:
-            self.Spectrum.bit_fit=True
-            self.bit_fit_T=True 
-            self.text_box_msg.setText('FIT ERROR'+str(e))
-           
-            return
-        fit=sum_function(x_sub,*params)
-
-        if sum((fit-y_sub)**2) < sum(self.Spectrum.dY**2):
-            text_fit= rf"Curve_fit BEST you can Validate \n REPORT: {[ p for p in param_print]}"
-        else:
-            text_fit= "Curve_fit LESS GOOD you can Cancel"
-        #self.plot_start=self.ax_spectrum.plot(self.Spectrum.wnb,sum_function(self.Spectrum.wnb,*initial_guess),'r')
-        self.plot_curv_fit.setData(x_sub,fit)
-        self.plot_curv_dY.setData(x_sub,y_sub-fit)
-       
-        self.Print_fit_start()
-       
-
-        if self.bit_bypass is False :
-            msg_box = QMessageBox(self)
-            msg_box.setWindowTitle("CURVE FIT DONE")
-            text=text_fit+'\n Save fit Press "v" Cancel Press "c"' #\n Launch lmfit Press "l"
-            msg_box.setText(text)
-
-            v_button = msg_box.addButton("Validate", QMessageBox.AcceptRole)
-
-            a_button = msg_box.addButton("Cancel", QMessageBox.RejectRole)
-
-            msg_box.setDefaultButton(v_button)
-
-            def on_key_press(event):
-                if event.key() == Qt.Key_V:
-                    v_button.click()
-                elif event.key() == Qt.Key_C:
-                    a_button.click()
-
-            msg_box.keyPressEvent = on_key_press
-            msg_box.exec_()
-            
-
-        if msg_box.clickedButton() == v_button or (self.bit_bypass is True and text_fit=="Curve_fit BEST you can Validate" ):             
-            self.plot_curv_fit.setData([],[])
-            self.plot_curv_dY.setData([],[])
-
-            self.Spectrum.Y= fit +  blfit
-            self.Spectrum.X=x_sub
-            self.Spectrum.dY= y_sub-fit 
-            self.Spectrum.lamb_fit =params[0]
-            ij_3,ij_4,ij_5=0,0,0
-            params_list=list(params)
-
-            for i, J in enumerate(self.Spectrum.Gauges):
-                for j , p in enumerate(J.pics):
-                    n_c=len(self.Param0[i][j][3])
-                    start_idx = 3 * ij_3 + 4 * ij_4 + 5 * ij_5
-                    end_idx = start_idx + 3
-                    l_sigma=params_covar[start_idx:end_idx]
-                    if n_c == 0:
-                        self.Param0[i][j][:4] = params_list[start_idx:end_idx] #list(params[start_idx:end_idx]) 
-                        ij_3 += 1
-                    elif n_c == 1:
-                        self.Param0[i][j][:4] = params_list[start_idx:end_idx] + [np.array([params_list[end_idx]])]#list(params[start_idx:end_idx]) + list(np.array(params[end_idx]))
-                        ij_4 += 1  
-                    elif n_c == 2:
-                        self.Param0[i][j][:4] = params_list[start_idx:end_idx] + [np.array(params_list[end_idx:end_idx+2])] #list(params[start_idx:end_idx]) + list(np.array(params[end_idx:end_idx+2]))
-                        ij_5 += 1
-                    p.Update(ctr=float(self.Param0[i][j][0]),ampH=float(self.Param0[i][j][1]),coef_spe=self.Param0[i][j][3],sigma=float(self.Param0[i][j][2]),inter=self.get_fit_variation())
-                    p.ctr=[p.ctr,[p.ctr-l_sigma[0],p.ctr+l_sigma[0]]]
-
-                    params_f = p.model.make_params()
-                    y_plot = p.model.eval(params_f, x=self.Spectrum.wnb)
-                    self._update_pic_display(i, j, y_plot)
-
-                J.lamb_fit=self.Param0[i][0][0]
-                J.bit_fit=True
-                
-            
-            
-            
-
-            self.Spectrum.bit_fit=True
-            self.Spectrum.Calcul_study(mini=True)
-            self.text_box_msg.setText('FIT TOTAL \n DONE')
-            self.bit_fit_T=True    
-            self.index_jauge=save_jauge
-            self.index_pic_select=save_pic
-            self.f_Gauge_Load()
-            self.Print_fit_start()
-
-
-        else:
-            self.plot_curv_fit.setData([],[])
-            self.plot_curv_dY.setData([],[])
-            self.bit_fit_T=True 
-            for i, J in enumerate(self.Spectrum.Gauges):         
-                J.bit_fit=True
-                if self.vslmfit.isChecked():
-                    for j, p in enumerate(J.pics):
-                        y_plot=self.list_y_fit_start[i][j]
-                        self._update_pic_fill_data(
-                            i,
-                            j,
-                            self.Spectrum.wnb,
-                            y_plot,
-                            np.zeros_like(self.Spectrum.blfit),
-                        )
-                        new_P0,_=p.Out_model()                       
-                        self.Param0[i][j][:4]=new_P0
-                        new_name= self.Nom_pic[i][j] + "   X0:"+str(self.Param0[i][j][0])+"   Y0:"+ str(self.Param0[i][j][1]) + "   sigma:" + str(self.Param0[i][j][2]) + "   Coef:" + str(self.Param0[i][j][3]) + " ; Modele:" + str(self.Param0[i][j][4])
-                        self.list_text_pic[i][j]=str(new_name)
-                        if i ==save_jauge:
-                            self.listbox_pic.takeItem(j)
-                            self.listbox_pic.insertItem(j,str(new_name))
-                J.lamb_fit=self.Param0[i][0][0]
-            self.Spectrum.bit_fit=True
-            self.Spectrum.Calcul_study(mini=True)
-            self.text_box_msg.setText('BAD FIT r^2 INCREAS')
-
     def FIT_lmfitVScurvfit(self, skip_ui=False, fit_context: Optional[FitContext] = None):
         """Fit avec comparaison lmfit vs curve_fit"""
         fit_context = fit_context or self._get_fit_context(skip_ui)
@@ -4523,6 +4507,11 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         elif self.plot_piezo is not None:
             self.plot_piezo.setData([], [])
 
+        self._set_piezo_setpoint_visible(
+            getattr(getattr(self, "cb_piezo_consigne", None), "isChecked", lambda: True)()
+        )
+
+
         time_attr = getattr(self, "time", None)
         time_display = np.asarray(time_attr, dtype=float) if time_attr is not None else np.asarray([])
         time_limits = time_display
@@ -4648,6 +4637,11 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                 self.plot_piezo.setData(time_amp_arr, amp_arr)
         elif self.plot_piezo is not None:
             self.plot_piezo.setData([], [])
+
+        self._set_piezo_setpoint_visible(
+            getattr(getattr(self, "cb_piezo_consigne", None), "isChecked", lambda: True)()
+        )
+
 
         theta_range = self._update_cedx_image(run, Time)
 
@@ -5658,7 +5652,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             last_pressure = None
 
         progress_dialog = None
-        if not skip_ui and batch_range.total_steps:
+        if batch_range.total_steps:
             progress_dialog = ProgressDialog(
                 "Recherche automatique des compositions...",
                 "Annuler",
@@ -5867,7 +5861,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
 
         self.text_box_msg.setText("New integration")
         self.bit_bypass=True
-        self.f_Spectrum_Load(Spectrum=CL.Spectre(np.array(tth),np.array(intens),Gauges=save_gauges,deg_baseline=int(self.deg_baseline_entry.value(),param_f=[float(self.param_filtre_1_entry.text()),float(self.param_filtre_2_entry.text())])))
+        self.f_Spectrum_Load(Spectrum=CL.Spectre(np.array(tth),np.array(intens),Gauges=save_gauges,deg_baseline=int(self.deg_baseline_entry.value()),param_f=[float(self.param_filtre_1_entry.text()),float(self.param_filtre_2_entry.text())]))
         self.bit_bypass=False
 
     def SAVE_CEDd(self):
@@ -5934,7 +5928,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         for j in range(n):
             before = old_save_var[j]
             after = new_save_var[j]
-            print(f"j={j} | old={before} | new={after} | k={k}")
+            #print(f"j={j} | old={before} | new={after} | k={k}")
 
             # AJOUT
             if not before and after:
@@ -5968,14 +5962,14 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                 self.J[self.index_jauge] += 1
                 self.index_pic_select = k
                 self.Replace_pic()
-                print("ref:",j,"pics:", k, "add in")
+                #print("ref:",j,"pics:", k, "add in")
                 k += 1
 
             # SUPPRESSION
             elif before and not after:
                 self.index_pic_select = k
                 self.Undo_pic_select()
-                print("ref:",j,"pics:", k, "del")
+                #print("ref:",j,"pics:", k, "del")
                 # NE PAS INCREMENTER k car le pic vient d'être retiré
 
             # 3. MODIFICATION d'un pic existant
@@ -6011,7 +6005,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                     self.J[self.index_jauge] += 1
                     self.index_pic_select = k
                     self.Replace_pic()
-                    print("ref:",j,"pics:", k, "add (from empty)")
+                    #print("ref:",j,"pics:", k, "add (from empty)")
                     k += 1
                 else:
                     X0 = elem_ref.thetas_PV[j][0]
@@ -6022,7 +6016,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                     self.bit_bypass = True
                     self.Replace_pic()
                     self.bit_bypass = False
-                    print("ref:",j,"pics:", k, "chg")
+                    #print("ref:",j,"pics:", k, "chg")
                     k += 1
 
         # Mettre à jour l'état de référence et recalculer
@@ -6747,17 +6741,9 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         self.select_pic()
         self.bit_bypass=False
         self.plot_ax3.setBrush(brush)
-        #self.plot_pic_fit[self.index_jauge][self.index_pic_select].setBrush(brush)
              
     def Replace_pic(self):# - - - REPLACE PIQUE (r) - - -#
         if self.index_pic_select is not None:
-            #name=self.listbox_pic.item(self.index_pic_select).text()
-            #motif = r'_p(\d+)_'
-            #matches = re.findall(motif, name)
-            #index_pic=int(matches[0])
-            #if index_pic != self.index_pic_select:
-            #print(index_pic,self.index_pic_select,"Different betewen list and select")qqqqqqq
-
             if self.bit_bypass == False:
                 self.Param0[self.index_jauge][self.index_pic_select]=[self.X0,self.Y0,float(self.spinbox_sigma.value()),np.array([float(spin.value()) for spin in self.coef_dynamic_spinbox]),str(self.model_pic_fit) ]
             else:

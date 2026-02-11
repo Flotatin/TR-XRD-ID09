@@ -64,7 +64,7 @@ def load_command_file(list_widget: QListWidget, python_commands: List[str], path
                 elif command.startswith("self"):
                     font = QFont("Arial", 10, QFont.Bold)
                     item.setFont(font)
-                    item.setForeground(QColor("lightgrey"))
+                    item.setForeground(QColor("k"))
                     text = command[5:]
                 elif command.startswith("."):
                     text = command[1:]
@@ -79,7 +79,7 @@ def load_command_file(list_widget: QListWidget, python_commands: List[str], path
                 else:
                     font = QFont("Arial", 10, QFont.Bold)
                     item.setFont(font)
-                    item.setForeground(QColor("lightgrey"))
+                    item.setForeground(QColor("k"))
                 item.setText(text.split("(")[0])
                 python_commands.append(command)
                 list_widget.addItem(item)

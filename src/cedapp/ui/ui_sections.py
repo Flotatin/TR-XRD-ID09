@@ -189,7 +189,7 @@ def build_command_panel(window) -> None:
     layout.addWidget(state.help_widget)
 
     box.setLayout(layout)
-    window.grid_layout.addWidget(box, 0, 5, 2, 1)
+    window.grid_layout.addWidget(box, 0, 5, 3, 1)
 
     state.help_tab_index = None
     state.help_tab_visible = False
@@ -334,7 +334,7 @@ def build_message_label(window) -> None:
 
     window.ui_state.text_box_msg = QLabel("Good Luck and Have Fun")
 
-
+'''
 def build_model_peak_section(window) -> None:
     """Configure the model peak parameter widgets."""
 
@@ -370,12 +370,12 @@ def build_model_peak_section(window) -> None:
     state.ParampicLayout.addLayout(creat_spin_label(state.spinbox_sigma, "σ :"))
 
     parampic_box.setLayout(state.ParampicLayout)
-    window.grid_layout.addWidget(parampic_box, 2, 5, 1, 2)
+    window.grid_layout.addWidget(parampic_box, 3, 5, 1, 2)
 
     window.bit_bypass = True
     window.f_model_pic_type()
     window.bit_bypass = False
-
+'''
 
 def init_plot_widgets(window) -> None:
     """Initialise the main spectrum plot area and related items."""
@@ -422,9 +422,49 @@ def build_gauge_section(window) -> None:
     state.listbox_pic = QListWidget()
     state.listbox_pic.doubleClicked.connect(window.select_pic)
     layout.addWidget(state.listbox_pic)
-
     add_box.setLayout(layout)
+
+
+    parampic_box = QGroupBox("Model peak")
+    state.ParampicLayout = QVBoxLayout()
+    state.fit_param_widget = FitParamWidget(window)
+    state.ParampicLayout.addWidget(state.fit_param_widget)
+
+    state.coef_dynamic_spinbox, state.coef_dynamic_label = [], []
+
+    state.model_pic_type_selector = QComboBox(window)
+    state.liste_type_model_pic = ["PearsonIV", "PseudoVoigt", "Moffat", "SplitLorentzian", "Gaussian"]
+    state.model_pic_type_selector.addItems(state.liste_type_model_pic)
+    tableau_colors = list(mcolors.TABLEAU_COLORS.values())
+    for ind in range(state.model_pic_type_selector.count()):
+        color = tableau_colors[ind % len(tableau_colors)]
+        item = state.model_pic_type_selector.model().item(ind)
+        if item is not None:
+            item.setBackground(QColor(color))
+    state.model_pic_type_selector.currentIndexChanged.connect(window.f_model_pic_type)
+    state.ParampicLayout.addWidget(state.model_pic_type_selector)
+    state.model_pic_fit = state.model_pic_type_selector.currentText()
+    
+
+    state.spinbox_sigma = QDoubleSpinBox()
+    state.spinbox_sigma.valueChanged.connect(window.setFocus)
+    state.spinbox_sigma.valueChanged.connect(
+        lambda _value: window._update_fit_window() if getattr(window, "index_pic_select", None) is not None else None
+    )
+    
+    state.spinbox_sigma.setRange(0.01, 10)
+    state.spinbox_sigma.setSingleStep(0.01)
+    state.spinbox_sigma.setValue(0.15)
+    state.ParampicLayout.addLayout(creat_spin_label(state.spinbox_sigma, "σ :"))
+
+    parampic_box.setLayout(state.ParampicLayout)
+    layout.addWidget(parampic_box)
+
     window.AddBox = add_box
     if getattr(window.ui_state, "spectrum_section_widget", None) is not None:
         window.ui_state.spectrum_section_widget.add_right_widget(add_box)
     window.bit_modif_PTlambda = False
+    
+    window.bit_bypass = True
+    window.f_model_pic_type()
+    window.bit_bypass = False

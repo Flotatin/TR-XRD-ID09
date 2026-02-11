@@ -125,7 +125,7 @@ class FiltreWidget(QWidget):
         main.param_filtre_1_name = QLabel("")
         layh1.addWidget(main.param_filtre_1_name)
         main.param_filtre_1_entry = QLineEdit()
-        main.param_filtre_1_entry.setText("10")
+        main.param_filtre_1_entry.setText("9")
         layh1.addWidget(main.param_filtre_1_entry)
         layout.addLayout(layh1)
 
@@ -133,7 +133,7 @@ class FiltreWidget(QWidget):
         main.param_filtre_2_name = QLabel("")
         layh2.addWidget(main.param_filtre_2_name)
         main.param_filtre_2_entry = QLineEdit()
-        main.param_filtre_2_entry.setText("1")
+        main.param_filtre_2_entry.setText("2")
         layh2.addWidget(main.param_filtre_2_entry)
         layout.addLayout(layh2)
 
@@ -293,14 +293,14 @@ class FitParamWidget(QWidget):
 
     def __init__(self, main):
         super().__init__()
-        layout = QVBoxLayout()
-
-        main.spinbox_cycle = QSpinBox()
-        main.spinbox_cycle.valueChanged.connect(main.setFocus)
-        main.spinbox_cycle.setRange(0, 10)
-        main.spinbox_cycle.setSingleStep(1)
-        main.spinbox_cycle.setValue(1)
-        layout.addLayout(creat_spin_label(main.spinbox_cycle, "?(Y)"))
+        layout = QHBoxLayout()
+        
+        #main.spinbox_cycle = QSpinBox()
+        #main.spinbox_cycle.valueChanged.connect(main.setFocus)
+        #main.spinbox_cycle.setRange(0, 10)
+        #main.spinbox_cycle.setSingleStep(1)
+        #main.spinbox_cycle.setValue(1)
+        #layout.addLayout(creat_spin_label(main.spinbox_cycle, "?(Y)"))
 
         main.sigma_pic_fit_entry = QSpinBox()
         main.sigma_pic_fit_entry.valueChanged.connect(main.setFocus)

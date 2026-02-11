@@ -285,7 +285,7 @@ class Element(Gauge):
                 theta=self.Element_ref.thetas_PV[i][0]
                 self.pic_ref.append([name_dhkl,theta])
                 text_print=text_print+" ; "+name_dhkl 
-                new_pics=Pics(name=self.name + f'_p{name_dhkl}',ctr=theta,model_fit="PearsonIV",coef_spe=[1.1,0])
+                new_pics=Pics(name=self.name + f'_p{name_dhkl}',ctr=theta,model_fit="PearsonIV",coef_spe=[1.1,0])#,sigma=1 if "liq" in self.name else 0.15 )
                 self.pics.append(new_pics)
                 if n_p == 0:
                     self.model = new_pics.model

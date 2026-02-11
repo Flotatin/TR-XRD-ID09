@@ -38,8 +38,6 @@ self.ClassDRX
 
 #---Utile---:
 self.RUN.Print(Oscilo=True)
-self.RUN.Temps_Pression(Y="Channel4") #ESRF2023
 self.RUN.Summary.to_csv(CL.os.path.basename(self.RUN.CEDd_path), index=False)
-self.RUN.Summary["Time"]=self.RUN.Time_spectrum
-self.RUN.Time_spectrum=CL.np.linspace(0,len(self.RUN.Spectrum)*1e-3,len(self.RUN.Spectrum))
+self.print_plate_image_item.setColorMap(CL.pg.colormap.get('CET-L17'))
 #DEBUG

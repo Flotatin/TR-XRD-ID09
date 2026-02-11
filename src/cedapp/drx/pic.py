@@ -178,7 +178,7 @@ class Pics:
         else:
             # rafraîchir les bornes si inter a changé
             s = self.sigma[0]
-            self.sigma = [s, [s * inter_min, s * (1 + self.inter)]]
+            self.sigma = [s, [s * inter_min, min(s * (1 + self.inter),5)]]
 
         # --- maj coef_spe
         if coef_spe is not None:
@@ -216,8 +216,8 @@ class Pics:
 
                 self.coef_spe[0][0] = m0
                 self.coef_spe[0][1] = [max(0.501, m0 * inter_min),
-                                    max(0.51, m0 * (1 + self.inter))]
-                self.coef_spe[1][1] = [min(lc), max(lc)]
+                                    min(max(0.51, m0 * (1 + self.inter)),4)]
+                self.coef_spe[1][1] = [max(-4,min(lc)), min(max(lc),4)]
                 """
                 if not move:
                     ctr_phys = self.ctr[0] + self.sigma[0] * skew0 / (2 * m0)

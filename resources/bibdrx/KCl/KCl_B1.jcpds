@@ -4,6 +4,11 @@ K0:        17.1000
 K0P:       5.5000
 SYMMETRY: CUBIC
 A:      6.2879
+B:      6.2879
+C:      6.2879
+ALPHA:    90.0
+BETA:     90.0
+GAMMA:    90.0
 VOLUME: 248.609
 ALPHAT:      0
 DIHKL:   3.1439    100.    2.00    0.00    0.00

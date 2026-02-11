@@ -1,6 +1,6 @@
 VERSION:   4
-COMMENT: Ga III /T[150,350]/P[-0.2,20]/Z=18 #, I4/mmm, eos de prb 52, 9988, 1995
-K0:       63.7
+COMMENT: Ga III /T[150,350]/P[1,20]/Z=18 #, I4/mmm, eos de prb 52, 9988, 1995 K0=63.7
+K0:       18
 K0P:      4.652
 DK0DT:    0.0
 DK0PDT:   0.0
@@ -11,7 +11,7 @@ C:        4.452
 ALPHA:    90.0
 BETA:     90.0
 GAMMA:    90.0
-VOLUME:   35.22853798800001
+VOLUME:   39.5
 ALPHAT:   0.0
 DALPHADT: 0.0
 DIHKL:    2.37807	100	1	0	1

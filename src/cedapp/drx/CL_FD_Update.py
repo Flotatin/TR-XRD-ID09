@@ -53,8 +53,8 @@ def SAVE_CEDd(file_CEDd,bit_try=False):
     if file_CEDd:
         if bit_try==True:
             try:
-                if hasattr(file_CEDd, 'data_drx'):
-                    file_CEDd.data_drx = None
+                #if hasattr(file_CEDd, 'data_drx'):
+                #file_CEDd.data_drx = None
                 dill.dump( file_CEDd, open( file_CEDd.CEDd_path, "wb" ) )
             except Exception as e:
                 print("ERROR : ",e," in SAVE_CEDd")
