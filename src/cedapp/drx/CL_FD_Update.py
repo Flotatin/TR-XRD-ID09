@@ -261,7 +261,7 @@ class Element_Bibli:
         self.Dhkl = pd.DataFrame(M, columns=["Dhkl", "I", "h", "k", "l"])
 
         # Récupérer la symétrie
-        self.symmetrie = self.file[1][int(np.where(self.file[0] == "SYMMETRY")[0])]
+        self.symmetrie = self.file[1][np.flatnonzero(self.file[0] == "SYMMETRY")[0]]
 
         # Si V0 pas défini → calcul selon la symétrie
         if self.V0 is None:
