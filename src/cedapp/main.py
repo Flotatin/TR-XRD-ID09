@@ -242,136 +242,210 @@ def _setattr_and_call(method_name: str, attribute: str, value) -> Callable[["Mai
     return _caller
 
 
-KEYBOARD_SHORTCUTS: Dict[Tuple[int, int], Dict[str, object]] = {
-    (Qt.Key_Return, Qt.ControlModifier): _direct_action(lambda self: self.execute_code()),
-    (Qt.Key_C, Qt.ControlModifier): _direct_action(_method_action("copy_gauge_models_to_clipboard")),
-    (Qt.Key_R, Qt.ShiftModifier): {
-        "handler": _method_action("Replace_pic_fit"),
-        "name": "Replace pic",
-        "requires_box": False,
-        "allow_extra_modifiers": True,
+from PyQt5.QtCore import Qt
+from typing import Dict, Tuple, Any
+
+KEYBOARD_SHORTCUTS: Dict[Tuple[int, int], Dict[str, Any]] = {
+
+    # ======================
+    # Execution / Core
+    # ======================
+
+    (Qt.Key_Return, Qt.ControlModifier): {
+        "handler": "execute_code",
+        "name": "Execute code",
+        "description": "Execute current command",
+        "category": "Core",
     },
-    (Qt.Key_R, Qt.NoModifier): {
-        "handler": _method_action("Replace_pic"),
-        "name": "Replace pic",
-        "requires_box": False,
-    },
-    (Qt.Key_U, Qt.ShiftModifier): {
-        "handler": _method_action("Undo_pic"),
-        "name": "Undo pic",
-        "requires_box": False,
-        "allow_extra_modifiers": True,
-    },
-    (Qt.Key_U, Qt.NoModifier): {
-        "handler": _method_action("Undo_pic_select"),
-        "name": "Undo pic",
-        "requires_box": False,
-    },
-    (Qt.Key_C, Qt.NoModifier): {
-        "handler": _method_action("Click_Confirme"),
-        "name": "Confirm pic",
-        "requires_box": False,
-    },
-    (Qt.Key_Y, Qt.NoModifier): {
-        "handler": _method_action("Auto_pic"),
-        "name": "Auto pic",
-        "requires_box": False,
-    },
-    (Qt.Key_I, Qt.NoModifier): {
-        "handler": _method_action("f_out_bib_gauge"),
-        "name": "Output bib gauge",
-        "requires_box": False,
-    },
-    (Qt.Key_S, Qt.ShiftModifier): {
-        "handler": _method_action("CREAT_new_Spectrum"),
-        "name": "New Spectrum",
-        "requires_box": True,
-        "allow_extra_modifiers": True,
-    },
-    (Qt.Key_F, Qt.ShiftModifier): {
-        "handler": _method_action("FIT_lmfitVScurvfit"),
-        "name": "Fit total",
-        "requires_box": True,
-        "allow_extra_modifiers": True,
-    },
-    (Qt.Key_B, Qt.ShiftModifier): {
-        "handler": _method_action("Baseline_spectrum"),
-        "name": "Baseline",
-        "requires_box": False,
-    },
-    (Qt.Key_X, Qt.NoModifier): _direct_action(
-        lambda self: self.Spectrum.Calcul_study(mini=True)
-    ),
-    (Qt.Key_A, Qt.ShiftModifier): {
-        "handler": _method_action("f_Gauge_Add_in_Spectrum"),
-        "name": "add Gauge",
-        "requires_box": False,
-        "allow_extra_modifiers": True,
-    },
-    (Qt.Key_D, Qt.ShiftModifier): {
-        "handler": _method_action("f_dell_bib_gauge"),
-        "name": "Delete last pic",
-        "requires_box": False,
-        "allow_extra_modifiers": True,
-    },
-    (Qt.Key_D, Qt.NoModifier): {
-        "handler": _method_action("Dell_Jauge"),
-        "name": "dell Gauge",
-        "requires_box": False,
-    },
-    (Qt.Key_E, Qt.ShiftModifier): {
-        "handler": _method_action("CREAT_empty_CEDd_from_loaded_files"),
-        "name": "New CEDd",
-        "requires_box": True,
-        "allow_extra_modifiers": True,
-    },
+
     (Qt.Key_F5, Qt.NoModifier): {
-        "handler": _setattr_and_call("CLEAR_CEDd", "bit_bypass", True),
+        "handler": "CLEAR_CEDd",
         "name": "Clear CEDd",
+        "description": "Clear current CEDd dataset",
+        "category": "CEDd",
         "requires_box": True,
     },
+
     (Qt.Key_F3, Qt.NoModifier): {
-        "handler": _method_action("SAVE_CEDd"),
+        "handler": "SAVE_CEDd",
         "name": "Save CEDd",
+        "description": "Save current CEDd file",
+        "category": "CEDd",
         "requires_box": True,
     },
+
     (Qt.Key_F4, Qt.NoModifier): {
-        "handler": _method_action("REFRESH"),
-        "name": "Refresh data CEDd",
+        "handler": "REFRESH",
+        "name": "Refresh",
+        "description": "Reload CEDd data",
+        "category": "CEDd",
         "requires_box": True,
     },
-    (Qt.Key_T, Qt.ShiftModifier): {
-        "handler": _method_action("CEDX_Fit_all"),
-        "name": "CEDX_Fit_all",
-        "requires_box": True,
+
+    # ======================
+    # Peaks
+    # ======================
+
+    (Qt.Key_R, Qt.NoModifier): {
+        "handler": "Replace_pic",
+        "name": "Replace pic",
+        "description": "Replace selected peak",
+        "category": "Peaks",
+    },
+
+    (Qt.Key_R, Qt.ShiftModifier): {
+        "handler": "Replace_pic_fit",
+        "name": "Fit pic",
+        "description": "Replace peak using fitted model",
+        "category": "Peaks",
         "allow_extra_modifiers": True,
     },
-    (Qt.Key_L, Qt.ShiftModifier): {
-        **_direct_action(lambda self: self._open_oscilloscope_viewer()),
+
+    (Qt.Key_U, Qt.NoModifier): {
+        "handler": "Undo_pic_select",
+        "name": "Undo pic (selected)",
+        "description": "Undo last selected peak action",
+        "category": "Peaks",
+    },
+
+    (Qt.Key_U, Qt.ShiftModifier): {
+        "handler": "Undo_pic",
+        "name": "Undo pic",
+        "description": "Undo last peak operation",
+        "category": "Peaks",
         "allow_extra_modifiers": True,
     },
-    (Qt.Key_P, Qt.ShiftModifier): {
-        "handler": _method_action("toggle_colonne"),
-        "name": "Toggle column",
-        "requires_box": False,
-        "allow_extra_modifiers": True,
+
+    (Qt.Key_C, Qt.NoModifier): {
+        "handler": "Click_Confirme",
+        "name": "Confirm pic",
+        "description": "Confirm manually placed peak",
+        "category": "Peaks",
     },
+
+    (Qt.Key_Y, Qt.NoModifier): {
+        "handler": "Auto_pic",
+        "name": "Auto peak",
+        "description": "Automatic peak detection",
+        "category": "Peaks",
+    },
+
     (Qt.Key_M, Qt.NoModifier): {
-        "handler": _method_action("try_find_peak"),
-        "name": "Try find peak",
-        "requires_box": False,
+        "handler": "try_find_peak",
+        "name": "Find peak",
+        "description": "Try to detect new peak",
+        "category": "Peaks",
     },
-    (Qt.Key_Q, Qt.NoModifier): _direct_action(_toggle_checkbox_action("select_clic_box")),
-    (Qt.Key_H, Qt.NoModifier): _direct_action(_toggle_checkbox_action("spectrum_select_box")),
-    (Qt.Key_F2, Qt.NoModifier): _direct_action(_method_action("afficher_clavier_utilise")),
-    (Qt.Key_S, Qt.ControlModifier): _direct_action(_method_action("show_gauge_selection_zone")),
-    (Qt.Key_V, Qt.ControlModifier): _direct_action(_method_action("paste_gauge_models_from_clipboard")),
-    (Qt.Key_Delete, Qt.NoModifier): _direct_action(_method_action("delete_gauges_in_zone")),
-    (Qt.Key_Escape, Qt.NoModifier): _direct_action(_method_action("hide_gauge_selection_zone")),
+
+    # ======================
+    # Gauges
+    # ======================
+
+    (Qt.Key_A, Qt.ShiftModifier): {
+        "handler": "f_Gauge_Add_in_Spectrum",
+        "name": "Add gauge",
+        "description": "Add gauge to spectrum",
+        "category": "Gauges",
+        "allow_extra_modifiers": True,
+    },
+
+    (Qt.Key_D, Qt.NoModifier): {
+        "handler": "Dell_Jauge",
+        "name": "Delete gauge",
+        "description": "Delete selected gauge",
+        "category": "Gauges",
+    },
+
+    (Qt.Key_D, Qt.ShiftModifier): {
+        "handler": "f_dell_bib_gauge",
+        "name": "Delete Gauge bibli",
+        "description": "Delete last added peak",
+        "category": "Gauges",
+        "allow_extra_modifiers": True,
+    },
+
+    (Qt.Key_I, Qt.NoModifier): {
+        "handler": "f_out_bib_gauge",
+        "name": "Export gauge",
+        "description": "Export gauge to bibliography",
+        "category": "Gauges",
+    },
+
+    # ======================
+    # Spectrum
+    # ======================
+
+    (Qt.Key_S, Qt.ShiftModifier): {
+        "handler": "CREAT_new_Spectrum",
+        "name": "New spectrum",
+        "description": "Create new spectrum",
+        "category": "Spectrum",
+        "requires_box": True,
+        "allow_extra_modifiers": True,
+    },
+
+    (Qt.Key_B, Qt.ShiftModifier): {
+        "handler": "Baseline_spectrum",
+        "name": "Baseline",
+        "description": "Compute baseline",
+        "category": "Spectrum",
+    },
+
+    (Qt.Key_F, Qt.ShiftModifier): {
+        "handler": "FIT_lmfitVScurvfit",
+        "name": "Fit total",
+        "description": "Run full spectrum fitting",
+        "category": "Spectrum",
+        "requires_box": True,
+        "allow_extra_modifiers": True,
+    },
+
+    # ======================
+    # CEDX
+    # ======================
+
+    (Qt.Key_T, Qt.ShiftModifier): {
+        "handler": "CEDX_Fit_all",
+        "name": "CEDX fit all",
+        "description": "Fit all spectra in CEDX",
+        "category": "CEDX",
+        "requires_box": True,
+        "allow_extra_modifiers": True,
+    },
+
+    (Qt.Key_N, Qt.ShiftModifier): {
+        "handler": "CREAT_empty_CEDd_from_loaded_files",
+        "name": "New CEDd",
+        "description": "Create empty CEDd from loaded files",
+        "category": "CEDX",
+        "requires_box": True,
+        "allow_extra_modifiers": True,
+    },
+
+    # ======================
+    # UI
+    # ======================
+
+    (Qt.Key_F2, Qt.NoModifier): {
+        "handler": "afficher_clavier_utilise",
+        "name": "Show shortcuts",
+        "description": "Display keyboard shortcuts window",
+        "category": "UI",
+    },
+
+    (Qt.Key_P, Qt.ShiftModifier): {
+        "handler": "toggle_colonne",
+        "name": "Toggle column",
+        "description": "Toggle side column visibility",
+        "category": "UI",
+        "allow_extra_modifiers": True,
+    },
+
     (Qt.Key_Z, Qt.NoModifier): {
-        "handler": _method_action("f_print_region"),
-        "name": "f_print_region",
-        "requires_box": False,
+        "handler": "f_print_region",
+        "name": "Print region",
+        "description": "Print selected region",
+        "category": "UI",
     },
 }
 
@@ -1222,24 +1296,26 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         self.viewer = Oscilo.OscilloscopeViewer(folder=folder)
         self.viewer.show()
 
-    def _find_shortcut_action(self, key: int, modifiers: Qt.KeyboardModifiers) -> Optional[Dict[str, object]]:
+    def _find_shortcut_action(self, key: int, modifiers: Qt.KeyboardModifiers):
         normalized = modifiers & _RELEVANT_MODIFIERS
+
         action = KEYBOARD_SHORTCUTS.get((key, normalized))
-        if action is not None:
+        if action:
             return action
 
-        for (shortcut_key, mask), candidate in KEYBOARD_SHORTCUTS.items():
-            if shortcut_key != key or mask == Qt.NoModifier:
+        for (k, mask), candidate in KEYBOARD_SHORTCUTS.items():
+            if k != key:
                 continue
             if not candidate.get("allow_extra_modifiers"):
                 continue
             if normalized & mask == mask:
                 return candidate
-        if normalized == Qt.NoModifier:
-            return KEYBOARD_SHORTCUTS.get((key, Qt.NoModifier))
+
         return None
 
+
     def keyPressEvent(self, event):  # - - - COMMANDE CLAVIER - - - #
+
         key = event.key()
         modifiers = event.modifiers()
 
@@ -1255,29 +1331,30 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             super().keyPressEvent(event)
             return
 
-        handler = action["handler"]
-
-        if action.get("direct_return"):
-            try:
-                handler(self)
-            except Exception:
-                e = traceback.format_exc()
-                self.Print_error(e)
+        method_name = action.get("handler")
+        if not method_name:
             return
+
+        if not hasattr(self, method_name):
+            logger.warning("Shortcut method '%s' not found", method_name)
+            return
+
+        method = getattr(self, method_name)
 
         try:
             if action.get("requires_box"):
-                self.Box_loading(lambda: handler(self), action.get("name") or "")
+                self.Box_loading(method, action.get("name") or "")
             else:
-                handler(self)
+                method()
                 name = action.get("name")
                 if name:
-                    self.text_box_msg.setText(f"{name} SUCCES idTouche: {key}")
+                    self.text_box_msg.setText(f"{name} SUCCESS")
         except Exception:
             e = traceback.format_exc()
             self.Print_error(e)
         finally:
             self.bit_bypass = False
+
 
     def Box_loading(self,fonction,name_f):
         # Création de la QMessageBox
@@ -2125,7 +2202,11 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
 
         if self.calib is None:
             self.text_box_msg.setText("warn: no calibration loaded")
-            #return
+            self.calib = Calibration.Calib_DRX(
+                file_mask=None,
+                file_poni=None,
+                theta_range=list(getattr(self, "DEFAULT_THETA_RANGE", DEFAULT_THETA_RANGE)),
+                energy=self.get_energy_value())
 
         new_energy = self.calib.Change_calib(file=file_img, energy=self.get_energy_value())
 
@@ -6525,11 +6606,11 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             return
 
         gauges = list(self.liste_type_Gauge)
-        print("Update table, gauges =", gauges)  # debug
+        #print("Update table, gauges =", gauges)  # debug
         self.gauge_table.setRowCount(len(gauges))
 
         for row, gauge_name in enumerate(gauges):
-            print("Ajout ligne", row, gauge_name)  # debug
+            #print("Ajout ligne", row, gauge_name)  # debug
 
             # Colonne 0 : nom
             item_name = QTableWidgetItem(gauge_name)
@@ -6792,60 +6873,15 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             #self.ax_spectrum.legend()
 
     def afficher_clavier_utilise(self):
-
-        self._ensure_help_entries_loaded()
-        key_to_description: Dict[str, str] = {}
-
-        active_entries = [self.helpLabel.item(i).text() for i in range(self.helpLabel.count())]
-        if active_entries:
-            self.help_entries = active_entries
-
-        for raw_entry in self.help_entries:
-            item_text = raw_entry.strip()
-
-            if not item_text or item_text.startswith("#") or item_text.startswith("*"):
-                continue
-
-            match = re.match(r"([^\s:]+)\s*:\s*(.+)", item_text)
-            if not match:
-                continue
-            raw_keys = match.group(1)
-            description = match.group(2).strip()
-
-            desc_parts = re.match(r"^(.*?)\s*(\([^)]*\))?$", description)
-            clean_description = desc_parts.group(1).strip() if desc_parts else description
-            extra = desc_parts.group(2).strip() if desc_parts and desc_parts.group(2) else ""
-
-            text_block = clean_description
-            if extra:
-                text_block += f"\n{extra}"
-
-            if "+" in raw_keys or re.match(r"F\d+", raw_keys, re.IGNORECASE):
-                special_key = raw_keys.upper().replace("*", "")
-                if special_key not in key_to_description:
-                    key_to_description[special_key] = text_block
-                elif text_block not in key_to_description[special_key]:
-                    key_to_description[special_key] += f"{text_block}"
-            else:
-                keys = re.findall(r"[a-zA-Z]", raw_keys)
-                for key in keys:
-                    k = key.upper()
-                    if k not in key_to_description:
-                        key_to_description[k] = text_block
-                    elif text_block not in key_to_description[k]:
-                        key_to_description[k] += f"{text_block}"
-
-        help_entries = list(self.help_entries)
-        if self.clavier_visuel is None:
-            self.clavier_visuel = KeyboardWindow(key_to_description, help_entries)#, parent=self)
+        if getattr(self, "clavier_visuel", None) is None:
+            self.clavier_visuel = KeyboardWindow(KEYBOARD_SHORTCUTS, parent=None)
         else:
-            self.clavier_visuel.update_content(key_to_description, help_entries)
+            self.clavier_visuel.shortcuts = KEYBOARD_SHORTCUTS
+            self.clavier_visuel._refresh_keys()
 
         self.clavier_visuel.show()
         self.clavier_visuel.raise_()
         self.clavier_visuel.activateWindow()
-
-
 
 
 def main() -> int:

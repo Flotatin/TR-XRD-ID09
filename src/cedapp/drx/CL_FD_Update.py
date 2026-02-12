@@ -2459,7 +2459,7 @@ last_modified_date = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(modificat
 note_version="CL_FD_Update:"
 
 
-print(note_version+ last_modified_date)
+print("LOADED:",note_version+ last_modified_date)
 
 
 
