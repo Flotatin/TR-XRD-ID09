@@ -394,7 +394,7 @@ class GaugeController:
                     visible = True
                     if idx < len(current_visibility):
                         visible = current_visibility[idx]
-                    line_item.setVisible(visible)
+                    line_item.setVisible(bool(visible))
                     self.ax_dy.addItem(line_item)
                 stored_lines.append(line_item)
 
@@ -597,7 +597,7 @@ class GaugeController:
                 gauge_select.save_var.append(visible)
             else:
                 visible = gauge_select.save_var[i]
-            checkbox.setChecked(visible)
+            checkbox.setChecked(bool(visible))
             checkbox.stateChanged.connect(self.f_print_dhkl)
             self.var_checkboxes.append(checkbox)
             self.layout_dhkl.addWidget(checkbox)
