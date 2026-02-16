@@ -70,6 +70,18 @@ class Calib_DRX:
             self.energy = dialog.energy
             return self.energy
         return None
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state["ai"] = None
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        if hasattr(self, "file_poni"):
+            try:
+                self.ai = pyFAI.load(self.file_poni)
+            except Exception:
+                self.ai = None
     
 class CalibDialog(QDialog):
     def __init__(

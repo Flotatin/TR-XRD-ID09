@@ -162,7 +162,7 @@ class Gauge:
                     self.a,self.b,self.c,self.rca,self.V,self.P=self.Element_ref.A,self.Element_ref.B,self.Element_ref.C,self.Element_ref.rCA,self.Element_ref.V0,0
                 else:
                     self.CALCUL(mini=mini,verbose=verbose)
-                self.study =pd.concat([pd.DataFrame(np.array([[self.a,self.b,self.c,self.rca,self.V,self.P]]) , columns=['a_'+self.name,'b_'+self.name,'c_'+self.name,'c/a_'+self.name,'V_'+self.name,'P_'+self.name]),self.study_add],axis=1)
+                self.study =pd.concat([pd.DataFrame(np.array([[self.a,self.b,self.c,self.rca,self.V,self.sigma_V,self.P,self.sigma_P]]) , columns=['a_'+self.name,'b_'+self.name,'c_'+self.name,'c/a_'+self.name,'V_'+self.name,'sigma_V_'+self.name,'P_'+self.name,'sigma_P_'+self.name]),self.study_add],axis=1)
                 return           
             self.lamb_fit=round(self.pics[0].ctr[0],3)
 

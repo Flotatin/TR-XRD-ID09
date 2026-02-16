@@ -125,8 +125,12 @@ class AnalysisController:
             return
 
         if df.empty:
+            stale_ids = set(self._items_by_id.keys()) | set(self._curve_by_id.keys())
+            for mid in list(stale_ids):
+                self._delete_marker_item(mid)
             self.set_enabled(self.cb_analysis.isChecked())
             return
+        df_ids = set(df["id"].astype(str))
 
         # créer / mettre à jour items
         for _, row in df.iterrows():
@@ -142,10 +146,12 @@ class AnalysisController:
             self._sync_item_from_row(mid, row)
 
         # supprimer items qui n’existent plus
-        to_remove = [
-            mid for mid in self._items_by_id.keys() if mid not in set(df["id"].astype(str))
+        stale_ids = [
+            mid
+            for mid in (set(self._items_by_id.keys()) | set(self._curve_by_id.keys()))
+            if mid not in df_ids
         ]
-        for mid in to_remove:
+        for mid in stale_ids:
             self._delete_marker_item(mid)
 
         # appliquer visibilité selon mode

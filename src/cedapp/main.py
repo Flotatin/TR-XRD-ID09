@@ -182,6 +182,8 @@ from cedapp.drx.gauge import Gauge, Element
 
 from cedapp.drx import Oscilloscope_LeCroy_QTinterface as Oscilo
 
+import Bibli_python
+
 from cedapp.controllers import (
     ANALYSE_COLUMNS,
     AnalysisController,
@@ -403,6 +405,48 @@ KEYBOARD_SHORTCUTS: Dict[Tuple[int, int], Dict[str, Any]] = {
     # ======================
     # CEDX
     # ======================
+        
+    (Qt.Key_V, Qt.ControlModifier): {
+        "handler": "paste_gauge_models_from_clipboard",
+        "name": "Paste Spectrum pattern",
+        "description": "Paste spectrum pattern in CEDX blue selection area (copied with Ctrl+C).",
+        "category": "CEDX",
+        "requires_box": False,
+        "allow_extra_modifiers": True,
+    },
+
+    (Qt.Key_C, Qt.ControlModifier): {
+        "handler": "copy_gauge_models_to_clipboard",
+        "name": "Copy Spectrum pattern",
+        "description": "Copy current gauge models to clipboard for CEDX reuse.",
+        "category": "CEDX",
+        "requires_box": False,
+        "allow_extra_modifiers": True,
+    },
+
+    (Qt.Key_Escape, Qt.NoModifier): {
+        "handler": "hide_gauge_selection_zone",
+        "name": "Hide selection zone",
+        "description": "Hide the CEDX gauge selection zone.",
+        "category": "CEDX",
+        "requires_box": False,
+    },
+
+    (Qt.Key_Delete, Qt.NoModifier): {
+        "handler": "delete_gauges_in_zone",
+        "name": "Delete gauges in zone",
+        "description": "Delete all gauges inside the current selection zone.",
+        "category": "CEDX",
+        "requires_box": False,
+    },
+
+    (Qt.Key_S, Qt.ControlModifier):{
+        "handler": "show_gauge_selection_zone",
+        "name": "Print Delete gauges zone",
+        "description": "Print zone  for Delete all gauges inside.",
+        "category": "CEDX",
+        "requires_box": False,
+    }, 
 
     (Qt.Key_T, Qt.ShiftModifier): {
         "handler": "CEDX_Fit_all",
@@ -1809,6 +1853,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                                 delta_p = float(np.trapz(y_sel, t_sel))
                                 dpdt_mean = float(delta_p / delta_t) if delta_t > 0 else np.nan
 
+            
             if dpdt_mean is None or delta_p is None:
                 t = np.asarray(series.get("time", []), dtype=float)
                 p = np.asarray(series.get("pressure", []), dtype=float)
@@ -1840,8 +1885,8 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                     continue
                 delta_p = float(np.sum(seg_dp))
                 dpdt_mean = float(delta_p / total_dt)
-
-            stats[name] = {"dpdt": float(dpdt_mean), "delta_p": float(delta_p)}
+                delta_t=total_dt
+            stats[name] = {"dpdt": float(dpdt_mean), "delta_p": float(delta_p), "delta_t": float(delta_t)}
         return stats
 
     def _refresh_dpdt_legend(self, interval_stats=None) -> None:
@@ -1865,8 +1910,9 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                 stat = interval_stats[name]
                 dpdt_val = stat.get("dpdt")
                 delta_p = stat.get("delta_p")
+                delta_t = stat.get("delta_t")
                 if dpdt_val is not None and delta_p is not None:
-                    label = f"{name} dP/dt={float(dpdt_val):.3f} ΔP={float(delta_p):.3f}"
+                    label = f"{name} \n dP/dt={float(dpdt_val):.3f} ΔP={float(delta_p):.3f} Δt={float(delta_t*1e3):.0f}"
             try:
                 self.ax_dPdt.legend.addItem(deriv_item, label)
             except Exception:
@@ -4920,7 +4966,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                 pressure_item.setData(x=pressure_x, y=pressure_y, symbol=symbol, pen=color_pen, brush=color_brush, size=10)
                 deriv_item.setData(x=deriv_x, y=deriv_y, symbol=symbol, pen=color_pen, brush=color_brush, size=10)
             else:
-                pressure_item = pg.PlotDataItem(
+                pressure_item = pg.ScatterPlotItem(
                     x=pressure_x,
                     y=pressure_y,
                     symbol=symbol,
@@ -4929,7 +4975,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                     size=10,
                     name=name,
                 )
-                deriv_item = pg.PlotDataItem(
+                deriv_item = pg.ScatterPlotItem(
                     x=deriv_x,
                     y=deriv_y,
                     symbol=symbol,

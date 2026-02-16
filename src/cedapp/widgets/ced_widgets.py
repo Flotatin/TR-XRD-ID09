@@ -83,21 +83,21 @@ class DdacWidget:
         host.zone_multi_P = pg.LinearRegionItem(
             values=[0, 0],
             orientation=pg.LinearRegionItem.Vertical,
-            brush=pg.mkBrush(0, 120, 255, 40),
+            brush=pg.mkBrush(120, 120, 120, 40),
             movable=True,
         )
         host.ax_P.addItem(host.zone_multi_P)
         host.zone_multi_dPdt = pg.LinearRegionItem(
             values=[0, 0],
             orientation=pg.LinearRegionItem.Vertical,
-            brush=pg.mkBrush(0, 120, 255, 40),
+            brush=pg.mkBrush(120, 120, 120, 40),
             movable=True,
         )
         host.ax_dPdt.addItem(host.zone_multi_dPdt)
         host.zone_multi_diff_int = pg.LinearRegionItem(
             values=[0, 0],
             orientation=pg.LinearRegionItem.Vertical,
-            brush=pg.mkBrush(0, 120, 255, 40),
+            brush=pg.mkBrush(120, 120, 120, 40),
             movable=True,
         )
         host.ax_diff_int.addItem(host.zone_multi_diff_int)
