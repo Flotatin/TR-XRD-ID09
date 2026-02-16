@@ -1012,28 +1012,13 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                     dP_dt_time=dpdt_ref_time,
                 )
 
-            if isinstance(dpdt_data, (list, tuple)) and len(dpdt_data) == 6:
-                (
-                    dpdt_moyen,
-                    t_lim,
-                    dt,
-                    t_inter_f,
-                    _t_fine,
-                    _P_fine,
-                ) = dpdt_data
-                t_fine_arr = np.asarray(_t_fine, dtype=float)
-                p_fine_arr = np.asarray(_P_fine, dtype=float)
-            else:
-                dpdt_moyen, t_lim, dt, t_inter_f = (np.nan, np.nan, 0.0, 0.0)
-                t_fine_arr = curve_t_fine
-                p_fine_arr = curve_p_fine
-
+            dpdt_moyen, t_lim, dt, t_inter_f, _t_fine, _P_fine = dpdt_data
+            t_fine_arr = np.asarray(_t_fine, dtype=float)
+            p_fine_arr = np.asarray(_P_fine, dtype=float)
             if t_fine_arr.size > 2 and p_fine_arr.size == t_fine_arr.size:
                 dPdt_fine = np.gradient(p_fine_arr, t_fine_arr)
             else:
                 dPdt_fine = np.asarray([])
-            if t_fine_arr.size == 0 or p_fine_arr.size == 0:
-                continue
             rows.append(
                 {
                     "id": f"auto-{name}-curve",
@@ -1056,7 +1041,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                 }
             )
 
-            if not (isinstance(dpdt_data, (list, tuple)) and len(dpdt_data) == 6):
+            if dpdt_data is None:
                 continue
 
             key_points = [
@@ -1803,6 +1788,9 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         if not zone_visible or not region:
             for item in labels.values():
                 item.setVisible(False)
+            summary_label = getattr(self, "label_interval_dpdt", None)
+            if summary_label is not None:
+                summary_label.setText("dP/dt zone: —")
             return
 
         start_ms, stop_ms = sorted(map(float, region))
@@ -1814,7 +1802,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                 self._safe_remove_plot_item(self.ax_dPdt, labels[name])
                 labels.pop(name, None)
 
-        delta_t = float(stop_ms - start_ms)
+        summary_parts = []
         for name, value in values.items():
             if name not in labels:
                 text_item = pg.TextItem(anchor=(0, 0.5))
@@ -1824,10 +1812,17 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             color = self._get_gauge_color(name)
             if color is not None:
                 text_item.setColor(color)
-            delta_p = float(value * delta_t)
-            text_item.setText(f"{name} ⟨dP/dt⟩={value:.3f} GPa/ms | ΔPint={delta_p:.3f} GPa")
+            text_item.setText(f"{name} ⟨dP/dt⟩={value:.3f} GPa/ms")
             text_item.setPos(stop_ms, value)
             text_item.setVisible(True)
+            summary_parts.append(f"{name}: {value:.3f}")
+
+        summary_label = getattr(self, "label_interval_dpdt", None)
+        if summary_label is not None:
+            if summary_parts:
+                summary_label.setText("dP/dt zone: " + " | ".join(summary_parts))
+            else:
+                summary_label.setText("dP/dt zone: aucune donnée")
         
     def _selection_highlight_color(self, alpha: int = 100) -> QColor:
         """Return the highlight colour used when a peak is selected."""
@@ -2177,9 +2172,88 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         if element is None:
             QMessageBox.information(self, "Info", "No gauge selected")
             return
-        dlg = JcpdsEditor(element, self)
+
+        edited_element = copy.deepcopy(element)
+        dlg = JcpdsEditor(edited_element, self)
         if dlg.exec_() == QDialog.Accepted:
-            self.gauge_controller.f_Gauge_Load(element)
+            self._apply_edited_gauge(edited_element)
+            if getattr(dlg, "save_to_jcpds", False):
+                self._save_gauge_to_jcpds(edited_element)
+
+    def _apply_edited_gauge(self, edited_element) -> None:
+        self.gauge_select = self.gauge_controller.f_Gauge_Load(copy.deepcopy(edited_element))
+
+        if self.bit_modif_jauge and self.Spectrum is not None:
+            if 0 <= self.index_jauge < len(self.Spectrum.Gauges):
+                gauge = self.Spectrum.Gauges[self.index_jauge]
+                gauge.Element_ref = copy.deepcopy(edited_element)
+                gauge.init_ref()
+                gauge.bit_fit = False
+                self.Spectrum.bit_fit = False
+
+                if self.RUN is not None and 0 <= self.index_spec < len(self.RUN.Spectra):
+                    self.RUN.Spectra[self.index_spec] = self.Spectrum
+                    self.RUN.Corr_Summary()
+
+        else:
+            gauge_name = getattr(edited_element, "name", None)
+            if gauge_name and gauge_name in getattr(self.ClassDRX, "Bibli_elements", {}):
+                self.ClassDRX.Bibli_elements[gauge_name] = copy.deepcopy(edited_element)
+
+        self.gauge_controller.refresh_fixed_lines(self.gauge_select)
+        self._refresh_drx_view()
+
+    def _find_jcpds_file_for_element(self, element_name: str) -> Optional[str]:
+        list_file = getattr(self.ClassDRX, "list_file", []) if hasattr(self, "ClassDRX") else []
+        for path in list_file:
+            if not os.path.isfile(path):
+                continue
+            try:
+                file_df = pd.read_csv(path, sep=":", header=None, engine="python")
+                parsed_element = CL.Element_Bibli(file=file_df, E=self.get_energy_value())
+                if getattr(parsed_element, "name", None) == element_name:
+                    return path
+            except Exception:
+                continue
+        return None
+
+    def _save_gauge_to_jcpds(self, element) -> None:
+        element_name = getattr(element, "name", None)
+        if not element_name:
+            QMessageBox.warning(self, "JCPDS", "Element name missing, cannot save JCPDS file.")
+            return
+
+        path = self._find_jcpds_file_for_element(element_name)
+        if path is None:
+            QMessageBox.warning(self, "JCPDS", f"Original JCPDS file not found for '{element_name}'.")
+            return
+
+        file_df = pd.read_csv(path, sep=":", header=None, engine="python")
+
+        updates = {
+            "K0": element.K0,
+            "K0P": element.K0P,
+            "V0": element.V0,
+            "A": element.A,
+            "B": element.B,
+            "C": element.C,
+            "ALPHA": element.ALPHA,
+            "BETA": element.BETA,
+            "GAMMA": element.GAMMA,
+        }
+
+        for key, value in updates.items():
+            mask = file_df[0].astype(str).str.strip() == key
+            if mask.any():
+                file_df.loc[mask, 1] = "" if value is None else str(value)
+
+        with open(path, "w", encoding="utf-8") as handle:
+            for _, row in file_df.iterrows():
+                left = str(row[0])
+                right = "" if pd.isna(row[1]) else str(row[1])
+                handle.write(f"{left}: {right}\n")
+
+        QMessageBox.information(self, "JCPDS", f"JCPDS updated: {os.path.basename(path)}")
 
     def f_select_directory(self,file_name,file_label,name,type_file=".asc"):
         options = QFileDialog.Options()
@@ -6438,6 +6512,8 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         for item in getattr(self, "_cedx_interval_dpdt_text_items", {}).values():
             self._safe_remove_plot_item(self.ax_dPdt, item)
         self._cedx_interval_dpdt_text_items = {}
+        if hasattr(self, "label_interval_dpdt"):
+            self.label_interval_dpdt.setText("dP/dt zone: —")
         self._cedx_image_cache = None
         self._cedx_image_row_map = {}
         self._cedx_spectrum_theta_range = {}
