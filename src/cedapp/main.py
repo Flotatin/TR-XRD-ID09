@@ -950,6 +950,11 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                 item.setVisible(visible)
             except Exception:
                 logger.debug("Failed to toggle overlay visibility", exc_info=True)
+        for item in getattr(self, "_cedx_interval_dpdt_text_items", {}).values():
+            try:
+                item.setVisible(bool(visible))
+            except Exception:
+                logger.debug("Failed to toggle interval dP/dt labels", exc_info=True)
     
     def _set_piezo_setpoint_visible(self, visible: bool) -> None:
         """Show or hide piezo setpoint curve and right-hand axis."""
@@ -979,46 +984,103 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             color = self._get_gauge_color(name)
             summary_df = self._build_summary_for_analysis(run, name, pressures, times)
             pressure_limit = self._select_analysis_pressure_limit(name, pressures)
-            if pressure_limit is None:
-                continue
 
-            dpdt_data = self._compute_dpdt_mean_from_limit_allgauges(
-                summary_df=summary_df,
-                gauge_name=name,
-                pressure_limit=pressure_limit,
-                inter_frame_times=self._estimate_inter_frame_times(run, len(summary_df)),
-                idx_end=self._get_last_valid_index(pressures),
-                dP_dt_mean=dpdt_ref_values,
-                dP_dt_time=dpdt_ref_time,
-            )
-            if dpdt_data is None:
-                continue
+            t_raw = np.asarray(times, dtype=float)
+            p_raw = np.asarray(pressures, dtype=float)
+            valid = np.isfinite(t_raw) & np.isfinite(p_raw)
+            t_valid = t_raw[valid]
+            p_valid = p_raw[valid]
+            order = np.argsort(t_valid) if t_valid.size else np.asarray([])
+            t_valid = t_valid[order] if t_valid.size else t_valid
+            p_valid = p_valid[order] if p_valid.size else p_valid
 
-            dpdt_moyen, t_lim, dt, t_inter_f, _t_fine, _P_fine = dpdt_data
+            curve_t_fine = np.asarray([])
+            curve_p_fine = np.asarray([])
+            curve_dpdt_fine = np.asarray([])
+            if t_valid.size >= 2:
+                curve_t_fine = np.linspace(
+                    float(t_valid[0]),
+                    float(t_valid[-1]),
+                    max(len(t_valid) * 80, 200),
+                )
+                if t_valid.size >= 4:
+                    try:
+                        noise = float(np.nanstd(p_valid))
+                        smooth = max((noise ** 2) * len(p_valid), 1e-12)
+                        spline_fallback = UnivariateSpline(t_valid, p_valid, s=smooth)
+                        curve_p_fine = np.asarray(spline_fallback(curve_t_fine), dtype=float)
+                        curve_dpdt_fine = np.asarray(spline_fallback.derivative()(curve_t_fine), dtype=float)
+                    except Exception:
+                        curve_p_fine = np.interp(curve_t_fine, t_valid, p_valid)
+                else:
+                    curve_p_fine = np.interp(curve_t_fine, t_valid, p_valid)
+
+            dpdt_data = None
+            if pressure_limit is not None:
+                dpdt_data = self._compute_dpdt_mean_from_limit_allgauges(
+                    summary_df=summary_df,
+                    gauge_name=name,
+                    pressure_limit=pressure_limit,
+                    inter_frame_times=self._estimate_inter_frame_times(run, len(summary_df)),
+                    idx_end=self._get_last_valid_index(pressures),
+                    dP_dt_mean=dpdt_ref_values,
+                    dP_dt_time=dpdt_ref_time,
+                )
+
+            if isinstance(dpdt_data, (list, tuple)) and len(dpdt_data) == 6:
+                (
+                    dpdt_moyen,
+                    t_lim,
+                    dt,
+                    t_inter_f,
+                    _t_fine,
+                    _P_fine,
+                ) = dpdt_data
+                t_fine_arr = np.asarray(_t_fine, dtype=float)
+                p_fine_arr = np.asarray(_P_fine, dtype=float)
+                dpdt_fine_arr = np.asarray([])
+            else:
+                dpdt_moyen, t_lim, dt, t_inter_f = (np.nan, np.nan, 0.0, 0.0)
+                t_fine_arr = curve_t_fine
+                p_fine_arr = curve_p_fine
+                dpdt_fine_arr = curve_dpdt_fine
+
+            if dpdt_fine_arr.size == t_fine_arr.size and dpdt_fine_arr.size > 0:
+                dPdt_fine = dpdt_fine_arr
+            elif t_fine_arr.size > 2 and p_fine_arr.size == t_fine_arr.size:
+                dPdt_fine = np.gradient(p_fine_arr, t_fine_arr)
+            else:
+                dPdt_fine = np.asarray([])
+            if t_fine_arr.size == 0 or p_fine_arr.size == 0:
+                continue
             rows.append(
                 {
                     "id": f"auto-{name}-curve",
                     "kind": "analysis_curve",
                     "label": f"{name}:curve",
-                    "spec_idx": int(self._nearest_spectrum_index_from_time_ms(run, float(_t_fine[0]) if len(_t_fine) else 0.0)),
-                    "time_s": float(_t_fine[0]) / 1000.0 if len(_t_fine) else 0.0,
-                    "P_GPa": float(_P_fine[0]) if len(_P_fine) else 0.0,
-                    "x": float(_t_fine[0]) if len(_t_fine) else 0.0,
-                    "y": float(_P_fine[0]) if len(_P_fine) else 0.0,
+                    "spec_idx": int(self._nearest_spectrum_index_from_time_ms(run, float(t_fine_arr[0]) if len(t_fine_arr) else 0.0)),
+                    "time_s": float(t_fine_arr[0]) / 1000.0 if len(t_fine_arr) else 0.0,
+                    "P_GPa": float(p_fine_arr[0]) if len(p_fine_arr) else 0.0,
+                    "x": float(t_fine_arr[0]) if len(t_fine_arr) else 0.0,
+                    "y": float(p_fine_arr[0]) if len(p_fine_arr) else 0.0,
                     "source": "auto",
                     "locked": False,
                     "meta": {
                         "gauge": str(name),
                         "color": color,
-                        "t_fine": np.asarray(_t_fine, dtype=float).tolist(),
-                        "P_fine": np.asarray(_P_fine, dtype=float).tolist(),
+                        "t_fine": t_fine_arr.tolist(),
+                        "P_fine": p_fine_arr.tolist(),
+                        "dPdt_fine": np.asarray(dPdt_fine, dtype=float).tolist(),
                     },
                 }
             )
+
+            if not (isinstance(dpdt_data, (list, tuple)) and len(dpdt_data) == 6):
+                continue
+
             key_points = [
                 ("t_lim", t_lim, "-"),
                 ("t_lim_dt", t_lim + dt, "-."),
-                ("t_lim_dt_inter", t_lim + dt + t_inter_f, "--"),
             ]
             for suffix, time_ms, linestyle in key_points:
                 pressure_at_point = self._interpolate_pressure_at_time(pressures, times, time_ms)
@@ -1629,9 +1691,21 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                 zone.setVisible(visible)
 
     def set_ddac_multi_zone_visibility(self, checked: bool) -> None:
-        self._ddac_multi_zone_visible = bool(checked)
+        checked = bool(checked)
+        self._ddac_multi_zone_visible = checked
         self._update_ddac_multi_zone_range()
         self._apply_ddac_multi_zone_visibility()
+        for widget_name in ("multi_spec_action", "btn_zone_dpdt"):
+            widget = getattr(self, widget_name, None)
+            if widget is None:
+                continue
+            getter = getattr(widget, "isChecked", None)
+            setter = getattr(widget, "setChecked", None)
+            if callable(getter) and callable(setter) and bool(getter()) != checked:
+                widget.blockSignals(True)
+                setter(checked)
+                widget.blockSignals(False)
+        self._update_interval_dpdt_labels()
 
     def _connect_ddac_multi_zone_signals(self) -> None:
         for attr in ("zone_multi_P", "zone_multi_dPdt", "zone_multi_diff_int"):
@@ -1668,6 +1742,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             start_index, stop_index = self._indices_from_ddac_range(start, stop)
             self._set_batch_indices_from_zone(start_index, stop_index)
             self._refresh_batch_range_cache()
+            self._update_interval_dpdt_labels()
         finally:
             self._ddac_multi_zone_syncing = False
 
@@ -1697,6 +1772,122 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             self.index_stop_entry.blockSignals(True)
             self.index_stop_entry.setValue(stop_index)
             self.index_stop_entry.blockSignals(False)
+        self._update_interval_dpdt_labels()
+
+    def _compute_interval_dpdt_by_gauge(self, start_ms: float, stop_ms: float):
+        stats = {}
+        if stop_ms <= start_ms:
+            return stats
+        delta_t = float(stop_ms - start_ms)
+
+        analyse_df = getattr(getattr(self, "RUN", None), "analyse", None)
+
+        for name, series in (getattr(self, "_cedx_gauge_series", {}) or {}).items():
+            dpdt_mean = None
+            delta_p = None
+
+            if isinstance(analyse_df, pd.DataFrame) and not analyse_df.empty:
+                curve_rows = analyse_df[
+                    (analyse_df.get("kind") == "analysis_curve")
+                    & (analyse_df.get("label") == f"{name}:curve")
+                ]
+                if not curve_rows.empty:
+                    meta = curve_rows.iloc[0].get("meta", None)
+                    if isinstance(meta, dict):
+                        t_fine = np.asarray(meta.get("t_fine", []), dtype=float)
+                        dpdt_fine = np.asarray(meta.get("dPdt_fine", []), dtype=float)
+                        if t_fine.size == dpdt_fine.size and t_fine.size >= 2:
+                            mask = (
+                                np.isfinite(t_fine)
+                                & np.isfinite(dpdt_fine)
+                                & (t_fine >= start_ms)
+                                & (t_fine <= stop_ms)
+                            )
+                            t_sel = t_fine[mask]
+                            y_sel = dpdt_fine[mask]
+                            if t_sel.size >= 2:
+                                delta_p = float(np.trapz(y_sel, t_sel))
+                                dpdt_mean = float(delta_p / delta_t) if delta_t > 0 else np.nan
+
+            if dpdt_mean is None or delta_p is None:
+                t = np.asarray(series.get("time", []), dtype=float)
+                p = np.asarray(series.get("pressure", []), dtype=float)
+                if t.size < 2 or p.size != t.size:
+                    continue
+                mask = np.isfinite(t) & np.isfinite(p)
+                t = t[mask]
+                p = p[mask]
+                if t.size < 2:
+                    continue
+                order = np.argsort(t)
+                t = t[order]
+                p = p[order]
+                seg_t = []
+                seg_dp = []
+                for i in range(1, t.size):
+                    left = max(start_ms, float(t[i - 1]))
+                    right = min(stop_ms, float(t[i]))
+                    if right <= left:
+                        continue
+                    p_left = np.interp(left, t, p)
+                    p_right = np.interp(right, t, p)
+                    seg_t.append(right - left)
+                    seg_dp.append(p_right - p_left)
+                if not seg_t:
+                    continue
+                total_dt = float(np.sum(seg_t))
+                if total_dt <= 0:
+                    continue
+                delta_p = float(np.sum(seg_dp))
+                dpdt_mean = float(delta_p / total_dt)
+
+            stats[name] = {"dpdt": float(dpdt_mean), "delta_p": float(delta_p)}
+        return stats
+
+    def _refresh_dpdt_legend(self, interval_stats=None) -> None:
+        if not hasattr(self, "ax_dPdt"):
+            return
+        if self.ax_dPdt.legend is not None:
+            try:
+                self.ax_dPdt.legend.scene().removeItem(self.ax_dPdt.legend)
+            except Exception:
+                pass
+            self.ax_dPdt.legend = None
+        self.ax_dPdt.addLegend()
+
+        items = getattr(self, "_cedx_gauge_items", {}) or {}
+        for name, gauge_items in items.items():
+            deriv_item = gauge_items.get("deriv")
+            if deriv_item is None:
+                continue
+            label = f"{name} dP/dt"
+            if isinstance(interval_stats, dict) and name in interval_stats:
+                stat = interval_stats[name]
+                dpdt_val = stat.get("dpdt")
+                delta_p = stat.get("delta_p")
+                if dpdt_val is not None and delta_p is not None:
+                    label = f"{name} dP/dt={float(dpdt_val):.3f} ΔP={float(delta_p):.3f}"
+            try:
+                self.ax_dPdt.legend.addItem(deriv_item, label)
+            except Exception:
+                continue
+        mean_item = getattr(self, "_cedx_mean_curve_item", None)
+        if mean_item is not None:
+            try:
+                self.ax_dPdt.legend.addItem(mean_item, "Moyenne dP/dt")
+            except Exception:
+                pass
+
+    def _update_interval_dpdt_labels(self) -> None:
+        region = getattr(self, "_ddac_multi_zone_range", None)
+        zone_visible = bool(getattr(self, "_ddac_multi_zone_visible", False))
+        if not zone_visible or not region:
+            self._refresh_dpdt_legend(interval_stats=None)
+            return
+
+        start_ms, stop_ms = sorted(map(float, region))
+        stats = self._compute_interval_dpdt_by_gauge(start_ms, stop_ms)
+        self._refresh_dpdt_legend(interval_stats=stats)
         
     def _selection_highlight_color(self, alpha: int = 100) -> QColor:
         """Return the highlight colour used when a peak is selected."""
@@ -4458,6 +4649,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             self._update_curve_safe(pressure_item, pressure_x, pressure_y)
         if deriv_item is not None:
             self._update_curve_safe(deriv_item, deriv_x, deriv_y)
+        self._update_interval_dpdt_labels()
 
     def update_cedx_from_spectrum(self, spectrum_index):
         if self.RUN is None:
@@ -4632,8 +4824,6 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                 pass
             self.ax_dPdt.legend = None
 
-        if self.ax_dPdt.legend is None:
-            self.ax_dPdt.addLegend()
 
         new_items = {}
         order = []
@@ -4648,14 +4838,8 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             if name in self._cedx_gauge_items:
                 pressure_item = self._cedx_gauge_items[name]["pressure"]
                 deriv_item = self._cedx_gauge_items[name]["deriv"]
-                pressure_item.setData(x=pressure_x, y=pressure_y)
-                pressure_item.setSymbol(symbol)
-                pressure_item.setPen(color_pen)
-                pressure_item.setBrush(color_brush)
-                deriv_item.setData(x=deriv_x, y=deriv_y)
-                deriv_item.setSymbol(symbol)
-                deriv_item.setPen(color_pen)
-                deriv_item.setBrush(color_brush)
+                pressure_item.setData(x=pressure_x, y=pressure_y, symbol=symbol, pen=color_pen, brush=color_brush, size=10)
+                deriv_item.setData(x=deriv_x, y=deriv_y, symbol=symbol, pen=color_pen, brush=color_brush, size=10)
             else:
                 pressure_item = pg.ScatterPlotItem(
                     x=pressure_x,
@@ -4673,7 +4857,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                     pen=color_pen,
                     brush=color_brush,
                     size=10,
-                    name=name + " dP",
+                    name=name + " dP/dt",
                 )
                 self.ax_P.addItem(pressure_item)
                 self.ax_dPdt.addItem(deriv_item)
@@ -4699,6 +4883,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             }
         self._cedx_gauge_series = gauge_series
         self._update_cedx_mean_curve()
+        self._update_interval_dpdt_labels()
         self._update_analysis_from_cedx_data(run, n_J, l_P, l_t, gauge_indices)
 
         time_amp_arr = np.asarray(time_amp, dtype=float) if time_amp is not None else None
@@ -6302,6 +6487,9 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             self._safe_remove_plot_item(self.ax_dPdt, self._cedx_mean_curve_item)
             self._cedx_mean_curve_item = None
         self._cedx_mean_curve_data = (np.asarray([]), np.asarray([]))
+        for item in getattr(self, "_cedx_interval_dpdt_text_items", {}).values():
+            self._safe_remove_plot_item(self.ax_dPdt, item)
+        self._cedx_interval_dpdt_text_items = {}
         self._cedx_image_cache = None
         self._cedx_image_row_map = {}
         self._cedx_spectrum_theta_range = {}

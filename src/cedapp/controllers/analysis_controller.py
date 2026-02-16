@@ -75,6 +75,7 @@ class AnalysisController:
         self._dpdt_lines_by_id: dict[str, pg.InfiniteLine] = {}
         self._dpdt_text_by_id: dict[str, pg.TextItem] = {}
         self._curve_by_id: dict[str, pg.PlotCurveItem] = {}
+        self._dpdt_curve_by_id: dict[str, pg.PlotCurveItem] = {}
         self._syncing = False
 
     # ---------- Mode ON/OFF ----------
@@ -94,6 +95,8 @@ class AnalysisController:
             line.setVisible(self.enabled)
         for txt in self._dpdt_text_by_id.values():
             txt.setVisible(self.enabled)
+        for curve in self._dpdt_curve_by_id.values():
+            curve.setVisible(self.enabled)
         if df is not None and not df.empty:
             for mid, item in self._items_by_id.items():
                 row = self._find_row_for_id(df, mid)
@@ -181,6 +184,11 @@ class AnalysisController:
         self.plot.addItem(curve)
         self._curve_by_id[mid] = curve
 
+        if self.dpdt_plot is not None:
+            dpdt_curve = pg.PlotCurveItem([], [])
+            self.dpdt_plot.addItem(dpdt_curve)
+            self._dpdt_curve_by_id[mid] = dpdt_curve
+
     def _delete_marker_item(self, mid: str) -> None:
         it = self._items_by_id.pop(mid, None)
         if it is not None:
@@ -197,24 +205,40 @@ class AnalysisController:
         curve = self._curve_by_id.pop(mid, None)
         if curve is not None:
             self.plot.removeItem(curve)
+        dpdt_curve = self._dpdt_curve_by_id.pop(mid, None)
+        if dpdt_curve is not None and self.dpdt_plot is not None:
+            self.dpdt_plot.removeItem(dpdt_curve)
 
     def _sync_curve_from_row(self, mid: str, row) -> None:
         curve = self._curve_by_id.get(mid)
+        dpdt_curve = self._dpdt_curve_by_id.get(mid)
         if curve is None:
             return
         meta = row.get("meta", None)
         if not isinstance(meta, dict):
             curve.setData([], [])
+            if dpdt_curve is not None:
+                dpdt_curve.setData([], [])
             return
         t_fine = np.asarray(meta.get("t_fine", []), dtype=float)
         p_fine = np.asarray(meta.get("P_fine", []), dtype=float)
         if t_fine.size == 0 or p_fine.size == 0:
             curve.setData([], [])
+            if dpdt_curve is not None:
+                dpdt_curve.setData([], [])
             return
         color = meta.get("color")
-        pen = pg.mkPen(color) if color is not None else pg.mkPen("w")
+        pen = pg.mkPen(color, width=3) if color is not None else pg.mkPen("w", width=3)
         curve.setPen(pen)
         curve.setData(t_fine, p_fine)
+
+        if dpdt_curve is not None:
+            dpdt_fine = np.asarray(meta.get("dPdt_fine", []), dtype=float)
+            if dpdt_fine.size == t_fine.size:
+                dpdt_curve.setPen(pen)
+                dpdt_curve.setData(t_fine, dpdt_fine)
+            else:
+                dpdt_curve.setData([], [])
 
     def _sync_item_from_row(self, mid: str, row) -> None:
         self._syncing = True
