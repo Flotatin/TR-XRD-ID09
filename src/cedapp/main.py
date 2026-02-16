@@ -996,9 +996,24 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
 
             curve_t_fine = np.asarray([])
             curve_p_fine = np.asarray([])
+            curve_dpdt_fine = np.asarray([])
             if t_valid.size >= 2:
-                curve_t_fine = np.linspace(float(t_valid[0]), float(t_valid[-1]), max(len(t_valid) * 50, 2))
-                curve_p_fine = np.interp(curve_t_fine, t_valid, p_valid)
+                curve_t_fine = np.linspace(
+                    float(t_valid[0]),
+                    float(t_valid[-1]),
+                    max(len(t_valid) * 80, 200),
+                )
+                if t_valid.size >= 4:
+                    try:
+                        noise = float(np.nanstd(p_valid))
+                        smooth = max((noise ** 2) * len(p_valid), 1e-12)
+                        spline_fallback = UnivariateSpline(t_valid, p_valid, s=smooth)
+                        curve_p_fine = np.asarray(spline_fallback(curve_t_fine), dtype=float)
+                        curve_dpdt_fine = np.asarray(spline_fallback.derivative()(curve_t_fine), dtype=float)
+                    except Exception:
+                        curve_p_fine = np.interp(curve_t_fine, t_valid, p_valid)
+                else:
+                    curve_p_fine = np.interp(curve_t_fine, t_valid, p_valid)
 
             dpdt_data = None
             if pressure_limit is not None:
@@ -1012,13 +1027,32 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                     dP_dt_time=dpdt_ref_time,
                 )
 
-            dpdt_moyen, t_lim, dt, t_inter_f, _t_fine, _P_fine = dpdt_data
-            t_fine_arr = np.asarray(_t_fine, dtype=float)
-            p_fine_arr = np.asarray(_P_fine, dtype=float)
-            if t_fine_arr.size > 2 and p_fine_arr.size == t_fine_arr.size:
+            if isinstance(dpdt_data, (list, tuple)) and len(dpdt_data) == 6:
+                (
+                    dpdt_moyen,
+                    t_lim,
+                    dt,
+                    t_inter_f,
+                    _t_fine,
+                    _P_fine,
+                ) = dpdt_data
+                t_fine_arr = np.asarray(_t_fine, dtype=float)
+                p_fine_arr = np.asarray(_P_fine, dtype=float)
+                dpdt_fine_arr = np.asarray([])
+            else:
+                dpdt_moyen, t_lim, dt, t_inter_f = (np.nan, np.nan, 0.0, 0.0)
+                t_fine_arr = curve_t_fine
+                p_fine_arr = curve_p_fine
+                dpdt_fine_arr = curve_dpdt_fine
+
+            if dpdt_fine_arr.size == t_fine_arr.size and dpdt_fine_arr.size > 0:
+                dPdt_fine = dpdt_fine_arr
+            elif t_fine_arr.size > 2 and p_fine_arr.size == t_fine_arr.size:
                 dPdt_fine = np.gradient(p_fine_arr, t_fine_arr)
             else:
                 dPdt_fine = np.asarray([])
+            if t_fine_arr.size == 0 or p_fine_arr.size == 0:
+                continue
             rows.append(
                 {
                     "id": f"auto-{name}-curve",
@@ -1041,13 +1075,12 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                 }
             )
 
-            if dpdt_data is None:
+            if not (isinstance(dpdt_data, (list, tuple)) and len(dpdt_data) == 6):
                 continue
 
             key_points = [
                 ("t_lim", t_lim, "-"),
                 ("t_lim_dt", t_lim + dt, "-."),
-                ("t_lim_dt_inter", t_lim + dt + t_inter_f, "--"),
             ]
             for suffix, time_ms, linestyle in key_points:
                 pressure_at_point = self._interpolate_pressure_at_time(pressures, times, time_ms)
@@ -1788,9 +1821,6 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         if not zone_visible or not region:
             for item in labels.values():
                 item.setVisible(False)
-            summary_label = getattr(self, "label_interval_dpdt", None)
-            if summary_label is not None:
-                summary_label.setText("dP/dt zone: —")
             return
 
         start_ms, stop_ms = sorted(map(float, region))
@@ -1802,7 +1832,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                 self._safe_remove_plot_item(self.ax_dPdt, labels[name])
                 labels.pop(name, None)
 
-        summary_parts = []
+        delta_t = float(stop_ms - start_ms)
         for name, value in values.items():
             if name not in labels:
                 text_item = pg.TextItem(anchor=(0, 0.5))
@@ -1812,17 +1842,10 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             color = self._get_gauge_color(name)
             if color is not None:
                 text_item.setColor(color)
-            text_item.setText(f"{name} ⟨dP/dt⟩={value:.3f} GPa/ms")
+            delta_p = float(value * delta_t)
+            text_item.setText(f"{name} ⟨dP/dt⟩={value:.3f} GPa/ms | ΔPint={delta_p:.3f} GPa")
             text_item.setPos(stop_ms, value)
             text_item.setVisible(True)
-            summary_parts.append(f"{name}: {value:.3f}")
-
-        summary_label = getattr(self, "label_interval_dpdt", None)
-        if summary_label is not None:
-            if summary_parts:
-                summary_label.setText("dP/dt zone: " + " | ".join(summary_parts))
-            else:
-                summary_label.setText("dP/dt zone: aucune donnée")
         
     def _selection_highlight_color(self, alpha: int = 100) -> QColor:
         """Return the highlight colour used when a peak is selected."""
@@ -6512,8 +6535,6 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         for item in getattr(self, "_cedx_interval_dpdt_text_items", {}).values():
             self._safe_remove_plot_item(self.ax_dPdt, item)
         self._cedx_interval_dpdt_text_items = {}
-        if hasattr(self, "label_interval_dpdt"):
-            self.label_interval_dpdt.setText("dP/dt zone: —")
         self._cedx_image_cache = None
         self._cedx_image_row_map = {}
         self._cedx_spectrum_theta_range = {}

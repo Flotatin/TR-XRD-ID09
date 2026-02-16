@@ -164,9 +164,6 @@ class DdacWidget:
         host.btn_zone_dpdt.setCheckable(True)
         host.btn_zone_dpdt.setChecked(False)
 
-        host.label_interval_dpdt = QLabel("dP/dt zone: —", self._drx_container)
-        host.label_interval_dpdt.setFont(QFont("Arial", 7))
-
 
     def _connect_drx_events(self) -> None:
         host = self._drx_container
@@ -208,7 +205,6 @@ class DdacWidget:
         layhrun.addWidget(host.label_dpdt_smooth)
         layhrun.addWidget(host.spinbox_dpdt_smooth)
         layhrun.addWidget(host.btn_zone_dpdt)
-        layhrun.addWidget(host.label_interval_dpdt)
         if getattr(host, "analysis_toggle", None) is not None:
             layhrun.addWidget(host.analysis_toggle)
         ddac_layout.addLayout(layhrun)
