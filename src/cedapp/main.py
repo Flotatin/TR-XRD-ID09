@@ -1775,77 +1775,119 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         self._update_interval_dpdt_labels()
 
     def _compute_interval_dpdt_by_gauge(self, start_ms: float, stop_ms: float):
-        interval_values = {}
+        stats = {}
         if stop_ms <= start_ms:
-            return interval_values
+            return stats
+        delta_t = float(stop_ms - start_ms)
+
+        analyse_df = getattr(getattr(self, "RUN", None), "analyse", None)
+
         for name, series in (getattr(self, "_cedx_gauge_series", {}) or {}).items():
-            t = np.asarray(series.get("time", []), dtype=float)
-            p = np.asarray(series.get("pressure", []), dtype=float)
-            if t.size < 2 or p.size != t.size:
-                continue
-            mask = np.isfinite(t) & np.isfinite(p)
-            t = t[mask]
-            p = p[mask]
-            if t.size < 2:
-                continue
-            order = np.argsort(t)
-            t = t[order]
-            p = p[order]
-            seg_t = []
-            seg_dp = []
-            for i in range(1, t.size):
-                left = max(start_ms, float(t[i - 1]))
-                right = min(stop_ms, float(t[i]))
-                if right <= left:
+            dpdt_mean = None
+            delta_p = None
+
+            if isinstance(analyse_df, pd.DataFrame) and not analyse_df.empty:
+                curve_rows = analyse_df[
+                    (analyse_df.get("kind") == "analysis_curve")
+                    & (analyse_df.get("label") == f"{name}:curve")
+                ]
+                if not curve_rows.empty:
+                    meta = curve_rows.iloc[0].get("meta", None)
+                    if isinstance(meta, dict):
+                        t_fine = np.asarray(meta.get("t_fine", []), dtype=float)
+                        dpdt_fine = np.asarray(meta.get("dPdt_fine", []), dtype=float)
+                        if t_fine.size == dpdt_fine.size and t_fine.size >= 2:
+                            mask = (
+                                np.isfinite(t_fine)
+                                & np.isfinite(dpdt_fine)
+                                & (t_fine >= start_ms)
+                                & (t_fine <= stop_ms)
+                            )
+                            t_sel = t_fine[mask]
+                            y_sel = dpdt_fine[mask]
+                            if t_sel.size >= 2:
+                                delta_p = float(np.trapz(y_sel, t_sel))
+                                dpdt_mean = float(delta_p / delta_t) if delta_t > 0 else np.nan
+
+            if dpdt_mean is None or delta_p is None:
+                t = np.asarray(series.get("time", []), dtype=float)
+                p = np.asarray(series.get("pressure", []), dtype=float)
+                if t.size < 2 or p.size != t.size:
                     continue
-                p_left = np.interp(left, t, p)
-                p_right = np.interp(right, t, p)
-                seg_t.append(right - left)
-                seg_dp.append(p_right - p_left)
-            if not seg_t:
+                mask = np.isfinite(t) & np.isfinite(p)
+                t = t[mask]
+                p = p[mask]
+                if t.size < 2:
+                    continue
+                order = np.argsort(t)
+                t = t[order]
+                p = p[order]
+                seg_t = []
+                seg_dp = []
+                for i in range(1, t.size):
+                    left = max(start_ms, float(t[i - 1]))
+                    right = min(stop_ms, float(t[i]))
+                    if right <= left:
+                        continue
+                    p_left = np.interp(left, t, p)
+                    p_right = np.interp(right, t, p)
+                    seg_t.append(right - left)
+                    seg_dp.append(p_right - p_left)
+                if not seg_t:
+                    continue
+                total_dt = float(np.sum(seg_t))
+                if total_dt <= 0:
+                    continue
+                delta_p = float(np.sum(seg_dp))
+                dpdt_mean = float(delta_p / total_dt)
+
+            stats[name] = {"dpdt": float(dpdt_mean), "delta_p": float(delta_p)}
+        return stats
+
+    def _refresh_dpdt_legend(self, interval_stats=None) -> None:
+        if not hasattr(self, "ax_dPdt"):
+            return
+        if self.ax_dPdt.legend is not None:
+            try:
+                self.ax_dPdt.legend.scene().removeItem(self.ax_dPdt.legend)
+            except Exception:
+                pass
+            self.ax_dPdt.legend = None
+        self.ax_dPdt.addLegend()
+
+        items = getattr(self, "_cedx_gauge_items", {}) or {}
+        for name, gauge_items in items.items():
+            deriv_item = gauge_items.get("deriv")
+            if deriv_item is None:
                 continue
-            total_dt = float(np.sum(seg_t))
-            if total_dt <= 0:
+            label = f"{name} dP/dt"
+            if isinstance(interval_stats, dict) and name in interval_stats:
+                stat = interval_stats[name]
+                dpdt_val = stat.get("dpdt")
+                delta_p = stat.get("delta_p")
+                if dpdt_val is not None and delta_p is not None:
+                    label = f"{name} dP/dt={float(dpdt_val):.3f} ΔP={float(delta_p):.3f}"
+            try:
+                self.ax_dPdt.legend.addItem(deriv_item, label)
+            except Exception:
                 continue
-            interval_values[name] = float(np.sum(seg_dp) / total_dt)
-        return interval_values
+        mean_item = getattr(self, "_cedx_mean_curve_item", None)
+        if mean_item is not None:
+            try:
+                self.ax_dPdt.legend.addItem(mean_item, "Moyenne dP/dt")
+            except Exception:
+                pass
 
     def _update_interval_dpdt_labels(self) -> None:
-        labels = getattr(self, "_cedx_interval_dpdt_text_items", None)
-        if not isinstance(labels, dict):
-            self._cedx_interval_dpdt_text_items = {}
-            labels = self._cedx_interval_dpdt_text_items
-
         region = getattr(self, "_ddac_multi_zone_range", None)
         zone_visible = bool(getattr(self, "_ddac_multi_zone_visible", False))
         if not zone_visible or not region:
-            for item in labels.values():
-                item.setVisible(False)
+            self._refresh_dpdt_legend(interval_stats=None)
             return
 
         start_ms, stop_ms = sorted(map(float, region))
-        values = self._compute_interval_dpdt_by_gauge(start_ms, stop_ms)
-        active_names = set(values.keys())
-
-        for name in list(labels.keys()):
-            if name not in active_names:
-                self._safe_remove_plot_item(self.ax_dPdt, labels[name])
-                labels.pop(name, None)
-
-        delta_t = float(stop_ms - start_ms)
-        for name, value in values.items():
-            if name not in labels:
-                text_item = pg.TextItem(anchor=(0, 0.5))
-                self.ax_dPdt.addItem(text_item)
-                labels[name] = text_item
-            text_item = labels[name]
-            color = self._get_gauge_color(name)
-            if color is not None:
-                text_item.setColor(color)
-            delta_p = float(value * delta_t)
-            text_item.setText(f"{name} ⟨dP/dt⟩={value:.3f} GPa/ms | ΔPint={delta_p:.3f} GPa")
-            text_item.setPos(stop_ms, value)
-            text_item.setVisible(True)
+        stats = self._compute_interval_dpdt_by_gauge(start_ms, stop_ms)
+        self._refresh_dpdt_legend(interval_stats=stats)
         
     def _selection_highlight_color(self, alpha: int = 100) -> QColor:
         """Return the highlight colour used when a peak is selected."""
@@ -4861,8 +4903,6 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                 pass
             self.ax_dPdt.legend = None
 
-        if self.ax_dPdt.legend is None:
-            self.ax_dPdt.addLegend()
 
         new_items = {}
         order = []
@@ -4877,14 +4917,8 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             if name in self._cedx_gauge_items:
                 pressure_item = self._cedx_gauge_items[name]["pressure"]
                 deriv_item = self._cedx_gauge_items[name]["deriv"]
-                pressure_item.setData(x=pressure_x, y=pressure_y)
-                pressure_item.setSymbol(symbol)
-                pressure_item.setPen(color_pen)
-                pressure_item.setBrush(color_brush)
-                deriv_item.setData(x=deriv_x, y=deriv_y)
-                deriv_item.setSymbol(symbol)
-                deriv_item.setPen(color_pen)
-                deriv_item.setBrush(color_brush)
+                pressure_item.setData(x=pressure_x, y=pressure_y, symbol=symbol, pen=color_pen, brush=color_brush, size=10)
+                deriv_item.setData(x=deriv_x, y=deriv_y, symbol=symbol, pen=color_pen, brush=color_brush, size=10)
             else:
                 pressure_item = pg.PlotDataItem(
                     x=pressure_x,

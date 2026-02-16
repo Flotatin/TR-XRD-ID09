@@ -228,7 +228,7 @@ class AnalysisController:
                 dpdt_curve.setData([], [])
             return
         color = meta.get("color")
-        pen = pg.mkPen(color) if color is not None else pg.mkPen("w")
+        pen = pg.mkPen(color, width=3) if color is not None else pg.mkPen("w", width=3)
         curve.setPen(pen)
         curve.setData(t_fine, p_fine)
 
