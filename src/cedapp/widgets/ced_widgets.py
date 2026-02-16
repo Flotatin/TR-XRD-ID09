@@ -12,6 +12,7 @@ from PyQt5.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QPushButton,
     QVBoxLayout,
     QSpinBox,
 )
@@ -126,6 +127,7 @@ class DdacWidget:
         host._cedx_image_trimmed_length = 0
         host._cedx_theta_bounds = None
         host._cedx_levels = None
+        host._cedx_interval_dpdt_text_items = {}
         host._runtime_gauge_elements = {}
         host._gauge_library_dirty = False
         host._current_spectrum_gauges = set()
@@ -158,6 +160,13 @@ class DdacWidget:
             "UnivariateSpline(time,pressures,s=smooth) pour lisser la courbe moyenne dP/dt."
         )
 
+        host.btn_zone_dpdt = QPushButton("Zone dP/dt", self._drx_container)
+        host.btn_zone_dpdt.setCheckable(True)
+        host.btn_zone_dpdt.setChecked(False)
+
+        host.label_interval_dpdt = QLabel("dP/dt zone: —", self._drx_container)
+        host.label_interval_dpdt.setFont(QFont("Arial", 7))
+
 
     def _connect_drx_events(self) -> None:
         host = self._drx_container
@@ -172,6 +181,8 @@ class DdacWidget:
         )
         host.spinbox_dpdt_points.valueChanged.connect(host._on_dpdt_points_changed)
         host.spinbox_dpdt_smooth.valueChanged.connect(host._on_dpdt_points_changed)
+        if hasattr(host, "set_ddac_multi_zone_visibility"):
+            host.btn_zone_dpdt.toggled.connect(host.set_ddac_multi_zone_visibility)
 
 
     def _configure_drx_layout(self) -> None:
@@ -196,6 +207,8 @@ class DdacWidget:
         layhrun.addWidget(host.spinbox_dpdt_points)
         layhrun.addWidget(host.label_dpdt_smooth)
         layhrun.addWidget(host.spinbox_dpdt_smooth)
+        layhrun.addWidget(host.btn_zone_dpdt)
+        layhrun.addWidget(host.label_interval_dpdt)
         if getattr(host, "analysis_toggle", None) is not None:
             layhrun.addWidget(host.analysis_toggle)
         ddac_layout.addLayout(layhrun)
