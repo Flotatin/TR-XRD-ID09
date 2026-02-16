@@ -2,7 +2,16 @@
 
 from __future__ import annotations
 
-from PyQt5.QtWidgets import QDialog, QFormLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QVBoxLayout
+from PyQt5.QtWidgets import (
+    QDialog,
+    QFormLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QVBoxLayout,
+)
 
 
 class JcpdsEditor(QDialog):
@@ -38,10 +47,16 @@ class JcpdsEditor(QDialog):
 
         self.apply_btn = QPushButton("Apply")
         self.apply_btn.clicked.connect(self.apply_changes)
+        self.apply_save_btn = QPushButton("Apply + Save JCPDS")
+        self.apply_save_btn.clicked.connect(self.apply_and_save)
+        self.save_to_jcpds = False
 
         layout = QVBoxLayout()
         layout.addLayout(form)
-        layout.addWidget(self.apply_btn)
+        button_layout = QHBoxLayout()
+        button_layout.addWidget(self.apply_btn)
+        button_layout.addWidget(self.apply_save_btn)
+        layout.addLayout(button_layout)
         self.setLayout(layout)
 
     @staticmethod
@@ -63,3 +78,7 @@ class JcpdsEditor(QDialog):
             self.accept()
         except Exception as exc:
             QMessageBox.warning(self, "Error", str(exc))
+
+    def apply_and_save(self):
+        self.save_to_jcpds = True
+        self.apply_changes()
