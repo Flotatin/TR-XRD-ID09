@@ -984,20 +984,33 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             color = self._get_gauge_color(name)
             summary_df = self._build_summary_for_analysis(run, name, pressures, times)
             pressure_limit = self._select_analysis_pressure_limit(name, pressures)
-            if pressure_limit is None:
-                continue
 
-            dpdt_data = self._compute_dpdt_mean_from_limit_allgauges(
-                summary_df=summary_df,
-                gauge_name=name,
-                pressure_limit=pressure_limit,
-                inter_frame_times=self._estimate_inter_frame_times(run, len(summary_df)),
-                idx_end=self._get_last_valid_index(pressures),
-                dP_dt_mean=dpdt_ref_values,
-                dP_dt_time=dpdt_ref_time,
-            )
-            if dpdt_data is None:
-                continue
+            t_raw = np.asarray(times, dtype=float)
+            p_raw = np.asarray(pressures, dtype=float)
+            valid = np.isfinite(t_raw) & np.isfinite(p_raw)
+            t_valid = t_raw[valid]
+            p_valid = p_raw[valid]
+            order = np.argsort(t_valid) if t_valid.size else np.asarray([])
+            t_valid = t_valid[order] if t_valid.size else t_valid
+            p_valid = p_valid[order] if p_valid.size else p_valid
+
+            curve_t_fine = np.asarray([])
+            curve_p_fine = np.asarray([])
+            if t_valid.size >= 2:
+                curve_t_fine = np.linspace(float(t_valid[0]), float(t_valid[-1]), max(len(t_valid) * 50, 2))
+                curve_p_fine = np.interp(curve_t_fine, t_valid, p_valid)
+
+            dpdt_data = None
+            if pressure_limit is not None:
+                dpdt_data = self._compute_dpdt_mean_from_limit_allgauges(
+                    summary_df=summary_df,
+                    gauge_name=name,
+                    pressure_limit=pressure_limit,
+                    inter_frame_times=self._estimate_inter_frame_times(run, len(summary_df)),
+                    idx_end=self._get_last_valid_index(pressures),
+                    dP_dt_mean=dpdt_ref_values,
+                    dP_dt_time=dpdt_ref_time,
+                )
 
             dpdt_moyen, t_lim, dt, t_inter_f, _t_fine, _P_fine = dpdt_data
             t_fine_arr = np.asarray(_t_fine, dtype=float)
@@ -1011,11 +1024,11 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                     "id": f"auto-{name}-curve",
                     "kind": "analysis_curve",
                     "label": f"{name}:curve",
-                    "spec_idx": int(self._nearest_spectrum_index_from_time_ms(run, float(_t_fine[0]) if len(_t_fine) else 0.0)),
-                    "time_s": float(_t_fine[0]) / 1000.0 if len(_t_fine) else 0.0,
-                    "P_GPa": float(_P_fine[0]) if len(_P_fine) else 0.0,
-                    "x": float(_t_fine[0]) if len(_t_fine) else 0.0,
-                    "y": float(_P_fine[0]) if len(_P_fine) else 0.0,
+                    "spec_idx": int(self._nearest_spectrum_index_from_time_ms(run, float(t_fine_arr[0]) if len(t_fine_arr) else 0.0)),
+                    "time_s": float(t_fine_arr[0]) / 1000.0 if len(t_fine_arr) else 0.0,
+                    "P_GPa": float(p_fine_arr[0]) if len(p_fine_arr) else 0.0,
+                    "x": float(t_fine_arr[0]) if len(t_fine_arr) else 0.0,
+                    "y": float(p_fine_arr[0]) if len(p_fine_arr) else 0.0,
                     "source": "auto",
                     "locked": False,
                     "meta": {
@@ -1027,6 +1040,10 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                     },
                 }
             )
+
+            if dpdt_data is None:
+                continue
+
             key_points = [
                 ("t_lim", t_lim, "-"),
                 ("t_lim_dt", t_lim + dt, "-."),
