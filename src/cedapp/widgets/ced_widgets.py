@@ -10,6 +10,7 @@ from PyQt5.QtGui import QFont
 from PyQt5.QtWidgets import (
     QCheckBox,
     QGroupBox,
+    QComboBox,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -143,6 +144,11 @@ class DdacWidget:
         host.spectrum_select_box.setChecked(True)
         
         host.analysis_toggle = None
+        host.label_plot_metric = QLabel("Paramètre plot :", self._drx_container)
+        host.cedx_metric_combo = QComboBox(self._drx_container)
+        host.cedx_metric_combo.setToolTip(
+            "Sélectionne la grandeur du Summary à afficher (P, V, a, b, c, c/a, B/a, ...)."
+        )
 
         host.label_dpdt_points = QLabel("Pts glissants dP/dt :", self._drx_container)
         host.spinbox_dpdt_points = QSpinBox(self._drx_container)
@@ -178,6 +184,7 @@ class DdacWidget:
         )
         host.spinbox_dpdt_points.valueChanged.connect(host._on_dpdt_points_changed)
         host.spinbox_dpdt_smooth.valueChanged.connect(host._on_dpdt_points_changed)
+        host.cedx_metric_combo.currentTextChanged.connect(host._on_cedx_metric_changed)
         if hasattr(host, "set_ddac_multi_zone_visibility"):
             host.btn_zone_dpdt.toggled.connect(host.set_ddac_multi_zone_visibility)
 
@@ -200,6 +207,8 @@ class DdacWidget:
         layhrun = QHBoxLayout()
         layhrun.addWidget(host.label_CED)
         layhrun.addWidget(host.spectrum_select_box)
+        layhrun.addWidget(host.label_plot_metric)
+        layhrun.addWidget(host.cedx_metric_combo)
         layhrun.addWidget(host.label_dpdt_points)
         layhrun.addWidget(host.spinbox_dpdt_points)
         layhrun.addWidget(host.label_dpdt_smooth)

@@ -1288,8 +1288,9 @@ class Spectre:
         ax.plot(self.wnb, self.blfit, '-.', c='g', markersize=1)
         ax.plot(self.wnb, self.spec, '-', color='lightgray', markersize=4)
         ax.plot(self.wnb, self.y_corr + self.blfit, '.', color='black', markersize=3)
-
+        lc=["r","g","b","orange"]
         for G in self.Gauges:
+            c=None
             if not getattr(G, "bit_fit", False):
                 continue
 
@@ -1320,7 +1321,8 @@ class Spectre:
                 # (même si le fit n'a pas changé), décommente la ligne suivante :
                 G.X = X
                 pass
-
+            if G.color_print[1] is not None and lc !=[]:
+                c=lc.pop(0)
 
             for i, p in enumerate(G.pics):
                 params_f = p.model.make_params()
@@ -1331,9 +1333,10 @@ class Spectre:
                     titre_pic = rf" ${p.name}^{(G.name[0])}= {round(getattr(p,'ctr',[0])[0],3)}$"
                     ax.fill_between(G.X, y_fill, bf, where=y_fill > bf,
                                     alpha=0.3, label=titre_pic, color=G.color_print[1][i])
+                elif c is not None:
+                    ax.fill_between(G.X, y_fill, bf, where=y_fill > bf,color=c,alpha=0.25)
                 else:
-                    ax.fill_between(G.X, y_fill, bf, where=y_fill > bf, alpha=0.25)
-
+                    ax.fill_between(G.X, y_fill, bf, where=y_fill > bf,color=c,alpha=0.25)
 
             # Courbe du fit global (modèle + baseline)
             y_model_plus_bf = G.Y + bf

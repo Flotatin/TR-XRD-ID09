@@ -4472,12 +4472,77 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                 color = "white"
             status_item.setBackground(QColor(color))
 
+    def _get_selected_cedx_metric(self):
+        combo = getattr(self, "cedx_metric_combo", None)
+        if combo is None:
+            return "P"
+        text = combo.currentText().strip()
+        return text or "P"
+
+    def _set_cedx_pressure_axis_label(self):
+        metric = self._get_selected_cedx_metric()
+        if metric == "P":
+            self.ax_P.setLabel("left", "Pressure", units="GPa")
+        else:
+            self.ax_P.setLabel("left", metric)
+        self.ax_dPdt.setLabel("left", "dP/dt ", units="GPa/ms")
+
+    def _update_cedx_metric_options(self, run):
+        combo = getattr(self, "cedx_metric_combo", None)
+        if combo is None:
+            return
+
+        current_metric = self._get_selected_cedx_metric()
+        summary = getattr(run, "Summary", None)
+        metrics = {"P"}
+        if isinstance(summary, pd.DataFrame) and not summary.empty:
+            for col in summary.columns:
+                if not isinstance(col, str):
+                    continue
+                if "_" not in col:
+                    continue
+                metric, _gauge_name = col.split("_", 1)
+                if metric and metric not in {"sigma", "err"}:
+                    metrics.add(metric)
+
+        ordered_metrics = ["P"] + sorted(m for m in metrics if m != "P")
+
+        combo.blockSignals(True)
+        combo.clear()
+        for metric in ordered_metrics:
+            combo.addItem(metric)
+
+        target_metric = current_metric if current_metric in ordered_metrics else "P"
+        combo.setCurrentText(target_metric)
+        combo.blockSignals(False)
+        self._set_cedx_pressure_axis_label()
+
+    def _extract_metric_from_study(self, study, metric, gauge_name):
+        column_name = f"{metric}_{gauge_name}"
+        if column_name not in study.columns:
+            return np.nan
+        series = study[column_name]
+        if series.empty:
+            return np.nan
+        try:
+            return float(series.iloc[0])
+        except Exception:
+            return np.nan
+
+    def _on_cedx_metric_changed(self, _metric_text):
+        self._set_cedx_pressure_axis_label()
+        if getattr(self, "RUN", None) is None:
+            return
+        self._update_cedx_plots_from_run(reset_legend=True)
+
     def _get_data_CEDX(self,RUN):
         l_P, l_dP, l_t, l_sigma_P = [], [], [], []
+        l_P_ref = []
         l_T, l_sigma_T = [], []
         n_J = []
         gauge_lookup = {}
         gauge_indices = []
+        metric = self._get_selected_cedx_metric()
         spectra = getattr(RUN, "Spectra", []) or []
         for i, spec in enumerate(spectra):
             gauges = getattr(spec, "Gauges", []) or []
@@ -4496,29 +4561,29 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                     l_P.append([])
                     l_dP.append([])
                     l_t.append([])
+                    l_P_ref.append([])
                     l_sigma_P.append([])
                     gauge_indices.append([])
                     self._cedx_gauge_meta[name] = (symbol, color)
                 index = gauge_lookup[name]
                 study = getattr(spec, "study", pd.DataFrame())
-                column_name = "P_" + name
-                if column_name in study.columns:
-                    series = study[column_name]
-                    p = float(series.iloc[0]) if not series.empty else 0
-                    l_sigma_P[index].append(abs(p * 0.1 + 0.1))
+                p = self._extract_metric_from_study(study, metric, name)
+                p_ref = self._extract_metric_from_study(study, "P", name)
+                if np.isnan(p_ref):
+                    l_sigma_P[index].append(np.nan)
                 else:
-                    p = 0
-                    l_sigma_P[index].append(0)
-                if l_P[index] and i > 0:
+                    l_sigma_P[index].append(abs(p_ref * 0.1 + 0.1))
+                if l_P_ref[index] and i > 0:
                     try:
                         dt = (RUN.Time_spectrum[i] - RUN.Time_spectrum[i - 1]) * 1e3
                     except Exception:
                         dt = None
                     if dt:
-                        l_dP[index].append((p - l_P[index][-1]) / dt)
+                        l_dP[index].append((p_ref - l_P_ref[index][-1]) / dt)
                     else:
                         l_dP[index].append(np.nan)
                 l_P[index].append(p)
+                l_P_ref[index].append(p_ref)
                 if RUN.Time_spectrum is not None and i < len(RUN.Time_spectrum):
                     l_t[index].append(RUN.Time_spectrum[i] * 1e3)
                 else:
@@ -4743,7 +4808,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         series = self._cedx_gauge_series.get(name)
         if not series:
             return
-        pressures = series.get("pressure", [])
+        pressures = series.get("pressure_ref", series.get("pressure", []))
         indices = series.get("spectra_indices", [])
         derivs = []
         for pos in range(1, len(pressures)):
@@ -4795,15 +4860,14 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             gauges = getattr(spectrum, "Gauges", []) or []
             for gauge in gauges:
                 name = gauge.name
-                column = f"P_{name}"
-                if column in study.columns:
-                    pressure = float(study[column])
-                else:
-                    pressure = 0.0
-                new_gauges[name] = pressure
+                metric = self._get_selected_cedx_metric()
+                pressure = self._extract_metric_from_study(study, metric, name)
+                pressure_ref = self._extract_metric_from_study(study, "P", name)
+                new_gauges[name] = (pressure, pressure_ref)
 
         # Update or add gauges present in the spectrum
-        for name, pressure in new_gauges.items():
+        for name, values in new_gauges.items():
+            pressure, pressure_ref = values
             series = self._cedx_gauge_series.get(name)
             if series is None:
                 symbol, color = self._cedx_gauge_meta.get(name, (None, None))
@@ -4835,6 +4899,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                 self._cedx_gauge_meta[name] = (symbol, color)
                 self._cedx_gauge_series[name] = {
                     "pressure": [pressure],
+                    "pressure_ref": [pressure_ref],
                     "time": [time_value],
                     "deriv": [],
                     "spectra_indices": [spectrum_index],
@@ -4843,16 +4908,22 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
 
             indices = series.setdefault("spectra_indices", [])
             pressures = series.setdefault("pressure", [])
+            pressures_ref = series.setdefault("pressure_ref", [])
             times = series.setdefault("time", [])
 
             if spectrum_index in indices:
                 pos = indices.index(spectrum_index)
                 pressures[pos] = pressure
+                if pos < len(pressures_ref):
+                    pressures_ref[pos] = pressure_ref
+                else:
+                    pressures_ref.append(pressure_ref)
                 times[pos] = time_value
             else:
                 insert_pos = np.searchsorted(indices, spectrum_index)
                 indices.insert(insert_pos, spectrum_index)
                 pressures.insert(insert_pos, pressure)
+                pressures_ref.insert(insert_pos, pressure_ref)
                 times.insert(insert_pos, time_value)
 
             self._recompute_cedx_derivatives_for_gauge(name)
@@ -4866,6 +4937,9 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                 pos = indices.index(spectrum_index)
                 indices.pop(pos)
                 series.get("pressure", []).pop(pos)
+                pressure_ref_list = series.get("pressure_ref", [])
+                if pos < len(pressure_ref_list):
+                    pressure_ref_list.pop(pos)
                 series.get("time", []).pop(pos)
                 self._recompute_cedx_derivatives_for_gauge(name)
                 if not indices:
@@ -4928,6 +5002,17 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
 
         self._update_cedx_image_incremental(spectrum_index)
         self._refresh_gauge_library_if_needed()
+    
+    def _collect_pressure_reference_for_gauge(self, run, gauge_name, indices):
+        values = []
+        spectra = getattr(run, "Spectra", []) or []
+        for spec_index in indices:
+            if spec_index < 0 or spec_index >= len(spectra):
+                values.append(np.nan)
+                continue
+            study = getattr(spectra[spec_index], "study", pd.DataFrame())
+            values.append(self._extract_metric_from_study(study, "P", gauge_name))
+        return values
     
     def _update_cedx_plot_items(
         self,
@@ -5004,6 +5089,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                 "pressure": list(np.asarray(l_P[idx], dtype=float)),
                 "time": list(np.asarray(l_t[idx], dtype=float)),
                 "deriv": list(np.asarray(l_dP[idx], dtype=float)),
+                "pressure_ref": list(np.asarray(self._collect_pressure_reference_for_gauge(run, name, gauge_indices[idx]), dtype=float)),
                 "spectra_indices": list(gauge_indices[idx]),
             }
         self._cedx_gauge_series = gauge_series
@@ -5063,6 +5149,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         if self.RUN is None:
             return
         ensure_analyse_dataframe(self.RUN)
+        self._update_cedx_metric_options(self.RUN)
         (
             l_P,
             l_sigma_P,
@@ -5113,6 +5200,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         print("PRINT CEDd objet_run", objet_run, add_txt)
         self.RUN = objet_run
         ensure_analyse_dataframe(self.RUN)
+        self._update_cedx_metric_options(self.RUN)
         try:
             name_select = os.path.basename(self.RUN.CEDd_path)
         except:

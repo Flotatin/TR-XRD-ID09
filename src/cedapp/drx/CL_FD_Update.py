@@ -160,6 +160,7 @@ class Element_Bibli:
         self.P_range=[-10,1000]
         self.Vmin=0.8
         self.Z_max=None
+        self.fu=None
         self.P_start=0
         self.thetas_PV=[]
         self.domaine=[]
@@ -219,6 +220,10 @@ class Element_Bibli:
                 match_Z = re.search(r"/Z=\s*(\d+)", ligne)
                 if match_Z:
                     self.Z_max = int(match_Z.group(1))
+
+                match_fu = re.search(r"/fu=\s*(\d+)", ligne)
+                if match_fu:
+                    self.fu = int(match_fu.group(1))
 
             # --- Cas DIHKL ---
             elif "DIHKL" in l_name:
@@ -314,7 +319,6 @@ class Element_Bibli:
             )
             self.EoS = [P, f(P)]
             print("Vmin too low → reset to 0.8*V0")
-
 
     def E_theta(self,l,E=None):
         if E is not None:
@@ -1327,11 +1331,11 @@ class Spectre:
         ax.plot(self.wnb, self.blfit, '-.', c='g', markersize=1)
         ax.plot(self.wnb, self.spec, '-', color='lightgray', markersize=4)
         ax.plot(self.wnb, self.y_corr + self.blfit, '.', color='black', markersize=3)
-
+        lc=["r","g","b","orange"]
         for G in self.Gauges:
             if not getattr(G, "bit_fit", False):
                 continue
-
+            c=None
             titre_fiti = f"{G.name}:$\\lambda_0=$" + str(G.lamb0)
 
             if G.indexX is None:
@@ -1359,7 +1363,8 @@ class Spectre:
                 # (même si le fit n'a pas changé), décommente la ligne suivante :
                 G.X = X
                 pass
-
+            if G.color_print[1] is not None and lc !=[]:
+                c=lc.pop(0)
 
             for i, p in enumerate(G.pics):
                 params_f = p.model.make_params()
@@ -1370,8 +1375,10 @@ class Spectre:
                     titre_pic = rf" ${p.name}^{(G.name[0])}= {round(getattr(p,'ctr',[0])[0],3)}$"
                     ax.fill_between(G.X, y_fill, bf, where=y_fill > bf,
                                     alpha=0.3, label=titre_pic, color=G.color_print[1][i])
+                elif c is not None:
+                    ax.fill_between(G.X, y_fill, bf, where=y_fill > bf,color=c,alpha=0.25)
                 else:
-                    ax.fill_between(G.X, y_fill, bf, where=y_fill > bf, alpha=0.25)
+                    ax.fill_between(G.X, y_fill, bf, where=y_fill > bf,color=c,alpha=0.25)
 
 
             # Courbe du fit global (modèle + baseline)
