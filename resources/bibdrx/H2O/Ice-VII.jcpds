@@ -1,5 +1,5 @@
 VERSION:   4(bcc)  (EOS Bezacier 2014 https://doi.org/10.1063/1.4894421) K0=20.15 K0P=4 V0=41.480
-COMMENT: H2O Ice VII /T[100,1000]/P[-1,70]/Z=18
+COMMENT: H2O Ice VII /T[100,1000]/P[-1,70]/Z=18/fu=2
 K0:       20.15
 K0P:      4
 DK0DT:    0.0

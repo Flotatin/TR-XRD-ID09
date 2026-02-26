@@ -55,9 +55,9 @@ class DdacWidget:
         host.ax_diff_int = host.fig_DRX_dynamic.addPlot(row=2, col=0)
         host.ax_diff_int.setLabel("left", '2<font>&theta<font>', units="°")
         host.ax_diff_int.setLabel("bottom", "Time", units="ms")
-        #host.fig_DRX_dynamic.ci.layout.setRowStretchFactor(0, 2)
-        #host.fig_DRX_dynamic.ci.layout.setRowStretchFactor(1, 1)
-        #host.fig_DRX_dynamic.ci.layout.setRowStretchFactor(2, 2)
+        host.fig_DRX_dynamic.ci.layout.setRowStretchFactor(0, 3)
+        host.fig_DRX_dynamic.ci.layout.setRowStretchFactor(1, 1)
+        host.fig_DRX_dynamic.ci.layout.setRowStretchFactor(2, 2)
 
     def _create_drx_persistent_items(self) -> None:
         host = self._drx_container

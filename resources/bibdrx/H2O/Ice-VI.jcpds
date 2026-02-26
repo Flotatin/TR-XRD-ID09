@@ -1,5 +1,5 @@
 VERSION:   4 modifié https://doi.org/10.1063/1.4894421 H2O-iceVI - Kamb, 1965
-COMMENT: H2O Ice VI /T[150,350]/P[-0.2,3]/Z=18
+COMMENT: H2O Ice VI /T[150,350]/P[-0.2,3]/Z=18/fu=10
 K0:       14.05
 K0P:      4
 DK0DT:    0.0

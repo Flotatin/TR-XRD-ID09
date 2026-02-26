@@ -5,7 +5,7 @@ import os
 import sys
 import dill
 import traceback
-from scipy.signal import find_peaks
+from scipy.signal import find_peaks , savgol_filter
 import json
 import numpy as np
 import ast
@@ -109,7 +109,7 @@ from pyqtgraph import PlotItem
 import pyqtgraph as pg
 import copy
 from scipy.optimize import curve_fit
-from scipy.interpolate import UnivariateSpline
+from scipy.interpolate import UnivariateSpline,PchipInterpolator
 import io
 from math import isnan
 import pandas as pd
@@ -1014,7 +1014,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                 else:
                     self.ax_P.hideAxis("right")
 
-    def _update_analysis_from_cedx_data(self, run, n_J, l_P, l_t, gauge_indices) -> None:
+    def _update_analysis_from_cedx_data(self, run, n_J, l_P_analysis, l_t, gauge_indices) -> None:
         df = ensure_analyse_dataframe(run)
         if df is None:
             return
@@ -1022,7 +1022,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         rows = []
         dpdt_ref_time, dpdt_ref_values = self._compute_mean_dp_curve(self._cedx_gauge_series)
         for idx, (name, _symbol, _color) in enumerate(n_J):
-            pressures = l_P[idx] if idx < len(l_P) else []
+            pressures = l_P_analysis[idx] if idx < len(l_P_analysis) else []
             times = l_t[idx] if idx < len(l_t) else []
             indices = gauge_indices[idx] if idx < len(gauge_indices) else []
             color = self._get_gauge_color(name)
@@ -1047,17 +1047,21 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                     float(t_valid[-1]),
                     max(len(t_valid) * 80, 200),
                 )
-                if t_valid.size >= 4:
+                if t_valid.size >= 3:
                     try:
-                        noise = float(np.nanstd(p_valid))
-                        smooth = max((noise ** 2) * len(p_valid), 1e-12)
-                        spline_fallback = UnivariateSpline(t_valid, p_valid, s=smooth)
-                        curve_p_fine = np.asarray(spline_fallback(curve_t_fine), dtype=float)
-                        curve_dpdt_fine = np.asarray(spline_fallback.derivative()(curve_t_fine), dtype=float)
-                    except Exception:
+                        pchip = PchipInterpolator(t_valid, p_valid, extrapolate=True)
+                        curve_p_fine = np.asarray(pchip(curve_t_fine), dtype=float)
+                        curve_p_smooth = savgol_filter(curve_p_fine, 21, 3)
+                        curve_dpdt_fine = np.gradient(curve_p_smooth, curve_t_fine)
+                        #print("chip",name)
+                    except Exception as e:
+                        #print("PchipInterpolator:",e)
                         curve_p_fine = np.interp(curve_t_fine, t_valid, p_valid)
+                        curve_dpdt_fine = np.gradient(curve_p_fine, curve_t_fine)
                 else:
+                    #print("t_valid.size:",t_valid.size)
                     curve_p_fine = np.interp(curve_t_fine, t_valid, p_valid)
+                    curve_dpdt_fine = np.gradient(curve_p_fine, curve_t_fine)
 
             dpdt_data = None
             if pressure_limit is not None:
@@ -2293,6 +2297,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
 
     def _apply_edited_gauge(self, edited_element) -> None:
         self.gauge_select = self.gauge_controller.f_Gauge_Load(copy.deepcopy(edited_element))
+        element_name = getattr(edited_element, "name", None)
 
         if self.bit_modif_jauge and self.Spectrum is not None:
             if 0 <= self.index_jauge < len(self.Spectrum.Gauges):
@@ -2304,12 +2309,20 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
 
                 if self.RUN is not None and 0 <= self.index_spec < len(self.RUN.Spectra):
                     self.RUN.Spectra[self.index_spec] = self.Spectrum
-                    self.RUN.Corr_Summary()
-
         else:
-            gauge_name = getattr(edited_element, "name", None)
-            if gauge_name and gauge_name in getattr(self.ClassDRX, "Bibli_elements", {}):
-                self.ClassDRX.Bibli_elements[gauge_name] = copy.deepcopy(edited_element)
+            if element_name and element_name in getattr(self.ClassDRX, "Bibli_elements", {}):
+                self.ClassDRX.Bibli_elements[element_name] = copy.deepcopy(edited_element)
+
+        if element_name and self.RUN is not None:
+            changed = False
+            for spec in self.RUN.Spectra:
+                for gauge_item in getattr(spec, "Gauges", []) or []:
+                    ref_name = getattr(getattr(gauge_item, "Element_ref", None), "name", None)
+                    if ref_name == element_name:
+                        gauge_item.Element_ref = copy.deepcopy(edited_element)
+                        changed = True
+            if changed:
+                self.RUN.Corr_Summary()
 
         self.gauge_controller.refresh_fixed_lines(self.gauge_select)
         self._refresh_drx_view()
@@ -2351,6 +2364,8 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             "ALPHA": element.ALPHA,
             "BETA": element.BETA,
             "GAMMA": element.GAMMA,
+            "ALPHAT": getattr(element, "ALPHAKT", None),
+            "Vmin": getattr(element, "Vmin", None)
         }
 
         for key, value in updates.items():
@@ -4484,7 +4499,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         if metric == "P":
             self.ax_P.setLabel("left", "Pressure", units="GPa")
         else:
-            self.ax_P.setLabel("left", metric)
+            self.ax_P.setLabel("left", f"{metric}/{metric}₀")
         self.ax_dPdt.setLabel("left", "dP/dt ", units="GPa/ms")
 
     def _update_cedx_metric_options(self, run):
@@ -4494,7 +4509,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
 
         current_metric = self._get_selected_cedx_metric()
         summary = getattr(run, "Summary", None)
-        metrics = {"P"}
+        metrics = {"P", "a", "b", "c", "V", "c/a", "b/c", "V/f.u"}
         if isinstance(summary, pd.DataFrame) and not summary.empty:
             for col in summary.columns:
                 if not isinstance(col, str):
@@ -4528,6 +4543,114 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             return float(series.iloc[0])
         except Exception:
             return np.nan
+
+    def _extract_metric_from_gauge(self, gauge, metric):
+        metric_key = str(metric).strip().lower()
+        if metric_key == "p":
+            return float(getattr(gauge, "P", np.nan))
+        if metric_key == "a":
+            return float(getattr(gauge, "a", np.nan))
+        if metric_key == "b":
+            return float(getattr(gauge, "b", np.nan))
+        if metric_key == "c":
+            return float(getattr(gauge, "c", np.nan))
+        if metric_key == "v":
+            return float(getattr(gauge, "V", np.nan))
+        if metric_key == "c/a":
+            c_val = float(getattr(gauge, "c", np.nan))
+            a_val = float(getattr(gauge, "a", np.nan))
+            return c_val / a_val if np.isfinite(c_val) and np.isfinite(a_val) and a_val else np.nan
+        if metric_key == "b/c":
+            b_val = float(getattr(gauge, "b", np.nan))
+            c_val = float(getattr(gauge, "c", np.nan))
+            return b_val / c_val if np.isfinite(b_val) and np.isfinite(c_val) and c_val else np.nan
+        if metric_key == "v/f.u":
+            v_val = float(getattr(gauge, "V", np.nan))
+            fu = getattr(getattr(gauge, "Element_ref", None), "fu", None)
+            if fu is None or not np.isfinite(v_val) or float(fu) == 0:
+                return np.nan
+            return v_val / float(fu)
+        return np.nan
+
+    def _warn_missing_element_ref_field(self, gauge, metric, field_name):
+        shown = getattr(self, "_cedx_missing_ref_warnings", None)
+        if shown is None:
+            shown = set()
+            self._cedx_missing_ref_warnings = shown
+
+        gauge_name = getattr(gauge, "name", "?")
+        ref_name = getattr(getattr(gauge, "Element_ref", None), "name", gauge_name)
+        key = (str(ref_name), str(metric), str(field_name))
+        if key in shown:
+            return
+        shown.add(key)
+
+        QMessageBox.warning(
+            self,
+            "Element_ref incomplet",
+            (
+                f"Impossible de normaliser '{metric}' pour '{ref_name}' : valeur de référence manquante ({field_name}).\n\n"
+                "Utilisez 'Edit Element Ref' pour renseigner les champs manquants "
+                "(ex: f.u., plages P/T, A/B/C, V0, ratios, etc.).\n"
+                "La modification sera propagée aux Element_ref identiques du CEDX."
+            ),
+        )
+
+    def _normalized_metric_value(self, metric, value, gauge):
+        if not np.isfinite(value):
+            return np.nan
+
+        metric_key = str(metric).strip().lower()
+        if (metric_key == "p") or (metric_key == "v/f.u"):
+            return value
+        ref = getattr(gauge, "Element_ref", None)
+        if ref is None:
+            return value
+
+        try:
+            if metric_key == "a":
+                ref_val = float(getattr(ref, "A", np.nan))
+            elif metric_key == "b":
+                ref_val = float(getattr(ref, "B", np.nan))
+                if not np.isfinite(ref_val):
+                    ref_val = float(getattr(ref, "A", np.nan)) * float(getattr(ref, "rBA", np.nan))
+            elif metric_key == "c":
+                ref_val = float(getattr(ref, "C", np.nan))
+                if not np.isfinite(ref_val):
+                    ref_val = float(getattr(ref, "A", np.nan)) * float(getattr(ref, "rCA", np.nan))
+            elif metric_key == "v":
+                ref_val = float(getattr(ref, "V0", np.nan))
+            elif metric_key == "c/a":
+                ref_val = float(getattr(ref, "rCA", np.nan))
+                if not np.isfinite(ref_val):
+                    c0 = float(getattr(ref, "C", np.nan))
+                    a0 = float(getattr(ref, "A", np.nan))
+                    ref_val = c0 / a0 if np.isfinite(c0) and np.isfinite(a0) and a0 else np.nan
+            elif metric_key == "b/c":
+                b0 = float(getattr(ref, "B", np.nan))
+                c0 = float(getattr(ref, "C", np.nan))
+                if np.isfinite(b0) and np.isfinite(c0) and c0:
+                    ref_val = b0 / c0
+                else:
+                    rba = float(getattr(ref, "rBA", np.nan))
+                    rca = float(getattr(ref, "rCA", np.nan))
+                    ref_val = rba / rca if np.isfinite(rba) and np.isfinite(rca) and rca else np.nan
+            else:
+                ref_val = np.nan
+        except Exception:
+            ref_val = np.nan
+
+        if not np.isfinite(ref_val) or ref_val == 0:
+            self._warn_missing_element_ref_field(gauge, metric, "reference value")
+            return value
+        return value / ref_val
+
+    def _extract_cedx_metric_value(self, study, gauge, metric):
+        gauge_name = getattr(gauge, "name", "")
+        value = self._extract_metric_from_study(study, metric, gauge_name)
+        if not np.isfinite(value):
+            value = self._extract_metric_from_gauge(gauge, metric)
+        return self._normalized_metric_value(metric, value, gauge)
 
     def _on_cedx_metric_changed(self, _metric_text):
         self._set_cedx_pressure_axis_label()
@@ -4567,7 +4690,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                     self._cedx_gauge_meta[name] = (symbol, color)
                 index = gauge_lookup[name]
                 study = getattr(spec, "study", pd.DataFrame())
-                p = self._extract_metric_from_study(study, metric, name)
+                p = self._extract_cedx_metric_value(study, gauge, metric)
                 p_ref = self._extract_metric_from_study(study, "P", name)
                 if np.isnan(p_ref):
                     l_sigma_P[index].append(np.nan)
@@ -5095,7 +5218,11 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         self._cedx_gauge_series = gauge_series
         self._update_cedx_mean_curve()
         self._update_interval_dpdt_labels()
-        self._update_analysis_from_cedx_data(run, n_J, l_P, l_t, gauge_indices)
+        l_P_analysis = [
+            list(np.asarray(gauge_series.get(name, {}).get("pressure_ref", []), dtype=float))
+            for name, _symbol, _color in n_J
+        ]
+        self._update_analysis_from_cedx_data(run, n_J, l_P_analysis, l_t, gauge_indices)
 
         time_amp_arr = np.asarray(time_amp, dtype=float) if time_amp is not None else None
         amp_arr = np.asarray(amp, dtype=float) if amp is not None else None
@@ -6782,7 +6909,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         time_by_index = {}
 
         for series in gauge_series.values():
-            pressures = series.get("pressure", []) or []
+            pressures = series.get("pressure_ref", series.get("pressure", [])) or []
             times = series.get("time", []) or []
             indices = series.get("spectra_indices", []) or []
             for pos, pressure in enumerate(pressures):
@@ -6956,8 +7083,8 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             return collected
 
         pressure_values = _collect(pressure_series)
-        if amp is not None:
-            pressure_values.extend([v for v in amp if v is not None and not np.isnan(v)])
+        #if amp is not None:
+        #pressure_values.extend([v for v in amp if v is not None and not np.isnan(v)])
 
         if pressure_values:
             p_min = min(pressure_values)
