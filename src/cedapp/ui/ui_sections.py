@@ -63,6 +63,7 @@ class UIState:
     select_file_oscilo_button: QPushButton | None = None
     file_label_oscilo: QLabel | None = None
     Calibration_DRX_button: QPushButton | None = None
+    detector_distance_button: QPushButton | None = None
     plot_fit_toggle: QPushButton | None = None
     setup_mode_button: QPushButton | None = None
     DRX_selector: QComboBox | None = None
@@ -92,6 +93,7 @@ class UIState:
     spinbox_P: QDoubleSpinBox | None = None
     spinbox_T: QDoubleSpinBox | None = None
     listbox_pic: QListWidget | None = None
+    gauge_undock_box: QPushButton | None = None
 
 
 class CalibrationButton(QPushButton):
@@ -142,6 +144,7 @@ def build_command_panel(window) -> None:
     state.helpLabel = QListWidget()
     state.helpLabel.itemDoubleClicked.connect(window.try_command)
     state.helpLabel.hide()
+
 
     commands_title = QLabel("Commandes")
     state.CommandeLayout.addWidget(commands_title)
@@ -222,6 +225,10 @@ def build_file_section(window) -> None:
     state.Calibration_DRX_button.clicked.connect(window.Calibration_DRX)
     state.Calibration_DRX_button.doubleClicked.connect(window._open_calibration_dialog)
     row_layout.addWidget(state.Calibration_DRX_button)
+
+    state.detector_distance_button = QPushButton("Dist detector", window)
+    state.detector_distance_button.clicked.connect(window.update_detector_distance_without_integration)
+    row_layout.addWidget(state.detector_distance_button)
 
     bouton_configue = QPushButton("Save config")
     bouton_configue.clicked.connect(window.save_paths_to_txt)
@@ -423,6 +430,11 @@ def build_gauge_section(window) -> None:
     state.listbox_pic.doubleClicked.connect(window.select_pic)
     layout.addWidget(state.listbox_pic)
     add_box.setLayout(layout)
+    
+    state.gauge_undock_box = QPushButton("Undock panel")
+    state.gauge_undock_box.setCheckable(True)
+    state.gauge_undock_box.toggled.connect(window.toggle_gauge_panel_dock)
+    layout.addWidget(state.gauge_undock_box)
 
 
     parampic_box = QGroupBox("Model peak")

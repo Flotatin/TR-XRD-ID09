@@ -5,19 +5,25 @@ from .paths import (
     get_bibdrx_dir,
     get_config_dir,
     get_default_config_path,
+    get_last_config_record_path,
+    get_startup_config_path,
     get_resources_dir,
     get_text_dir,
     resolve_bibdrx_paths,
     resolve_config_path,
+    save_startup_config_path,
 )
 
 __all__ = [
     "get_bibdrx_dir",
     "get_config_dir",
     "get_default_config_path",
+    "get_last_config_record_path",
+    "get_startup_config_path",
     "get_resources_dir",
     "get_text_dir",
     "resolve_bibdrx_paths",
     "resolve_config_path",
+    "save_startup_config_path",
     "setup_logging",
 ]

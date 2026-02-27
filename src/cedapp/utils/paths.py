@@ -57,6 +57,34 @@ def get_default_config_path() -> Path:
 
     return get_config_dir(require=False) / "config_21012025.txt"
 
+def get_last_config_record_path() -> Path:
+    """Return the file used to persist the last selected config path."""
+
+    return get_config_dir(require=False) / ".last_config_path"
+
+
+def get_startup_config_path() -> Path:
+    """Return the config file that should be loaded at startup."""
+
+    record_path = get_last_config_record_path()
+    if record_path.exists():
+        try:
+            saved_path = Path(record_path.read_text(encoding="utf-8").strip()).expanduser()
+        except OSError:
+            saved_path = None
+        if saved_path:
+            return resolve_config_path(saved_path)
+    return get_default_config_path()
+
+
+def save_startup_config_path(config_path: str | Path) -> Path:
+    """Persist the config path used by the application for future launches."""
+
+    resolved_path = resolve_config_path(config_path)
+    record_path = get_last_config_record_path()
+    record_path.parent.mkdir(parents=True, exist_ok=True)
+    record_path.write_text(str(resolved_path), encoding="utf-8")
+    return resolved_path
 
 def resolve_config_path(config_path: str | Path) -> Path:
     """Resolve a config path relative to the config directory when needed."""

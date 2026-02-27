@@ -39,6 +39,7 @@ from PyQt5.QtWidgets import (QApplication,
                              QDesktopWidget,
                              QToolButton,
                              QAbstractItemView,
+                            QInputDialog,
                              )
 
 try:
@@ -146,7 +147,7 @@ BIBLI_PLIM = {
     "H2O_Ice_Ih": None,
     "H2O_Ice_VI": [0.96, 2.064],
     "H2O_Ice_VII": [2.064, 100],
-    "Sn_Beta": [-0.5, 12],
+    "Sn_Beta": [-2, 12],
     "Sn_gamma": [12, 80],
 }
 
@@ -156,7 +157,7 @@ setup_logging(debug=_DEBUG_ENV)
 logger = logging.getLogger(__name__)
 
 folder_start = ""
-file_config = r'config_H2O.txt'#paths.get_default_config_path()
+file_config = paths.get_startup_config_path()
 text_dir = paths.get_text_dir(require=False)
 
 file_help = text_dir / "Help.txt"
@@ -512,7 +513,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         self._gauge_copy_zone: Optional[pg.LinearRegionItem] = None
         self._gauge_copy_zone_linked: List[pg.LinearRegionItem] = []
         
-        self.config_file = paths.resolve_config_path(config_file).expanduser()
+        self.config_file = paths.save_startup_config_path(config_file).expanduser()
         self.folder_start = folder_start or ""
         self.DEFAULT_THETA_RANGE = DEFAULT_THETA_RANGE
         self.DEFAULT_ENERGY = DEFAULT_ENERGY
@@ -583,6 +584,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
 #?Mise en fomre
         self.viewer=None
         self.clavier_visuel = None
+        self._gauge_panel_dialog = None
 
 
         self.folder_bibDRX = str(folder_Bib_DRX)  # os.path.join(folder_Bib_DRX,os.listdir(folder_Bib_DRX)[0])
@@ -803,6 +805,9 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
 
         self.setWindowTitle("0.1 vXRD © F.Dembele")
         self.grid_layout = QGridLayout()
+        self.setMinimumSize(1200, 780)
+        self.grid_layout.setContentsMargins(6, 6, 6, 6)
+        self.grid_layout.setSpacing(6)
         central_widget = QWidget()
         central_widget.setLayout(self.grid_layout)
         self.setCentralWidget(central_widget)
@@ -1050,7 +1055,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                 if t_valid.size >= 3:
                     try:
                         pchip = PchipInterpolator(t_valid, p_valid, extrapolate=True)
-                        curve_p_fine = np.asarray(pchip(curve_t_fine), dtype=float)
+                        curve_p_fine = savgol_filter(np.asarray(pchip(curve_t_fine), dtype=float), 21, 3)
                         curve_p_smooth = savgol_filter(curve_p_fine, 21, 3)
                         curve_dpdt_fine = np.gradient(curve_p_smooth, curve_t_fine)
                         #print("chip",name)
@@ -1397,7 +1402,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             theme, path = dialog.result
             self.apply_theme(theme == 'Light')
             if path:
-                self.config_file = Path(path).expanduser()
+                self.config_file = paths.save_startup_config_path(path).expanduser()
                 self.load_paths_from_txt()
 
     def _open_oscilloscope_viewer(self) -> None:
@@ -1952,6 +1957,42 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         self.help_tab_visible = visible
         self._update_help_button_color(visible)
 
+    def _on_gauge_panel_dialog_closed(self) -> None:
+        toggle_button = getattr(self, "gauge_undock_box", None)
+        if toggle_button is None:
+            return
+        if toggle_button.isChecked():
+            toggle_button.blockSignals(True)
+            toggle_button.setChecked(False)
+            toggle_button.blockSignals(False)
+        self.toggle_gauge_panel_dock(False)
+
+    def toggle_gauge_panel_dock(self, undocked: bool) -> None:
+        spectrum_section = getattr(self.ui_state, "spectrum_section_widget", None)
+        if spectrum_section is None:
+            return
+
+        if undocked:
+            if self._gauge_panel_dialog is None:
+                dialog = QDialog(self)
+                dialog.setWindowTitle("Gauge and zoom panel")
+                dialog_layout = QVBoxLayout(dialog)
+                dialog_layout.setContentsMargins(8, 8, 8, 8)
+                dialog.finished.connect(lambda _result: self._on_gauge_panel_dialog_closed())
+                self._gauge_panel_dialog = dialog
+
+            spectrum_section.undock_right_panel(self._gauge_panel_dialog.layout())
+            self._gauge_panel_dialog.resize(950, 720)
+            self._gauge_panel_dialog.show()
+            self._gauge_panel_dialog.raise_()
+            self._gauge_panel_dialog.activateWindow()
+            return
+
+        if self._gauge_panel_dialog is not None:
+            spectrum_section.dock_right_panel()
+            self._gauge_panel_dialog.hide()
+
+
     def toggle_live_mode(self, active: Optional[bool] = None) -> None:
         """Toggle the live DRX folder monitoring."""
         if active is None:
@@ -2303,9 +2344,9 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             if 0 <= self.index_jauge < len(self.Spectrum.Gauges):
                 gauge = self.Spectrum.Gauges[self.index_jauge]
                 gauge.Element_ref = copy.deepcopy(edited_element)
-                gauge.init_ref()
-                gauge.bit_fit = False
-                self.Spectrum.bit_fit = False
+                #gauge.init_ref()
+                #gauge.bit_fit = False
+                #self.Spectrum.bit_fit = False
 
                 if self.RUN is not None and 0 <= self.index_spec < len(self.RUN.Spectra):
                     self.RUN.Spectra[self.index_spec] = self.Spectrum
@@ -2543,6 +2584,114 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
 
         if self.energy_value != new_energy and new_energy is not None:
             self.set_energy_value(new_energy)
+    
+    def update_detector_distance_without_integration(self):
+        if self.calib is None or getattr(self.calib, "ai", None) is None:
+            self.text_box_msg.setText("warn: calibration missing")
+            return
+
+        current_dist_m = float(getattr(self.calib.ai, "dist", 0.0) or 0.0)
+        if current_dist_m <= 0:
+            self.text_box_msg.setText("warn: invalid detector distance")
+            return
+
+        value_mm, ok = QInputDialog.getDouble(
+            self,
+            "Detector distance",
+            f"Distance actuelle: {current_dist_m*1000.0:.3f} mm\n""Nouvelle distance détecteur (mm):",
+            current_dist_m * 1000.0,
+            1.0,
+            10000.0,
+            3,
+        )
+        if not ok:
+            return
+
+        new_dist_m = float(value_mm) / 1000.0
+        if new_dist_m <= 0:
+            self.text_box_msg.setText("warn: invalid detector distance")
+            return
+
+        def remap_theta_deg(theta_deg_array: np.ndarray) -> np.ndarray:
+            theta_old = np.deg2rad(np.asarray(theta_deg_array, dtype=float) / 2.0)
+            theta_new = np.arctan((current_dist_m / new_dist_m) * np.tan(theta_old))
+            return np.rad2deg(2.0 * theta_new)
+
+        def remap_pic_center(pic_obj) -> None:
+            if pic_obj is None or not hasattr(pic_obj, "ctr") or pic_obj.ctr is None:
+                return
+
+            try:
+                ctr_old = float(pic_obj.ctr[0])
+            except Exception:
+                return
+
+            ctr_new = float(remap_theta_deg(np.array([ctr_old]))[0])
+
+            delta_ctr = 0.4
+            try:
+                bounds = getattr(pic_obj, "ctr", [None, None])[1]
+                if bounds is not None and len(bounds) == 2:
+                    delta_ctr = max(1e-6, abs(float(bounds[1]) - float(bounds[0])) / 2.0)
+            except Exception:
+                pass
+
+            try:
+                pic_obj.Update(ctr=ctr_new, Delta_ctr=delta_ctr, move=True)
+            except Exception:
+                pic_obj.ctr = [ctr_new, [ctr_new - delta_ctr, ctr_new + delta_ctr]]
+
+        spectra = []
+        if self.RUN is not None and getattr(self.RUN, "Spectra", None):
+            spectra = [spec for spec in self.RUN.Spectra if spec is not None]
+        elif self.Spectrum is not None:
+            spectra = [self.Spectrum]
+
+        if not spectra:
+            self.text_box_msg.setText("warn: no spectrum loaded")
+            return
+
+        updated_specs = 0
+        for spectrum in spectra:
+            if getattr(spectrum, "wnb", None) is None:
+                continue
+            wnb_old = np.asarray(spectrum.wnb, dtype=float)
+            if wnb_old.size == 0:
+                continue
+
+            wnb_new = remap_theta_deg(wnb_old)
+            spectrum.wnb = wnb_new
+            spectrum.lambda_error = round((wnb_new[-1] - wnb_new[0]) * 0.5 / len(wnb_new), 4)
+
+            for gauge in getattr(spectrum, "Gauges", []) or []:
+                for pic in getattr(gauge, "pics", []) or []:
+                    remap_pic_center(pic)
+                if getattr(gauge, "pics", None):
+                    try:
+                        gauge.lamb_fit = float(gauge.pics[0].ctr[0])
+                    except Exception:
+                        pass
+            updated_specs += 1
+
+        self.calib.ai.dist = new_dist_m
+        if self.RUN is not None and getattr(self.RUN, "calib", None) is not None:
+            self.RUN.calib.ai.dist = new_dist_m
+            if 0 <= self.index_spec < len(self.RUN.Spectra):
+                self.RUN.Spectra[self.index_spec] = self.Spectrum
+
+        if self.RUN is not None and 0 <= self.index_spec < len(getattr(self.RUN, "Spectra", [])):
+            self.Spectrum = self.RUN.Spectra[self.index_spec]
+
+        self.bit_bypass = True
+        try:
+            self.f_Spectrum_Load(Spectrum=self.Spectrum)
+        finally:
+            self.bit_bypass = False
+
+        self.text_box_msg.setText(
+            f"Detector distance updated: {current_dist_m*1000:.3f} → {value_mm:.3f} mm on {updated_specs} spectrum(s), without reintegration"
+        )
+
 
     def set_loaded_drx_file(self, file_path: str, scan_name: Optional[str] = None) -> None:
         self.loaded_file_DRX = file_path
@@ -2987,6 +3136,10 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         cache_key = (key, id(calib.ai))
         if cache_key not in self._print_plate_theta_cache:
             try:
+                theta_rad = calib.ai.center_array(shape=shape, unit="2th_rad")
+                self._print_plate_theta_cache[(key, id(calib.ai))] = np.degrees(theta_rad)
+            except TypeError:
+                # Backward compatibility with older pyFAI versions.
                 self._print_plate_theta_cache[(key, id(calib.ai))] = np.degrees(calib.ai.twoThetaArray(shape))
             except Exception:
                 return None
@@ -3091,6 +3244,12 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
     def _apply_print_plate_view_controls(self) -> None:
         if self.print_plate_image_item is None or self.print_plate_shape is None:
             return
+        """
+        display_shape = getattr(self, "print_plate_display_shape", None)
+        if display_shape is None:
+            display_shape = self.print_plate_shape
+        h, w = display_shape
+        """
         h, w = self.print_plate_shape
         self.print_plate_plot.setLimits(xMin=0, xMax=float(w), yMin=0, yMax=float(h))
         self.print_plate_plot.setXRange(0, float(w))
@@ -3318,6 +3477,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                 return
 
             self.print_plate_shape = cake_img.shape
+            self.print_plate_display_shape = np.rot90(cake_img, -1).shape
             self._update_image_safe(self.print_plate_image_item, np.rot90(cake_img,-1), levels=self._print_plate_levels)
             x_min, x_max = float(np.min(radial)), float(np.max(radial))
             theta_bounds = self._get_print_theta_bounds()
@@ -3327,6 +3487,10 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             y_min, y_max = float(np.min(azimuth)), float(np.max(azimuth))
             self.print_plate_plot.setLabel("left", "Azimuth", units="°")
             self.print_plate_plot.setLabel("bottom", "2θ", units="°")
+            self.print_plate_plot.getViewBox().setAspectLocked(False)
+            spectrum_section = getattr(self.ui_state, "spectrum_section_widget", None)
+            if spectrum_section is not None:
+                spectrum_section.set_plot_window_ratio(None)
             self.print_plate_plot.invertY(False)
             self.print_plate_plot.setLimits(xMin=x_min, xMax=x_max, yMin=y_min, yMax=y_max)
             self.print_plate_plot.setXRange(x_min, x_max)
@@ -3341,9 +3505,15 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
 
         self.print_plate_shape = masked_frame.shape
         display_image = self._raw_to_display_image(masked_frame)
+        self.print_plate_display_shape = display_image.shape
         self._update_image_safe(self.print_plate_image_item, np.rot90(display_image,-1), levels=self._print_plate_levels)
         self.print_plate_plot.setLabel("left", "pixel Y")
         self.print_plate_plot.setLabel("bottom", "pixel X")
+        self.print_plate_plot.getViewBox().setAspectLocked(False)
+        spectrum_section = getattr(self.ui_state, "spectrum_section_widget", None)
+        if spectrum_section is not None:
+            aspect_ratio = float(display_image.shape[1]) / max(float(display_image.shape[0]), 1.0)
+            spectrum_section.set_plot_window_ratio(aspect_ratio)
         if self._print_plate_cake_theta_line is not None and self.print_plate_plot is not None:
             try:
                 self.print_plate_plot.removeItem(self._print_plate_cake_theta_line)
@@ -3366,31 +3536,30 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         self._update_print_plate_image()
 
     def show_print_plate(self) -> None:
+        spectrum_section = getattr(self.ui_state, "spectrum_section_widget", None)
+        if spectrum_section is None:
+            return
         if self.print_plate_active:
             if self.print_plate_window is not None:
-                self.print_plate_window.hide()
-            if hasattr(self, "zoom_widget"):
-                self.zoom_widget.show()
-            self.top_layout.setStretch(0, 3)
-            self.top_layout.setStretch(1, 1)
-            self.ui_state.spectrum_section_widget.right_layout.setStretch(0, 1)
-            self.ui_state.spectrum_section_widget.right_layout.setStretch(1, 1)
+                spectrum_section.show_zoom_replacement(self.print_plate_window, False)
+            if spectrum_section.is_right_panel_docked():
+                self.top_layout.setStretch(0, 3)
+                self.top_layout.setStretch(1, 1)
+            else:
+                self.top_layout.setStretch(0, 1)
+                self.top_layout.setStretch(1, 1)
             self.print_plate_active = False
             return
 
         if self.print_plate_window is None:
             self.print_plate_window = QWidget(self)
             layout = QVBoxLayout(self.print_plate_window)
-            tabs = QTabWidget(self.print_plate_window)
-            tab_print = QWidget()
-            tab_layout = QVBoxLayout(tab_print)
-
             controls_layout = QHBoxLayout()
             self._print_plate_mode_button = QPushButton("Image", self.print_plate_window)
             self._print_plate_mode_button.setCheckable(True)
             self._print_plate_mode_button.clicked.connect(self._on_print_plate_mode_toggled)
             controls_layout.addWidget(self._print_plate_mode_button)
-            tab_layout.addLayout(controls_layout)
+            layout.addLayout(controls_layout)
 
             hist_widget = pg.PlotWidget()
             hist_plot = hist_widget.getPlotItem()
@@ -3401,7 +3570,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             self._print_plate_hist_region = pg.LinearRegionItem(values=(0, 1), orientation=pg.LinearRegionItem.Vertical)
             self._print_plate_hist_region.sigRegionChanged.connect(self._on_print_plate_levels_changed)
             hist_plot.addItem(self._print_plate_hist_region)
-            tab_layout.addWidget(hist_widget, 1)
+            layout.addWidget(hist_widget, 1)
 
             plate_widget = pg.PlotWidget()
             self.print_plate_plot = plate_widget.getPlotItem()
@@ -3411,28 +3580,25 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             self.print_plate_image_item = pg.ImageItem(np.zeros((1, 1), dtype=float))
             self.print_plate_plot.addItem(self.print_plate_image_item)
             self.print_plate_plot.scene().sigMouseClicked.connect(self._on_print_plate_clicked)
-            tab_layout.addWidget(plate_widget, 4)
-            tabs.addTab(tab_print, "Plaque DRX")
-            layout.addWidget(tabs)
+            layout.addWidget(plate_widget, 4)
+            #tabs.addTab(tab_print, "Plaque DRX")
+            #layout.addWidget(tab_print)
 
-            right_layout = getattr(getattr(self.ui_state, "spectrum_section_widget", None), "right_layout", None)
-            if right_layout is not None:
-                right_layout.addWidget(self.print_plate_window)
+            spectrum_section.set_zoom_replacement_widget(self.print_plate_window)
 
-        if hasattr(self, "zoom_widget"):
-            self.zoom_widget.hide()
+        if self.print_plate_window is not None:
+            spectrum_section.show_zoom_replacement(self.print_plate_window, True)
         mode_button = getattr(self, "_print_plate_mode_button", None)
         if mode_button is not None:
             mode_button.blockSignals(True)
             mode_button.setChecked(self._print_plate_mode == "cake")
             mode_button.setText("Cake" if self._print_plate_mode == "cake" else "Image")
             mode_button.blockSignals(False)
-        self.print_plate_window.show()
+        if spectrum_section.is_right_panel_docked():
+            self.top_layout.setStretch(0, 1)
+            self.top_layout.setStretch(1, 2)
+            
         self.print_plate_active = True
-        self.top_layout.setStretch(0, 1)
-        self.top_layout.setStretch(1, 2)
-        self.ui_state.spectrum_section_widget.right_layout.setStretch(1, 1)
-        self.ui_state.spectrum_section_widget.right_layout.setStretch(0, 2)
         self._update_print_plate_image()
 
     def f_cross_spectrum(self,event):
@@ -7112,7 +7278,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                 d_min -= pad
                 d_max += pad
             else:
-                pad = (d_max - d_min) * 0.05
+                pad = (d_max - d_min) * 0.15
                 d_min -= pad
                 d_max += pad
             self.ax_dPdt.setLimits(yMin=d_min, yMax=d_max)
@@ -7429,9 +7595,9 @@ def main() -> int:
     logger.info("Mode debug %s", "activé" if debug_enabled else "désactivé")
 
     if args.config:
-        config_path = paths.resolve_config_path(args.config)
+        config_path = paths.save_startup_config_path(args.config)
     else:
-        config_path = file_config
+        config_path = paths.get_startup_config_path()
 
     app = QApplication(sys.argv)
     app.setStyleSheet(style)

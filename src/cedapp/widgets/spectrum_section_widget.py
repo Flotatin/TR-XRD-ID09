@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import numpy as np
 import pyqtgraph as pg
 from pyqtgraph import GraphicsLayoutWidget
 from PyQt5.QtCore import Qt
@@ -10,7 +11,9 @@ from PyQt5.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QSizePolicy,
+    QSplitter,
     QVBoxLayout,
+    QStackedWidget,
     QWidget,
 )
 
@@ -52,18 +55,35 @@ class SpectrumSectionWidget:
         main.graph_layout.ci.setContentsMargins(0, 0, 0, 0)
         main.graph_layout.ci.layout.setSpacing(2)
 
-        right_container = QWidget()
-        self.right_layout = QHBoxLayout(right_container)
+        self.right_splitter = QSplitter(Qt.Horizontal)
+        self.right_splitter.setChildrenCollapsible(False)
+        main.top_layout.addWidget(self.right_splitter, 1)
+
+        self.right_widget_container = QWidget()
+        self.right_layout = QVBoxLayout(self.right_widget_container)
         self.right_layout.setContentsMargins(0, 0, 0, 0)
         self.right_layout.setSpacing(2)
-        main.top_layout.addWidget(right_container, 1)
+        self.right_widget_container.setMinimumWidth(220)
+        self.right_widget_container.setMaximumWidth(500)
+        self.right_widget_container.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Preferred)
+        self.right_splitter.addWidget(self.right_widget_container)
+
+        self.zoom_stack = QStackedWidget()
+        self.right_splitter.addWidget(self.zoom_stack)
+        self._zoom_stack_base_min_width = 240
+        self.zoom_stack.setMinimumWidth(self._zoom_stack_base_min_width)
 
         main.zoom_widget = pg.PlotWidget()
         main.ax_zoom = main.zoom_widget.getPlotItem()
         main.ax_zoom.hideAxis("bottom")
         main.ax_zoom.hideAxis("left")
         main.ax_zoom.scene().sigMouseClicked.connect(main.f_cross_zoom)
-        self.right_layout.addWidget(main.zoom_widget)
+        self.right_splitter.addWidget(main.zoom_widget)
+        self._zoom_default_index = self.zoom_stack.indexOf(main.zoom_widget)
+
+        self.right_splitter.setStretchFactor(0, 1)
+        self.right_splitter.setStretchFactor(1, 2)
+
 
         main.plot_pic_fit = []
         main.plot_pic_fit_curves = []
@@ -184,6 +204,67 @@ class SpectrumSectionWidget:
 
         grid_layout.addWidget(self.spectrum_box, 0, 2, 4, 1)
         grid_layout.addWidget(self.dhkl_box, 0, 1, 3, 1)
+    
+    def set_zoom_replacement_widget(self, widget) -> None:
+        """Register an alternate widget displayed instead of the zoom plot."""
+
+        if widget is None:
+            return
+        if self.zoom_stack.indexOf(widget) == -1:
+            self.zoom_stack.addWidget(widget)
+
+    def show_zoom_replacement(self, widget, enabled: bool) -> None:
+        """Toggle display of a replacement widget in the zoom area."""
+
+        if widget is None:
+            return
+        self.set_zoom_replacement_widget(widget)
+        if enabled:
+            self.zoom_stack.setCurrentWidget(widget)
+            widget.show()
+            self.main.zoom_widget.hide()
+        else:
+            self.zoom_stack.setCurrentIndex(self._zoom_default_index)
+            self.main.zoom_widget.show()
+            widget.hide()
+
+    def set_plot_window_ratio(self, ratio: float | None) -> None:
+        """Resize preference for the right plot window instead of stretching image content."""
+
+        if ratio is None or not np.isfinite(ratio) or ratio <= 0:
+            self.zoom_stack.setMinimumWidth(self._zoom_stack_base_min_width)
+            return
+
+        splitter_height = max(1, self.right_splitter.height())
+        target_width = int(np.clip(splitter_height * float(ratio), self._zoom_stack_base_min_width, 2200))
+        self.zoom_stack.setMinimumWidth(target_width)
+
+        sizes = self.right_splitter.sizes()
+        if len(sizes) >= 2:
+            left_width = max(220, sizes[0])
+            self.right_splitter.setSizes([left_width, target_width])
+
+    def undock_right_panel(self, host_layout) -> None:
+        """Move the right splitter (gauges + zoom plot) into another layout."""
+
+        if self.right_splitter.parent() is self.spectrum_container:
+            self.main.top_layout.removeWidget(self.right_splitter)
+        self.right_splitter.setParent(None)
+        host_layout.addWidget(self.right_splitter)
+
+    def is_right_panel_docked(self) -> bool:
+        """Return whether the right splitter is currently in the main spectrum layout."""
+
+        return self.right_splitter.parent() is self.spectrum_container
+
+    def dock_right_panel(self) -> None:
+        """Restore the right splitter next to the main spectrum plot."""
+
+        if self.right_splitter.parent() is self.spectrum_container:
+            return
+        self.right_splitter.setParent(None)
+        self.main.top_layout.addWidget(self.right_splitter, 1)
+
 
     def add_right_widget(self, widget) -> None:
         """Insert a widget on the right side of the spectrum section."""
