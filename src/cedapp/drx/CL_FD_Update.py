@@ -155,7 +155,7 @@ class Element_Bibli:
         self.rCA=None
         self.rBA=None
         self.EoS=None
-        self.T=300
+        self.T=298
         self.T_range=None
         self.P_range=[-10,1000]
         self.Vmin=0.8
@@ -169,17 +169,29 @@ class Element_Bibli:
         except Exception as e:
             print(e)
 
-    def EoS_VP(self,P):
+    def EoS_VP(self, P_total, T=None):
+        """Retourne V à partir de P_total et T, via BM isotherme."""
+        if T is None:
+            T = self.T
+        P_iso = self.P_isotherm_from_total(P_total, T)
+
         try:
-            self.V=inversefunc((lambda x : Birch_M(x,self.V0,self.K0,self.K0P)),y_values=P,domain=[0.1,None])
+            self.V = inversefunc(
+                (lambda x: Birch_M(x, self.V0, self.K0, self.K0P)),
+                y_values=P_iso,
+                domain=[self.V0 * self.Vmin, self.V0 * 1.05],
+            )
         except Exception as e:
             print(e)
         return self.V
-    
-    def EoS_PV(self,V):
+
+    def EoS_PV(self, V, T=None):
+        """Retourne P_total à partir de V et T."""
+        if T is None:
+            T = self.T
         try:
-            self.P_start=Birch_M(V,self.V0,self.K0,self.K0P)
-    
+            P_iso = Birch_M(V, self.V0, self.K0, self.K0P)
+            self.P_start = self.P_total_from_isotherm(P_iso, T)
         except Exception as e:
             print(e)
         return self.P_start
@@ -326,8 +338,8 @@ class Element_Bibli:
         X= 360/np.pi*np.arcsin((1239.8/self.E)*1e-9/(self.Dhkl["Dhkl"][l]*2e-10))
         return X
     
-    def Eos_Pdhkl(self,P,extract=False):
-        V=self.EoS_VP(P)
+    def Eos_Pdhkl(self, P_total, T=None, extract=False):
+        V = self.EoS_VP(P_total, T=T)
         thetas_PV=[]
         if self.E is None:
             return print("Energie non définie, veuillez la définir avant de calculer les angles")
@@ -379,6 +391,21 @@ class Element_Bibli:
         self.name_dhkl=[]
         for i in range(len(self.Dhkl)):
             self.name_dhkl.append((int(self.Dhkl.h[i]),int(self.Dhkl.k[i]),int(self.Dhkl.l[i])))
+
+    def P_thermal(self, T):
+        """Terme de pression thermique Pt = ALPHAKT*(T-T0=298)."""
+        if self.ALPHAKT is None:
+            return 0.0
+        return float(self.ALPHAKT) * (float(T) - 298)
+
+    def P_isotherm_from_total(self, P_total, T):
+        """Retire le terme thermique pour obtenir la pression isotherme BM."""
+        return float(P_total) - self.P_thermal(T)
+
+    def P_total_from_isotherm(self, P_iso, T):
+        """Ajoute le terme thermique."""
+        return float(P_iso) + self.P_thermal(T)
+
 
 
 class DRX():

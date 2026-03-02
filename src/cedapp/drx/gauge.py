@@ -748,7 +748,7 @@ class Element(Gauge):
         else:
             print("MAILLE != (cubic,tetra,hexa,ortho,rhombo) , A CODER")
                 
-    def calcul_P(self, V0c=None, T=298,verbose=False):
+    def calcul_P(self, V0c=None, T=None,verbose=False):
         if verbose:
             print("- - - - - - calcul_P - - - - - -")
         if V0c is None:
@@ -758,8 +758,10 @@ class Element(Gauge):
             print("PROBLEME V non calculé")
             return
 
-        # correction thermique éventuelle
-        self.T = T
+        if T is not None:
+            self.T = float(T)   # on force Element à adopter la T demandée
+        # sinon on garde self.T (déjà initialisée depuis Element_ref)
+    
         Pt = 0
         if getattr(self.Element_ref, "ALPHAKT", None) is not None:
             Pt = self.Element_ref.ALPHAKT * (self.T - 298)
