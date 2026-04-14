@@ -945,6 +945,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             remove_button=getattr(self, "remove_btn", None),
         )
         self._connect_ddac_multi_zone_signals()
+        self._connect_time_arg_zone_signals()
         self.gauge_controller = GaugeController(
             spectrum_getter=lambda: self.Spectrum,
             gauge_getter=lambda: self.gauge_select,
@@ -962,11 +963,24 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             get_bit_modif_jauge=lambda: self.bit_modif_jauge,
             get_index_jauge=lambda: self.index_jauge,
             set_save_value=lambda value: setattr(self, "save_value", value),
+            run_getter=lambda: self.RUN,
+            library_getter=lambda: getattr(self.ClassDRX, "Bibli_elements", {}),
+            get_apply_temperature_to_all=lambda: bool(
+                getattr(self, "apply_temp_all_gauges_checkbox", None)
+                and self.apply_temp_all_gauges_checkbox.isChecked()
+            ),
+            get_use_fixed_pressure_solver=lambda: bool(
+                getattr(self, "pt_solver_pfix_checkbox", None)
+                and self.pt_solver_pfix_checkbox.isChecked()
+            ),
             gauge_color_getter=lambda name: self._get_gauge_color(name),
             cl_module=CL,
         )
-        self.spinbox_P.valueChanged.connect(self.gauge_controller.spinbox_p_move)
-        self.spinbox_T.valueChanged.connect(self.gauge_controller.spinbox_t_move)
+        self.spinbox_P.valueChanged.connect(self.gauge_controller.handle_spinbox_pt_changed)
+        self.spinbox_T.valueChanged.connect(self.gauge_controller.handle_spinbox_pt_changed)
+        if getattr(self, "pt_solver_pfix_checkbox", None) is not None:
+            self.pt_solver_pfix_checkbox.toggled.connect(self.gauge_controller.update_pt_mode_spinbox_colors)
+            self.pt_solver_pfix_checkbox.toggled.connect(self._on_pt_solver_mode_toggled)
         self.bit_load_jauge = False
         self.bit_modif_jauge = False
 
@@ -1188,7 +1202,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         if "Time" not in osc.columns:
             return [1e-3] * max(int(n_points), 1)
         time = np.asarray(osc["Time"], dtype=float) * 1e3
-        channel_key = getattr(run, "time_index", None)
+        channel_key = str(getattr(run, "time_index", None))
         if channel_key not in osc.columns:
             return [1e-3] * max(int(n_points), 1)
         signal = np.asarray(osc[channel_key], dtype=float)
@@ -1724,6 +1738,116 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             start_time, stop_time = stop_time, start_time
         return (start_time, stop_time)
 
+    def _compute_full_ddac_time_range(self) -> Optional[Tuple[float, float]]:
+        time_values = np.asarray(getattr(self, "time", []), dtype=float)
+        finite_times = time_values[np.isfinite(time_values)]
+        if finite_times.size == 0:
+            return None
+        start_time = float(np.nanmin(finite_times))
+        stop_time = float(np.nanmax(finite_times))
+        if stop_time <= start_time:
+            stop_time = start_time + 1.0
+        return (start_time, stop_time)
+
+    def _load_ddac_multi_zone_range_from_run(self) -> Optional[Tuple[float, float]]:
+        run = getattr(self, "RUN", None)
+        if run is None:
+            return None
+        stored = getattr(run, "multi_time_range_ms", None)
+        if not isinstance(stored, (tuple, list)) or len(stored) != 2:
+            return None
+        start, stop = sorted(map(float, stored))
+        if stop <= start:
+            stop = start + 1.0
+        return (start, stop)
+
+    def _save_ddac_multi_zone_range_to_run(self, zone_range: Optional[Tuple[float, float]]) -> None:
+        run = getattr(self, "RUN", None)
+        if run is None or zone_range is None:
+            return
+        start, stop = sorted(map(float, zone_range))
+        setattr(run, "multi_time_range_ms", (start, stop))
+
+    def _resolve_ddac_multi_zone_range_for_toggle(self) -> Optional[Tuple[float, float]]:
+        zone_range = self._load_ddac_multi_zone_range_from_run()
+        if zone_range is None:
+            zone_range = self._compute_full_ddac_time_range()
+        if zone_range is None:
+            zone_range = self._compute_ddac_multi_zone_range()
+        return zone_range
+
+    def _load_time_arg_zone_range_from_run(self) -> Optional[Tuple[float, float]]:
+        run = getattr(self, "RUN", None)
+        if run is None:
+            return None
+        stored = getattr(run, "time_arg_range_ms", None)
+        if not isinstance(stored, (tuple, list)) or len(stored) != 2:
+            return None
+        start, stop = sorted(map(float, stored))
+        if stop <= start:
+            stop = start + 1.0
+        return (start, stop)
+
+    def _save_time_arg_zone_range_to_run(self, zone_range: Optional[Tuple[float, float]]) -> None:
+        run = getattr(self, "RUN", None)
+        if run is None or zone_range is None:
+            return
+        start, stop = sorted(map(float, zone_range))
+        setattr(run, "time_arg_range_ms", (start, stop))
+
+    def _resolve_time_arg_zone_range_for_toggle(self) -> Optional[Tuple[float, float]]:
+        zone_range = self._load_time_arg_zone_range_from_run()
+        if zone_range is None:
+            zone_range = self._compute_full_ddac_time_range()
+        return zone_range
+
+    def _apply_time_arg_zone_visibility(self) -> None:
+        visible = bool(getattr(self, "_time_arg_zone_visible", False))
+        zone = getattr(self, "zone_time_arg_P", None)
+        if zone is not None:
+            zone.setVisible(visible)
+
+    def set_time_arg_zone_visibility(self, checked: bool) -> None:
+        checked = bool(checked)
+        self._time_arg_zone_visible = checked
+        if checked:
+            zone_range = self._resolve_time_arg_zone_range_for_toggle()
+            if zone_range is not None:
+                self._time_arg_zone_range = zone_range
+                zone = getattr(self, "zone_time_arg_P", None)
+                if zone is not None:
+                    zone.setRegion(zone_range)
+                self._save_time_arg_zone_range_to_run(zone_range)
+        self._apply_time_arg_zone_visibility()
+        button = getattr(self, "btn_time_arg", None)
+        if button is not None and bool(button.isChecked()) != checked:
+            button.blockSignals(True)
+            button.setChecked(checked)
+            button.blockSignals(False)
+
+    def _connect_time_arg_zone_signals(self) -> None:
+        zone = getattr(self, "zone_time_arg_P", None)
+        if zone is None:
+            return
+        try:
+            zone.sigRegionChangeFinished.connect(self._on_time_arg_zone_changed)
+        except Exception:
+            return
+
+    def _on_time_arg_zone_changed(self) -> None:
+        if getattr(self, "_time_arg_zone_syncing", False):
+            return
+        zone = getattr(self, "zone_time_arg_P", None)
+        if zone is None:
+            return
+        region = zone.getRegion()
+        if region is None:
+            return
+        start, stop = sorted(map(float, region))
+        self._time_arg_zone_range = (start, stop)
+        self._save_time_arg_zone_range_to_run(self._time_arg_zone_range)
+
+
     def _update_ddac_multi_zone_range(self) -> None:
         if getattr(self, "_ddac_multi_zone_syncing", False):
             return
@@ -1746,7 +1870,19 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
     def set_ddac_multi_zone_visibility(self, checked: bool) -> None:
         checked = bool(checked)
         self._ddac_multi_zone_visible = checked
-        self._update_ddac_multi_zone_range()
+        if checked:
+            zone_range = self._resolve_ddac_multi_zone_range_for_toggle()
+            if zone_range is not None:
+                self._ddac_multi_zone_range = zone_range
+                for attr in ("zone_multi_P", "zone_multi_dPdt", "zone_multi_diff_int"):
+                    zone = getattr(self, attr, None)
+                    if zone is not None:
+                        zone.setRegion(zone_range)
+                self._save_ddac_multi_zone_range_to_run(zone_range)
+            else:
+                self._update_ddac_multi_zone_range()
+        else:
+            self._update_ddac_multi_zone_range()
         self._apply_ddac_multi_zone_visibility()
         for widget_name in ("multi_spec_action", "btn_zone_dpdt"):
             widget = getattr(self, widget_name, None)
@@ -1785,6 +1921,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             return
         start, stop = sorted(map(float, region))
         self._ddac_multi_zone_range = (start, stop)
+        self._save_ddac_multi_zone_range_to_run(self._ddac_multi_zone_range)
         self._ddac_multi_zone_syncing = True
         try:
             for attr in ("zone_multi_P", "zone_multi_dPdt", "zone_multi_diff_int"):
@@ -1958,20 +2095,19 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         self._update_help_button_color(visible)
 
     def _on_gauge_panel_dialog_closed(self) -> None:
-        toggle_button = getattr(self, "gauge_undock_box", None)
-        if toggle_button is None:
-            return
-        if toggle_button.isChecked():
-            toggle_button.blockSignals(True)
-            toggle_button.setChecked(False)
-            toggle_button.blockSignals(False)
-        self.toggle_gauge_panel_dock(False)
+        """Re-dock the right panel and reset the undock toggle when dialog closes."""
+        undock_btn = getattr(self.ui_state, "undock_panel_button", None)
+        if undock_btn is not None and undock_btn.isChecked():
+            undock_btn.blockSignals(True)
+            undock_btn.setChecked(False)
+            undock_btn.blockSignals(False)
 
     def toggle_gauge_panel_dock(self, undocked: bool) -> None:
+        """Undock/dock the right panel (gauge + zoom/print) into a floating dialog."""
         spectrum_section = getattr(self.ui_state, "spectrum_section_widget", None)
         if spectrum_section is None:
             return
-
+        undock_btn = getattr(self.ui_state, "undock_panel_button", None)
         if undocked:
             if self._gauge_panel_dialog is None:
                 dialog = QDialog(self)
@@ -1980,17 +2116,43 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                 dialog_layout.setContentsMargins(8, 8, 8, 8)
                 dialog.finished.connect(lambda _result: self._on_gauge_panel_dialog_closed())
                 self._gauge_panel_dialog = dialog
-
-            spectrum_section.undock_right_panel(self._gauge_panel_dialog.layout())
+                
+            if spectrum_section.is_right_panel_docked():
+                spectrum_section.undock_right_panel(self._gauge_panel_dialog.layout())
             self._gauge_panel_dialog.resize(950, 720)
             self._gauge_panel_dialog.show()
             self._gauge_panel_dialog.raise_()
             self._gauge_panel_dialog.activateWindow()
+            if undock_btn is not None and not undock_btn.isChecked():
+                undock_btn.blockSignals(True)
+                undock_btn.setChecked(True)
+                undock_btn.blockSignals(False)
             return
 
-        if self._gauge_panel_dialog is not None:
+        if not spectrum_section.is_right_panel_docked():
             spectrum_section.dock_right_panel()
+        if self._gauge_panel_dialog is not None:
             self._gauge_panel_dialog.hide()
+        if undock_btn is not None and undock_btn.isChecked():
+            undock_btn.blockSignals(True)
+            undock_btn.setChecked(False)
+            undock_btn.blockSignals(False)
+
+    def _sync_view_toolbar(self, show_print: bool) -> None:
+        """Keep the gauge toolbar tabs aligned with the current right-panel view."""
+
+        tabs = getattr(self.ui_state, "right_view_tabs", None)
+        if tabs is None:
+            return
+        target_index = 1 if show_print else 0
+        tabs.blockSignals(True)
+        tabs.setCurrentIndex(target_index)
+        tabs.blockSignals(False)
+
+    def on_right_view_tab_changed(self, tab_index: int) -> None:
+        """Switch right panel content from the toolbar tab selection."""
+
+        self.show_print_plate(tab_index == 1)
 
 
     def toggle_live_mode(self, active: Optional[bool] = None) -> None:
@@ -2193,6 +2355,11 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             zone_range = getattr(self, "zone_diff_int_range", None)
             if zone is not None and zone_range:
                 zone.setRegion(zone_range)
+            time_arg_range = getattr(self, "_time_arg_zone_range", None)
+            if time_arg_range:
+                zone = getattr(self, "zone_time_arg_P", None)
+                if zone is not None:
+                    zone.setRegion(time_arg_range)
 
             multi_range = getattr(self, "_ddac_multi_zone_range", None)
             if multi_range:
@@ -3003,6 +3170,10 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                 self.gauge_select = self.gauge_controller.f_Gauge_Load(
                     copy.deepcopy(self.ClassDRX.Bibli_elements[gauge_name])
                 )
+                self.gauge_controller.sync_temperature_spinbox(
+                    element=self.gauge_select,
+                    gauge_temp=getattr(self.gauge_select, "T", None),
+                )
             else:
                 self.text_box_msg.setText("Gauge out bibli \n pres i to add")
                 return
@@ -3013,6 +3184,10 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
 
             self.gauge_select = self.gauge_controller.f_Gauge_Load(
                 copy.deepcopy(self.Spectrum.Gauges[self.index_jauge].Element_ref)
+            )
+            self.gauge_controller.sync_temperature_spinbox(
+                element=self.Spectrum.Gauges[self.index_jauge].Element_ref,
+                gauge_temp=getattr(self.Spectrum.Gauges[self.index_jauge], "T", None),
             )
             self.listbox_pic.clear()
             for name in self.list_text_pic[self.index_jauge]:
@@ -3031,6 +3206,13 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         else:
             self.param_filtre_1_name.setText("filtre p1")
             self.param_filtre_2_name.setText("filtre p2")
+    
+    def _on_pt_solver_mode_toggled(self, _checked: bool) -> None:
+        """Keep active spectrum solve mode aligned with Pfix/Tfix toggle."""
+
+        if getattr(self, "Spectrum", None) is not None:
+            self.Spectrum.fixe_mode = "T" if self.pt_solver_pfix_checkbox.isChecked() else "P"
+
 
     def f_model_pic_type(self):# - - - SELECT MODEL PIC - - -#
         col1 = self.model_pic_type_selector.model().item(self.model_pic_type_selector.currentIndex()).background().color().getRgb()
@@ -3198,6 +3380,14 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         self.cross_zoom.setPos(float(theta_deg), y_val)
 
     def _set_print_theta_from_source(self, theta_deg: float, update_spectrum: bool = False) -> None:
+        # Freeze print interactions when Print view is not active.
+        tabs = getattr(self.ui_state, "right_view_tabs", None)
+        print_visible = bool(getattr(self, "print_plate_active", False))
+        if tabs is not None:
+            print_visible = print_visible and tabs.currentIndex() == 1
+        if not print_visible:
+            return
+        
         if theta_deg is None or not np.isfinite(theta_deg):
             return
         theta_val = float(theta_deg)
@@ -3535,11 +3725,54 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             return
         self._update_print_plate_image()
 
-    def show_print_plate(self) -> None:
+    def ensure_print_plate_widget(self) -> None:
+        """Create the print-plate replacement widget once during UI initialization."""
+
+        spectrum_section = getattr(self.ui_state, "spectrum_section_widget", None)
+        if spectrum_section is None or self.print_plate_window is not None:
+            return
+
+        self.print_plate_window = QWidget(self)
+        layout = QVBoxLayout(self.print_plate_window)
+        controls_layout = QHBoxLayout()
+        self._print_plate_mode_button = QPushButton("Image", self.print_plate_window)
+        self._print_plate_mode_button.setCheckable(True)
+        self._print_plate_mode_button.clicked.connect(self._on_print_plate_mode_toggled)
+        controls_layout.addWidget(self._print_plate_mode_button)
+        layout.addLayout(controls_layout)
+
+        hist_widget = pg.PlotWidget()
+        hist_plot = hist_widget.getPlotItem()
+        hist_plot.setLabel("left", "Counts")
+        hist_plot.setLabel("bottom", "Pixel value")
+        self._print_plate_hist_curve = pg.PlotDataItem([], [], pen=pg.mkPen("k", width=1))
+        hist_plot.addItem(self._print_plate_hist_curve)
+        self._print_plate_hist_region = pg.LinearRegionItem(values=(0, 1), orientation=pg.LinearRegionItem.Vertical)
+        self._print_plate_hist_region.sigRegionChanged.connect(self._on_print_plate_levels_changed)
+        hist_plot.addItem(self._print_plate_hist_region)
+        layout.addWidget(hist_widget, 1)
+
+        plate_widget = pg.PlotWidget()
+        self.print_plate_plot = plate_widget.getPlotItem()
+        self.print_plate_plot.setLabel("left", "pixel Y")
+        self.print_plate_plot.setLabel("bottom", "pixel X")
+        self.print_plate_plot.invertY(True)
+        self.print_plate_image_item = pg.ImageItem(np.zeros((1, 1), dtype=float))
+        self.print_plate_plot.addItem(self.print_plate_image_item)
+        self.print_plate_plot.scene().sigMouseClicked.connect(self._on_print_plate_clicked)
+        layout.addWidget(plate_widget, 4)
+
+        spectrum_section.set_zoom_replacement_widget(self.print_plate_window)
+
+    def show_print_plate(self, visible: Optional[bool] = None) -> None:
         spectrum_section = getattr(self.ui_state, "spectrum_section_widget", None)
         if spectrum_section is None:
             return
-        if self.print_plate_active:
+        
+        if visible is None:
+            visible = not self.print_plate_active
+
+        if not visible:
             if self.print_plate_window is not None:
                 spectrum_section.show_zoom_replacement(self.print_plate_window, False)
             if spectrum_section.is_right_panel_docked():
@@ -3549,42 +3782,9 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                 self.top_layout.setStretch(0, 1)
                 self.top_layout.setStretch(1, 1)
             self.print_plate_active = False
+            self._sync_view_toolbar(False)
             return
-
-        if self.print_plate_window is None:
-            self.print_plate_window = QWidget(self)
-            layout = QVBoxLayout(self.print_plate_window)
-            controls_layout = QHBoxLayout()
-            self._print_plate_mode_button = QPushButton("Image", self.print_plate_window)
-            self._print_plate_mode_button.setCheckable(True)
-            self._print_plate_mode_button.clicked.connect(self._on_print_plate_mode_toggled)
-            controls_layout.addWidget(self._print_plate_mode_button)
-            layout.addLayout(controls_layout)
-
-            hist_widget = pg.PlotWidget()
-            hist_plot = hist_widget.getPlotItem()
-            hist_plot.setLabel("left", "Counts")
-            hist_plot.setLabel("bottom", "Pixel value")
-            self._print_plate_hist_curve = pg.PlotDataItem([], [], pen=pg.mkPen("k", width=1))
-            hist_plot.addItem(self._print_plate_hist_curve)
-            self._print_plate_hist_region = pg.LinearRegionItem(values=(0, 1), orientation=pg.LinearRegionItem.Vertical)
-            self._print_plate_hist_region.sigRegionChanged.connect(self._on_print_plate_levels_changed)
-            hist_plot.addItem(self._print_plate_hist_region)
-            layout.addWidget(hist_widget, 1)
-
-            plate_widget = pg.PlotWidget()
-            self.print_plate_plot = plate_widget.getPlotItem()
-            self.print_plate_plot.setLabel("left", "pixel Y")
-            self.print_plate_plot.setLabel("bottom", "pixel X")
-            self.print_plate_plot.invertY(True)
-            self.print_plate_image_item = pg.ImageItem(np.zeros((1, 1), dtype=float))
-            self.print_plate_plot.addItem(self.print_plate_image_item)
-            self.print_plate_plot.scene().sigMouseClicked.connect(self._on_print_plate_clicked)
-            layout.addWidget(plate_widget, 4)
-            #tabs.addTab(tab_print, "Plaque DRX")
-            #layout.addWidget(tab_print)
-
-            spectrum_section.set_zoom_replacement_widget(self.print_plate_window)
+        self.ensure_print_plate_widget()
 
         if self.print_plate_window is not None:
             spectrum_section.show_zoom_replacement(self.print_plate_window, True)
@@ -3599,6 +3799,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             self.top_layout.setStretch(1, 2)
             
         self.print_plate_active = True
+        self._sync_view_toolbar(True)
         self._update_print_plate_image()
 
     def f_cross_spectrum(self,event):
@@ -3625,7 +3826,8 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             self.cross_zoom.setPos(X0, Y0)  # Si c’est une croix dans la vue zoomée
 
             self.X0, self.Y0 = round(X0, 3), round(Y0, 3)
-            self._set_print_theta_from_source(self.X0, update_spectrum=False)
+            if bool(getattr(self, "print_plate_active", False)):
+                self._set_print_theta_from_source(self.X0, update_spectrum=False)
 
     def found_pic(self):
         if not self.Param0:
@@ -3959,6 +4161,52 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         self._update_spectrum_overlay_data()
         self._apply_spectrum_limits(include_overlays=True)
         self.ax_dy.setXRange(min(self.Spectrum.wnb),max(self.Spectrum.wnb))
+    
+    def apply_processing_to_all_spectra(self):
+        run = getattr(self, "RUN", None)
+        spectra = getattr(run, "Spectra", None) if run is not None else None
+        if not spectra:
+            self.text_box_msg.setText("No spectra loaded.")
+            return
+        batch_range = self._get_batch_range(skip_ui=False, total_spectra=len(spectra))
+        if batch_range is None:
+            self.text_box_msg.setText("Invalid multi-zone interval.")
+            return
+
+        param = [float(self.param_filtre_1_entry.text()), float(self.param_filtre_2_entry.text())]
+        filter_type = self.filtre_type_selector.currentText()
+        if filter_type == "svg":
+            param[0], param[1] = int(param[0]), int(param[1])
+
+        deg_baseline = int(self.deg_baseline_entry.value())
+
+        updated = 0
+        for i in batch_range.indices:
+            spectrum = spectra[i]
+            if spectrum is None:
+                continue
+            spectrum.Data_treatement(
+                deg_baseline=deg_baseline,
+                type_filtre=filter_type,
+                param_f=param,
+                print_data_QT=False,
+            )
+            updated += 1
+
+        if getattr(self, "Spectrum", None) is not None:
+            self.Spectrum = spectra[self.index_spec]
+            self.plot_data_fit.setData(self.Spectrum.wnb, self.Spectrum.y_corr)
+            self.plot_zoom.setData(self.Spectrum.wnb, self.Spectrum.y_corr)
+            self._update_spectrum_overlay_data()
+            self._apply_spectrum_limits(include_overlays=True)
+            self.ax_dy.setXRange(min(self.Spectrum.wnb), max(self.Spectrum.wnb))
+
+        self.text_box_msg.setText(
+            f"Base processing updated on {updated} spectra "
+            f"(idx {batch_range.start}→{batch_range.stop}):\n"
+            f"filter={filter_type}, p1={param[0]}, p2={param[1]}, bline={deg_baseline}"
+        )
+
 
     def _update_spectrum_overlay_data(self):
         if getattr(self, "Spectrum", None) is None:
@@ -4033,6 +4281,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         # Sauvegarde le spectre courant dans RUN
         if getattr(self, "Spectrum", None) is not None and getattr(self, "index_spec", None) is not None:
             self.RUN.Spectra[self.index_spec] = self.Spectrum
+            save_index=self.index_spec
 
         skip_ui = bool(getattr(self, "skip_ui_update", False))
         batch_range = self._get_batch_range(skip_ui, len(self.RUN.Spectra))
@@ -4104,6 +4353,8 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
                 progress_dialog.close()
 
         # Recharge spectre initial + refresh UI
+        
+        self.index_spec =save_index
         self.Spectrum = self.RUN.Spectra[self.index_spec]
         self.REFRESH()
 
@@ -5828,9 +6079,12 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         self.bit_load_jauge=False
         self.bit_modif_jauge=True
 
-        self.spinbox_T.setEnabled(False)
-        self.spinbox_T.setValue(293)
-        self.deltalambdaT=0
+        selected_gauge = self.Spectrum.Gauges[self.index_jauge]
+        self.gauge_controller.sync_temperature_spinbox(
+            element=selected_gauge.Element_ref,
+            gauge_temp=getattr(selected_gauge, "T", None),
+        )
+
         self.lamb0_entry.setText(str(self.Spectrum.Gauges[self.index_jauge].lamb0))
         self.name_spe_entry.setText(str(self.Spectrum.Gauges[self.index_jauge].name_spe))
         p=self.Spectrum.Gauges[self.index_jauge].P
@@ -6236,7 +6490,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         )
         if self.jungfrau_mode =="continue":
             CEDX.Time_spectrum= np.array([i*1e-3 for i in range(len(CEDX.Spectra))])
-            CEDX.time_index=np.array([i for i in range(len(CEDX.Spectra))])
+            CEDX.time_index="None"#np.array([i for i in range(len(CEDX.Spectra))])
         self.RUN = CEDX
         self.RUN.CEDd_path = os.path.join(
             self.dict_folders["CED"],
@@ -7348,8 +7602,8 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         self.f_gauge_select(gauge_name)
         self.index_jauge = row
         self.f_Gauge_Load()
-        if hasattr(self, "LOAD_Gauge"):
-            self.LOAD_Gauge()
+        #if hasattr(self, "LOAD_Gauge"):
+        #self.LOAD_Gauge()
 
     def Undo_pic(self):
         if self.J[self.index_jauge] >0:

@@ -14,7 +14,6 @@ import pyqtgraph as pg
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QColor
 from PyQt5.QtWidgets import QApplication, QCheckBox, QFileDialog, QMessageBox
-from pynverse import inversefunc
 
 from cedapp.drx import CL_FD_Update as CL
 
@@ -276,6 +275,10 @@ class GaugeController:
         get_bit_modif_jauge: Callable[[], bool],
         get_index_jauge: Callable[[], int],
         set_save_value: Callable[[float], None],
+        run_getter: Optional[Callable[[], Optional[object]]] = None,
+        library_getter: Optional[Callable[[], Optional[dict]]] = None,
+        get_apply_temperature_to_all: Optional[Callable[[], bool]] = None,
+        get_use_fixed_pressure_solver: Optional[Callable[[], bool]] = None,
         gauge_color_getter: Optional[Callable[[str], Optional[Sequence[int]]]] = None,
         cl_module=None,
     ) -> None:
@@ -295,6 +298,14 @@ class GaugeController:
         self._get_bit_modif_jauge = get_bit_modif_jauge
         self._get_index_jauge = get_index_jauge
         self._set_save_value = set_save_value
+        self._get_run = run_getter if run_getter is not None else (lambda: None)
+        self._get_library = library_getter if library_getter is not None else (lambda: None)
+        self._get_apply_temperature_to_all = (
+            get_apply_temperature_to_all if get_apply_temperature_to_all is not None else (lambda: False)
+        )
+        self._get_use_fixed_pressure_solver = (
+            get_use_fixed_pressure_solver if get_use_fixed_pressure_solver is not None else (lambda: False)
+        )
         if gauge_color_getter is None:
             self._get_gauge_color = lambda _name: None
         else:
@@ -307,6 +318,105 @@ class GaugeController:
         self.var_checkboxes: List[QCheckBox] = []
         self.deltalambdaP = 0.0
         self.deltalambdaT = 0.0
+
+    def sync_temperature_spinbox(self, element, gauge_temp: Optional[float] = None) -> None:
+        """Enable and update temperature spinbox from the selected gauge element."""
+
+        has_thermal_eos = getattr(element, "ALPHAKT", None) is not None
+        self.spinbox_t.blockSignals(True)
+        self.spinbox_t.setEnabled(has_thermal_eos)
+        if has_thermal_eos:
+            selected_temp = gauge_temp if gauge_temp is not None else getattr(element, "T", 293)
+            self.spinbox_t.setValue(float(selected_temp))
+        else:
+            self.spinbox_t.setValue(293)
+            self.deltalambdaT = 0
+        self.spinbox_t.blockSignals(False)
+        self.update_pt_mode_spinbox_colors()
+
+    def _propagate_temperature_to_library_and_run(self, temperature: float) -> None:
+        """Propagate selected element temperature to the gauge library and loaded run."""
+
+        selected = self._get_gauge()
+        element_name = getattr(selected, "name", None)
+        if element_name is None:
+            return
+
+        library = self._get_library() or {}
+        if element_name in library:
+            library[element_name].T = round(float(temperature), 3)
+
+        if not self._get_apply_temperature_to_all():
+            return
+
+        run = self._get_run()
+        if run is None:
+            return
+
+        for spec in getattr(run, "Spectra", []) or []:
+            for gauge_item in getattr(spec, "Gauges", []) or []:
+                ref = getattr(gauge_item, "Element_ref", None)
+                if getattr(ref, "name", None) == element_name:
+                    gauge_item.T = round(float(temperature), 3)
+                    ref.T = round(float(temperature), 3)
+
+    def _current_fixe_mode(self) -> str:
+        return "T" if self._get_use_fixed_pressure_solver() else "P"
+
+    def update_pt_mode_spinbox_colors(self) -> None:
+        """Color spinboxes: green for free variable, red for fixed one."""
+
+        p_is_fixed = bool(self._get_use_fixed_pressure_solver())
+        free_style = "QDoubleSpinBox { background-color: #d9f7d9; }"
+        fixed_style = "QDoubleSpinBox { background-color: #ffd9d9; }"
+        self.spinbox_p.setStyleSheet(fixed_style if p_is_fixed else free_style)
+        self.spinbox_t.setStyleSheet(free_style if p_is_fixed else fixed_style)
+
+    def handle_spinbox_pt_changed(self, _value: Optional[float] = None) -> None:
+        """Single slot handling both pressure and temperature spinbox changes."""
+
+        if self._get_bit_modif_PTlambda():
+            return
+        try:
+            pressure = float(self.spinbox_p.value())
+            temperature = float(self.spinbox_t.value())
+
+            gauge = self._get_gauge()
+            if self._get_bit_load_jauge() and gauge is not None:
+                gauge.lamb_fit = 0
+                gauge = self._apply_gauge_state_update(
+                    gauge,
+                    pressure=pressure,
+                    temperature=temperature,
+                    clear_lines=True,
+                )
+                self._set_gauge(gauge)
+
+            if self._get_bit_modif_jauge():
+                spectrum = self._get_spectrum()
+                index = self._get_index_jauge()
+                if spectrum is not None and 0 <= index < len(spectrum.Gauges):
+                    selected_gauge = spectrum.Gauges[index]
+                    selected_gauge.lamb_fit = 0
+                    selected_gauge.P = round(float(pressure), 3)
+                    selected_gauge.T = round(float(temperature), 3)
+                    selected_gauge.Element_ref = self._apply_gauge_state_update(
+                        selected_gauge.Element_ref,
+                        pressure=pressure,
+                        temperature=temperature,
+                    )
+                    spectrum.fixe_mode = self._current_fixe_mode()
+
+            self._propagate_temperature_to_library_and_run(temperature)
+            self._set_save_value(pressure)
+            self.update_pt_mode_spinbox_colors()
+        except Exception:  # pragma: no cover - defensive UI feedback
+            logger.exception("Erreur dans handle_spinbox_pt_changed")
+
+    def handle_temperature_spinbox_changed(self, value: float) -> None:
+        """Backward-compatible alias for temperature-only wiring."""
+
+        self.handle_spinbox_pt_changed(value)
 
     # ------------------------------------------------------------------
     # Utilities shared by several actions
@@ -412,7 +522,13 @@ class GaugeController:
         spectrum = self._get_spectrum()
         max_level = max(spectrum.y_corr) if spectrum else 1
 
-        gauge.Eos_Pdhkl(value)
+
+        if getattr(gauge, "ALPHAKT", None) is not None and getattr(gauge, "T", None) is not None:
+            gauge.Eos_Pdhkl(value, T=gauge.T)
+        else:
+            gauge.Eos_Pdhkl(value)
+
+
         self.deltalambdaP = 0
 
         thetas: Sequence[Sequence[float]] = gauge.thetas_PV
@@ -444,106 +560,38 @@ class GaugeController:
                 self.lines.append([line_item, line_item_dy])
         return gauge
 
+    def _apply_gauge_state_update(
+        self,
+        gauge,
+        *,
+        pressure: Optional[float] = None,
+        temperature: Optional[float] = None,
+        clear_lines: bool = False,
+    ):
+        """Apply pressure/temperature changes to *gauge* using the pressure redraw path."""
+
+        if gauge is None:
+            return None
+        if temperature is not None:
+            gauge.T = round(float(temperature), 3)
+        if pressure is None:
+            pressure = getattr(gauge, "P", getattr(gauge, "P_start", 0))
+        pressure = round(float(pressure), 3)
+        if hasattr(gauge, "P_start"):
+            gauge.P_start = pressure
+        if clear_lines:
+            self.clear_lines()
+        return self.f_p_move(gauge, pressure)
+    
     def spinbox_p_move(self, value: float) -> None:
         """Qt slot linked to the pressure spin box."""
-
-        if self._get_bit_modif_PTlambda():
-            return
-        try:
-            gauge = self._get_gauge()
-            if self._get_bit_load_jauge() and gauge is not None:
-                gauge.lamb_fit = 0
-                gauge = self.f_p_move(gauge, value)
-                self._set_gauge(gauge)
-            if self._get_bit_modif_jauge():
-                spectrum = self._get_spectrum()
-                index = self._get_index_jauge()
-                if spectrum is not None and 0 <= index < len(spectrum.Gauges):
-                    gauge = spectrum.Gauges[index]
-                    gauge.lamb_fit = 0
-                    gauge.Element_ref = self.f_p_move(gauge.Element_ref, value)
-            self._set_save_value(value)
-        except Exception:  # pragma: no cover - defensive UI feedback
-            logger.exception("Erreur dans spinbox_p_move")
+        self.handle_spinbox_pt_changed(value)
 
     # ------------------------------------------------------------------
     # Temperature handling
     # ------------------------------------------------------------------
-    def f_t_move(self, gauge, value: float):
-        """Update *gauge* according to a temperature change and redraw guides."""
-
-        gauge.T = round(value, 3)
-        spectrum = self._get_spectrum()
-        max_level = max(spectrum.y_corr) if spectrum else 1
-        try:
-            x_value = round(
-                float(
-                    inversefunc(
-                        lambda x: self.CL.T_Ruby_by_P(x, P=gauge.P, lamb0R=gauge.lamb0),
-                        value,
-                    )
-                ),
-                3,
-            )
-            self.deltalambdaT = x_value - gauge.lamb0
-        except Exception:  # pragma: no cover - keep UI usable on failure
-            x_value = 0
-            self.deltalambdaT = 0
-        for i, delta in enumerate(gauge.deltaP0i):
-            ctr = x_value + delta[0]
-            line_item = self.ax_spectrum.plot(
-                [ctr, ctr],
-                [0, max_level * delta[1]],
-                " ",
-                c=gauge.color_print[0],
-                marker="|",
-                markersize=70,
-                markeredgewidth=2,
-            )[0]
-            line_item_dy = pg.InfiniteLine(
-                pos=ctr,
-                angle=90,
-                pen=pg.mkPen(gauge.color_print[0], width=1),
-            )
-            self.ax_dy.addItem(line_item_dy)
-            self.lines.append([line_item, line_item_dy])
-        self._set_bit_modif_PTlambda(False)
-        return gauge
-
     def spinbox_t_move(self, value: float) -> None:
-        """Qt slot linked to the temperature spin box."""
-
-        if self._get_bit_modif_PTlambda():
-            return
-        try:
-            gauge = self._get_gauge()
-            if self._get_bit_load_jauge() and gauge is not None:
-                conv = inversefunc(
-                    lambda x: self.CL.T_Ruby_by_P(x, P=gauge.P, lamb0R=gauge.lamb0),
-                    value,
-                )
-                gauge.lamb_fit = round(float(conv), 3)
-                self.clear_lines()
-                gauge = self.f_t_move(gauge, value)
-                self._set_gauge(gauge)
-                if self._get_spectrum() is None and gauge is not None:
-                    l0 = gauge.lamb0
-                    self.ax_spectrum.setXRange(l0 * 0.95, l0 * 1.1)
-            if self._get_bit_modif_jauge():
-                spectrum = self._get_spectrum()
-                index = self._get_index_jauge()
-                if spectrum is not None and 0 <= index < len(spectrum.Gauges):
-                    gauge = spectrum.Gauges[index]
-                    conv = inversefunc(
-                        lambda x: self.CL.T_Ruby_by_P(x, P=gauge.P, lamb0R=gauge.lamb0),
-                        value,
-                    )
-                    gauge.lamb_fit = round(float(conv), 3)
-                    self.clear_lines()
-                    spectrum.Gauges[index] = self.f_t_move(gauge, value)
-            self._set_save_value(value)
-        except Exception:  # pragma: no cover - defensive UI feedback
-            logger.exception("Erreur dans spinbox_t_move")
+        self.handle_spinbox_pt_changed(value)
 
     # ------------------------------------------------------------------
     # Loading and display of gauge d-hkl information

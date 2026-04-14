@@ -78,7 +78,7 @@ class SpectrumSectionWidget:
         main.ax_zoom.hideAxis("bottom")
         main.ax_zoom.hideAxis("left")
         main.ax_zoom.scene().sigMouseClicked.connect(main.f_cross_zoom)
-        self.right_splitter.addWidget(main.zoom_widget)
+        self.zoom_stack.addWidget(main.zoom_widget)
         self._zoom_default_index = self.zoom_stack.indexOf(main.zoom_widget)
 
         self.right_splitter.setStretchFactor(0, 1)

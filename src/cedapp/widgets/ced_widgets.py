@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import numpy as np
 import pyqtgraph as pg
-from pyqtgraph import GraphicsLayoutWidget
 
+from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont
 from PyQt5.QtWidgets import (
     QCheckBox,
@@ -14,6 +14,7 @@ from PyQt5.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QSplitter,
     QVBoxLayout,
     QSpinBox,
 )
@@ -35,8 +36,12 @@ class DdacWidget:
 
     def _create_drx_plots(self) -> None:
         host = self._drx_container
-        host.fig_DRX_dynamic = GraphicsLayoutWidget()
-        host.ax_P = host.fig_DRX_dynamic.addPlot(row=0, col=0)#, title="Pressure (GPa)")
+        host.fig_DRX_dynamic = QSplitter(Qt.Vertical)
+        host.fig_DRX_dynamic.setChildrenCollapsible(False)
+        host.fig_DRX_dynamic.setHandleWidth(8)
+
+        host.plot_pressure_widget = pg.PlotWidget()
+        host.ax_P = host.plot_pressure_widget.getPlotItem()
         host.ax_P.setLabel("left", "Pressure", units="GPa")
         host.ax_P.showAxis("right")
         host.ax_P.getAxis("right").setLabel("Piezo", units="V")
@@ -49,15 +54,25 @@ class DdacWidget:
         host.ax_P.vb.sigResized.connect(host._update_piezo_view_geometry)
         host._update_piezo_view_geometry()
 
-        host.ax_dPdt = host.fig_DRX_dynamic.addPlot(row=1, col=0)
+        host.plot_dpdt_widget = pg.PlotWidget()
+        host.ax_dPdt = host.plot_dpdt_widget.getPlotItem()
         host.ax_dPdt.setLabel("left", "dP/dt ", units="GPa/ms")
+        host.ax_dPdt.setXLink(host.ax_P)
         host.ax_dPdt.addLegend()
-        host.ax_diff_int = host.fig_DRX_dynamic.addPlot(row=2, col=0)
+        
+        host.plot_diff_widget = pg.PlotWidget()
+        host.ax_diff_int = host.plot_diff_widget.getPlotItem()
         host.ax_diff_int.setLabel("left", '2<font>&theta<font>', units="°")
         host.ax_diff_int.setLabel("bottom", "Time", units="ms")
-        host.fig_DRX_dynamic.ci.layout.setRowStretchFactor(0, 3)
-        host.fig_DRX_dynamic.ci.layout.setRowStretchFactor(1, 1)
-        host.fig_DRX_dynamic.ci.layout.setRowStretchFactor(2, 2)
+        host.ax_diff_int.setXLink(host.ax_P)
+
+        host.fig_DRX_dynamic.addWidget(host.plot_pressure_widget)
+        host.fig_DRX_dynamic.addWidget(host.plot_dpdt_widget)
+        host.fig_DRX_dynamic.addWidget(host.plot_diff_widget)
+        host.fig_DRX_dynamic.setStretchFactor(0, 3)
+        host.fig_DRX_dynamic.setStretchFactor(1, 1)
+        host.fig_DRX_dynamic.setStretchFactor(2, 2)
+        host.fig_DRX_dynamic.setSizes([360, 140, 240])
 
     def _create_drx_persistent_items(self) -> None:
         host = self._drx_container
@@ -102,9 +117,18 @@ class DdacWidget:
             movable=True,
         )
         host.ax_diff_int.addItem(host.zone_multi_diff_int)
+        host.zone_time_arg_P = pg.LinearRegionItem(
+            values=[0, 0],
+            orientation=pg.LinearRegionItem.Vertical,
+            brush=pg.mkBrush(80, 120, 240, 60),
+            movable=True,
+        )
+        host.ax_P.addItem(host.zone_time_arg_P)
+
         host.zone_multi_P.setVisible(False)
         host.zone_multi_dPdt.setVisible(False)
         host.zone_multi_diff_int.setVisible(False)
+        host.zone_time_arg_P.setVisible(False)
 
     def _init_drx_state(self) -> None:
         host = self._drx_container
@@ -133,6 +157,9 @@ class DdacWidget:
         host._gauge_library_dirty = False
         host._current_spectrum_gauges = set()
         host._drx_in_refresh = False
+        host._time_arg_zone_visible = False
+        host._time_arg_zone_syncing = False
+        host._time_arg_zone_range = None
 
     def _build_drx_controls(self) -> None:
         host = self._drx_container
@@ -169,6 +196,9 @@ class DdacWidget:
         host.btn_zone_dpdt = QPushButton("Zone dP/dt", self._drx_container)
         host.btn_zone_dpdt.setCheckable(True)
         host.btn_zone_dpdt.setChecked(False)
+        host.btn_time_arg = QPushButton("Plage temps", self._drx_container)
+        host.btn_time_arg.setCheckable(True)
+        host.btn_time_arg.setChecked(False)
 
 
     def _connect_drx_events(self) -> None:
@@ -187,13 +217,11 @@ class DdacWidget:
         host.cedx_metric_combo.currentTextChanged.connect(host._on_cedx_metric_changed)
         if hasattr(host, "set_ddac_multi_zone_visibility"):
             host.btn_zone_dpdt.toggled.connect(host.set_ddac_multi_zone_visibility)
-
+        if hasattr(host, "set_time_arg_zone_visibility"):
+            host.btn_time_arg.toggled.connect(host.set_time_arg_zone_visibility)
 
     def _configure_drx_layout(self) -> None:
         host = self._drx_container
-        host.fig_DRX_dynamic.ci.setContentsMargins(0, 0, 0, 0)
-        host.fig_DRX_dynamic.ci.layout.setSpacing(4)
-
         if host is None:
             return
 
@@ -214,6 +242,7 @@ class DdacWidget:
         layhrun.addWidget(host.label_dpdt_smooth)
         layhrun.addWidget(host.spinbox_dpdt_smooth)
         layhrun.addWidget(host.btn_zone_dpdt)
+        layhrun.addWidget(host.btn_time_arg)
         if getattr(host, "analysis_toggle", None) is not None:
             layhrun.addWidget(host.analysis_toggle)
         ddac_layout.addLayout(layhrun)

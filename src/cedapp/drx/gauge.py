@@ -153,7 +153,7 @@ class Gauge:
         self.Init_perso()
 
     #CALCULE
-    def Calcul(self,input_spe=None,mini=True,lambda_error=0,verbose=False):
+    def Calcul(self,input_spe=None,mini=True,lambda_error=0,verbose=False,fixe="P"):
         if self.bit_fit is False :
             return print("NO FIT of ",self.name,"do it !")
         else:
@@ -161,7 +161,7 @@ class Gauge:
                 if self.state == "IN_NOISE":
                     self.a,self.b,self.c,self.rca,self.V,self.P=self.Element_ref.A,self.Element_ref.B,self.Element_ref.C,self.Element_ref.rCA,self.Element_ref.V0,0
                 else:
-                    self.CALCUL(mini=mini,verbose=verbose)
+                    self.CALCUL(mini=mini,verbose=verbose,fixe=fixe)
                 self.study =pd.concat([pd.DataFrame(np.array([[self.a,self.b,self.c,self.rca,self.V,self.sigma_V,self.P,self.sigma_P]]) , columns=['a_'+self.name,'b_'+self.name,'c_'+self.name,'c/a_'+self.name,'V_'+self.name,'sigma_V_'+self.name,'P_'+self.name,'sigma_P_'+self.name]),self.study_add],axis=1)
                 return           
             self.lamb_fit=round(self.pics[0].ctr[0],3)
@@ -748,63 +748,62 @@ class Element(Gauge):
         else:
             print("MAILLE != (cubic,tetra,hexa,ortho,rhombo) , A CODER")
                 
-    def calcul_P(self, V0c=None, T=None,verbose=False):
+    def calcul_P(self, V0c=None, T=None, verbose=False):
         if verbose:
             print("- - - - - - calcul_P - - - - - -")
-        if V0c is None:
-            V0c = self.Element_ref.V0
 
         if self.V is None:
             print("PROBLEME V non calculé")
             return
 
+        # Température
         if T is not None:
-            self.T = float(T)   # on force Element à adopter la T demandée
-        # sinon on garde self.T (déjà initialisée depuis Element_ref)
-    
-        Pt = 0
-        if getattr(self.Element_ref, "ALPHAKT", None) is not None:
-            Pt = self.Element_ref.ALPHAKT * (self.T - 298)
+            self.T = float(T)
 
-        # facteur de compression
-        eta = (V0c / self.V) ** (1/3)
+        # Pression (thermo via V0(T) dans Element_ref)
+        self.P = float(self.Element_ref.EoS_PV(self.V, T=self.T))
 
-        # Pression Birch-Murnaghan 3e ordre
-        P_bm = (3/2) * self.Element_ref.K0 * (eta**7 - eta**5) * \
-            (1 + (3/4) * (self.Element_ref.K0P - 4) * (eta**2 - 1))
+        # Incertitude sur P si sigma_V dispo et valide
+        self.sigma_P = 0.0
+        if hasattr(self, "sigma_V") and self.sigma_V is not None and self.sigma_V > 0:
+            dV = float(self.sigma_V)
 
-        self.P = round(P_bm + Pt, 3)
-
-        # calcul incertitude sur P si sigma_V dispo
-        if hasattr(self, "sigma_V"):
-            # dérivée ∂P/∂V (approx numérique)
-            dV = self.sigma_V
+            # Sécurités pour éviter V<=0
             V_plus = self.V + dV
-            V_minus = self.V - dV if self.V > dV else self.V * 0.99
+            V_minus = self.V - dV
+            if V_minus <= 0:
+                V_minus = self.V * 0.99
 
-            eta_plus = (V0c / V_plus) ** (1/3)
-            P_plus = (3/2) * self.Element_ref.K0 * (eta_plus**7 - eta_plus**5) * \
-                    (1 + (3/4) * (self.Element_ref.K0P - 4) * (eta_plus**2 - 1)) + Pt
-
-            eta_minus = (V0c / V_minus) ** (1/3)
-            P_minus = (3/2) * self.Element_ref.K0 * (eta_minus**7 - eta_minus**5) * \
-                    (1 + (3/4) * (self.Element_ref.K0P - 4) * (eta_minus**2 - 1)) + Pt
+            # Dérivée numérique cohérente avec l'EoS utilisée
+            P_plus = float(self.Element_ref.EoS_PV(V_plus, T=self.T))
+            P_minus = float(self.Element_ref.EoS_PV(V_minus, T=self.T))
 
             dPdV = (P_plus - P_minus) / (V_plus - V_minus)
-            self.sigma_P = abs(dPdV) * self.sigma_V
+            self.sigma_P = abs(dPdV) * dV
+
             if verbose:
-                print(f"Calcul_P DONE: P = {self.P} ± {self.sigma_P:.3f} GPa")
+                print(f"Calcul_P DONE: P = {self.P:.3f} ± {self.sigma_P:.3f} GPa")
         else:
             if verbose:
-                print(f"Calcul_P DONE: P = {self.P} GPa")
+                print(f"Calcul_P DONE: P = {self.P:.3f} GPa (sigma_V absent)")
 
         if verbose:
-            print("Paramètres utilisés: V0=", V0c,
-            " V=", self.V,
-            " K0=", self.Element_ref.K0,
-            " K0P=", self.Element_ref.K0P,
-            " alphaKt=", getattr(self.Element_ref, 'ALPHAKT', None),
-            " T=", self.T)
+            # V0(T) utile à afficher (si tu as V0_at_T côté Element_ref)
+            V0T = None
+            if hasattr(self.Element_ref, "V0_at_T"):
+                try:
+                    V0T = self.Element_ref.V0_at_T(self.T)
+                except Exception:
+                    V0T = None
+
+            print("Paramètres utilisés:",
+                "V=", self.V,
+                "T=", self.T,
+                "alpha=", getattr(self.Element_ref, "ALPHAKT", None),
+                "V0=", getattr(self.Element_ref, "V0", None),
+                "V0(T)=", V0T,
+                "K0=", self.Element_ref.K0,
+                "K0P=", self.Element_ref.K0P)
 
     def calcul_T(self, P):
         print("- - - - - - calcul_T - - - - - -")
@@ -835,7 +834,7 @@ class Element(Gauge):
             " V_T0=", V_p,
             " alphaKt=", self.Element_ref.ALPHAKT)
 
-    def CALCUL(self,mini=True,verbose=False):
+    def CALCUL(self,mini=True,verbose=False,fixe="P"):
         if verbose:
             print("START CALCUL "+self.name+" - - ->")
         if mini:
@@ -843,6 +842,11 @@ class Element(Gauge):
         else:
             self.calcul_abc(verbose=verbose)
         self.calcul_V(verbose=verbose)
-        self.calcul_P(verbose=verbose)
-
+        mode = str(fixe).upper()
+        if mode == "T" and getattr(self.Element_ref, "ALPHAKT", None) is not None:
+            self.calcul_T(self.P)
+            self.Element_ref.T = self.T
+        else:
+            self.calcul_P(verbose=verbose)
+            self.Element_ref.P_start = self.P
 

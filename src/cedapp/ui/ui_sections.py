@@ -16,8 +16,10 @@ from PyQt5.QtWidgets import (
     QLabel,
     QLineEdit,
     QListWidget,
+    QCheckBox,
     QPushButton,
     QTableWidget,
+    QTabWidget,
     QTextEdit,
     QToolButton,
     QVBoxLayout,
@@ -67,7 +69,6 @@ class UIState:
     plot_fit_toggle: QPushButton | None = None
     setup_mode_button: QPushButton | None = None
     DRX_selector: QComboBox | None = None
-    print_plate_button: QPushButton | None = None
     type_selector: QComboBox | None = None
     listbox_file: QListWidget | None = None
     search_bar: QLineEdit | None = None
@@ -92,8 +93,11 @@ class UIState:
     ddac_widget: DdacWidget | None = None
     spinbox_P: QDoubleSpinBox | None = None
     spinbox_T: QDoubleSpinBox | None = None
+    apply_temp_all_gauges_checkbox: QCheckBox | None = None
+    pt_solver_pfix_checkbox: QCheckBox | None = None
     listbox_pic: QListWidget | None = None
-    gauge_undock_box: QPushButton | None = None
+    right_view_tabs: QTabWidget | None = None
+    undock_panel_button: QPushButton | None = None
 
 
 class CalibrationButton(QPushButton):
@@ -268,10 +272,6 @@ def build_file_section(window) -> None:
     layout_fichiers.addWidget(state.DRX_selector)
     state.DRX_selector.currentIndexChanged.connect(window._update_print_plate_from_selector)
 
-    state.print_plate_button = QPushButton("Print", window)
-    state.print_plate_button.clicked.connect(window.show_print_plate)
-    layout_fichiers.addWidget(state.print_plate_button)
-
     state.type_selector = QComboBox()
     window.type_folder = ["CED", "Oscilloscope", "DRX"]
     state.type_selector.addItems(window.type_folder)
@@ -426,15 +426,34 @@ def build_gauge_section(window) -> None:
     window.deltalambdaT = 0
     layout.addLayout(layh4)
 
+    state.apply_temp_all_gauges_checkbox = QCheckBox("TAll")
+    state.apply_temp_all_gauges_checkbox.setChecked(False)
+    layh4.addWidget(state.apply_temp_all_gauges_checkbox)
+
+    state.pt_solver_pfix_checkbox = QCheckBox("Pfix")
+    state.pt_solver_pfix_checkbox.setChecked(False)
+    layh4.addWidget(state.pt_solver_pfix_checkbox)
+
+
     state.listbox_pic = QListWidget()
     state.listbox_pic.doubleClicked.connect(window.select_pic)
     layout.addWidget(state.listbox_pic)
     add_box.setLayout(layout)
     
-    state.gauge_undock_box = QPushButton("Undock panel")
-    state.gauge_undock_box.setCheckable(True)
-    state.gauge_undock_box.toggled.connect(window.toggle_gauge_panel_dock)
-    layout.addWidget(state.gauge_undock_box)
+    state.right_view_tabs = QTabWidget(window)
+    state.right_view_tabs.setDocumentMode(True)
+    state.right_view_tabs.setUsesScrollButtons(False)
+    state.right_view_tabs.addTab(QWidget(), "Zoom")
+    state.right_view_tabs.addTab(QWidget(), "Print")
+    state.right_view_tabs.currentChanged.connect(window.on_right_view_tab_changed)
+    layout.addWidget(state.right_view_tabs)
+
+    state.undock_panel_button = QPushButton("Undock", window)
+    state.undock_panel_button.setCheckable(True)
+    state.undock_panel_button.toggled.connect(window.toggle_gauge_panel_dock)
+    layout.addWidget(state.undock_panel_button)
+
+    window.ensure_print_plate_widget()
 
 
     parampic_box = QGroupBox("Model peak")

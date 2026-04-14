@@ -158,7 +158,7 @@ class Element_Bibli:
         self.T=298
         self.T_range=None
         self.P_range=[-10,1000]
-        self.Vmin=0.8
+        self.Vmin=0.6
         self.Z_max=None
         self.fu=None
         self.P_start=0
@@ -169,33 +169,27 @@ class Element_Bibli:
         except Exception as e:
             print(e)
 
-    def EoS_VP(self, P_total, T=None):
-        """Retourne V à partir de P_total et T, via BM isotherme."""
+    def EoS_PV(self, V, T=None):
         if T is None:
             T = self.T
-        P_iso = self.P_isotherm_from_total(P_total, T)
+        V0T = self.V0_at_T(T)
+        self.P_start = Birch_M(V, V0T, self.K0, self.K0P)
+        return self.P_start
 
+    def EoS_VP(self, P, T=None):
+        if T is None:
+            T = self.T
+        V0T = self.V0_at_T(T)
         try:
             self.V = inversefunc(
-                (lambda x: Birch_M(x, self.V0, self.K0, self.K0P)),
-                y_values=P_iso,
-                domain=[self.V0 * self.Vmin, self.V0 * 1.05],
+                lambda x: Birch_M(x, V0T, self.K0, self.K0P),
+                y_values=float(P),
+                domain=[V0T * self.Vmin, V0T * 1.05],
             )
         except Exception as e:
             print(e)
         return self.V
-
-    def EoS_PV(self, V, T=None):
-        """Retourne P_total à partir de V et T."""
-        if T is None:
-            T = self.T
-        try:
-            P_iso = Birch_M(V, self.V0, self.K0, self.K0P)
-            self.P_start = self.P_total_from_isotherm(P_iso, T)
-        except Exception as e:
-            print(e)
-        return self.P_start
-
+    
     def Extract(self):
         if self.file is None:
             return
@@ -338,8 +332,8 @@ class Element_Bibli:
         X= 360/np.pi*np.arcsin((1239.8/self.E)*1e-9/(self.Dhkl["Dhkl"][l]*2e-10))
         return X
     
-    def Eos_Pdhkl(self, P_total, T=None, extract=False):
-        V = self.EoS_VP(P_total, T=T)
+    def Eos_Pdhkl(self, P, T=None, extract=False):
+        V = self.EoS_VP(P, T=T)
         thetas_PV=[]
         if self.E is None:
             return print("Energie non définie, veuillez la définir avant de calculer les angles")
@@ -392,20 +386,12 @@ class Element_Bibli:
         for i in range(len(self.Dhkl)):
             self.name_dhkl.append((int(self.Dhkl.h[i]),int(self.Dhkl.k[i]),int(self.Dhkl.l[i])))
 
-    def P_thermal(self, T):
-        """Terme de pression thermique Pt = ALPHAKT*(T-T0=298)."""
+    def V0_at_T(self, T):
+        """V0(T) avec alpha volumique constant (ALPHAKT en K^-1)."""
         if self.ALPHAKT is None:
-            return 0.0
-        return float(self.ALPHAKT) * (float(T) - 298)
-
-    def P_isotherm_from_total(self, P_total, T):
-        """Retire le terme thermique pour obtenir la pression isotherme BM."""
-        return float(P_total) - self.P_thermal(T)
-
-    def P_total_from_isotherm(self, P_iso, T):
-        """Ajoute le terme thermique."""
-        return float(P_iso) + self.P_thermal(T)
-
+            return self.V0
+        dT = float(T) - 298
+        return float(self.V0) * np.exp(float(self.ALPHAKT) * dT)
 
 
 class DRX():
@@ -2179,7 +2165,6 @@ class CED_DRX:
                 sig = df[time_index].to_numpy()
             self.Temps_Pression(temps=temps, signale_spec=sig)
             print("Oscillo DONE nb time:", len(self.Time_spectrum))
-
 
     def Print(self,num_spec=0,data=[],Oscilo=False):
         if data ==[] and Oscilo ==False:

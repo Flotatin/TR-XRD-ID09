@@ -137,6 +137,10 @@ class FiltreWidget(QWidget):
         layh2.addWidget(main.param_filtre_2_entry)
         layout.addLayout(layh2)
 
+        main.apply_processing_all_button = QPushButton("Update multi", main)
+        main.apply_processing_all_button.clicked.connect(main.apply_processing_to_all_spectra)
+        layout.addWidget(main.apply_processing_all_button)
+
         self.setLayout(layout)
         self.setVisible(False)
 
