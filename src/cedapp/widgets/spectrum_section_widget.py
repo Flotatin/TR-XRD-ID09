@@ -8,6 +8,7 @@ from pyqtgraph import GraphicsLayoutWidget
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
     QAction,
+    QFrame,
     QGroupBox,
     QSizePolicy,
     QSplitter,
@@ -36,6 +37,7 @@ class SpectrumSectionWidget:
         main.spectra_layout.addWidget(self.spectrum_container)
 
         main.graph_layout = GraphicsLayoutWidget()
+        main.graph_layout.setMinimumHeight(420)
         main.graph_layout.ci.layout.setRowStretchFactor(0, 5)
         main.graph_layout.ci.layout.setRowStretchFactor(1, 1)
         main.graph_layout.ci.layout.setColumnStretchFactor(0, 1)
@@ -56,21 +58,40 @@ class SpectrumSectionWidget:
 
         self.right_splitter = QSplitter(Qt.Horizontal)
         self.right_splitter.setChildrenCollapsible(False)
-        main.top_layout.addWidget(self.right_splitter, 1)
+        main.top_layout.addWidget(self.right_splitter, 0)
 
         self.right_widget_container = QWidget()
         self.right_layout = QVBoxLayout(self.right_widget_container)
         self.right_layout.setContentsMargins(0, 0, 0, 0)
         self.right_layout.setSpacing(2)
         self.right_widget_container.setMinimumWidth(220)
-        self.right_widget_container.setMaximumWidth(500)
-        self.right_widget_container.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Preferred)
+        self.right_widget_container.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
         self.right_splitter.addWidget(self.right_widget_container)
 
-        self.zoom_stack = QStackedWidget()
-        self.right_splitter.addWidget(self.zoom_stack)
-        self._zoom_stack_base_min_width = 240
+        self.zoom_overlay = QFrame(self.spectrum_container)
+        self.zoom_overlay.setObjectName("spectrumZoomPrintOverlay")
+        self.zoom_overlay.setFrameShape(QFrame.StyledPanel)
+        self.zoom_overlay.setStyleSheet(
+            "#spectrumZoomPrintOverlay { background: rgba(255, 255, 255, 235); border: 1px solid #777; }"
+        )
+        self.zoom_overlay_layout = QVBoxLayout(self.zoom_overlay)
+        self.zoom_overlay_layout.setContentsMargins(4, 4, 4, 4)
+        self.zoom_overlay_layout.setSpacing(0)
+        self.zoom_overlay_corner = Qt.TopRightCorner
+        self._zoom_overlay_docked = True
+
+        self.zoom_stack = QStackedWidget(self.zoom_overlay)
+        self._zoom_stack_base_min_width = 280
         self.zoom_stack.setMinimumWidth(self._zoom_stack_base_min_width)
+        self.zoom_overlay_layout.addWidget(self.zoom_stack)
+
+        original_resize_event = self.spectrum_container.resizeEvent
+
+        def resize_spectrum_container(event):
+            original_resize_event(event)
+            self.update_overlay_geometry()
+
+        self.spectrum_container.resizeEvent = resize_spectrum_container
 
         main.zoom_widget = pg.PlotWidget()
         main.ax_zoom = main.zoom_widget.getPlotItem()
@@ -81,7 +102,7 @@ class SpectrumSectionWidget:
         self._zoom_default_index = self.zoom_stack.indexOf(main.zoom_widget)
 
         self.right_splitter.setStretchFactor(0, 1)
-        self.right_splitter.setStretchFactor(1, 2)
+        self.update_overlay_geometry()
 
 
         main.plot_pic_fit = []
@@ -214,11 +235,12 @@ class SpectrumSectionWidget:
             self.zoom_stack.addWidget(widget)
 
     def show_zoom_replacement(self, widget, enabled: bool) -> None:
-        """Toggle display of a replacement widget in the zoom area."""
+        """Toggle display of a replacement widget in the spectrum overlay."""
 
         if widget is None:
             return
         self.set_zoom_replacement_widget(widget)
+        self.set_overlay_visible(True)
         if enabled:
             self.zoom_stack.setCurrentWidget(widget)
             widget.show()
@@ -228,42 +250,86 @@ class SpectrumSectionWidget:
             self.main.zoom_widget.show()
             widget.hide()
 
+    def set_overlay_visible(self, visible: bool) -> None:
+        """Show or hide the docked Zoom/Print overlay."""
+
+        self.zoom_overlay.setVisible(bool(visible))
+        if visible:
+            self.update_overlay_geometry()
+            self.zoom_overlay.raise_()
+
+    def update_overlay_geometry(self) -> None:
+        """Place the Zoom/Print overlay in a corner of the spectrum plot."""
+
+        if not getattr(self, "_zoom_overlay_docked", True):
+            return
+        graph_geom = self.graph_geometry_in_container()
+        if graph_geom is None:
+            return
+
+        margin = 12
+        width = max(self._zoom_stack_base_min_width, int(graph_geom.width() * 0.34))
+        height = max(220, int(graph_geom.height() * 0.42))
+        width = min(width, max(1, graph_geom.width() - 2 * margin))
+        height = min(height, max(1, graph_geom.height() - 2 * margin))
+
+        if self.zoom_overlay_corner == Qt.TopLeftCorner:
+            x = graph_geom.left() + margin
+            y = graph_geom.top() + margin
+        elif self.zoom_overlay_corner == Qt.BottomLeftCorner:
+            x = graph_geom.left() + margin
+            y = graph_geom.bottom() - height - margin
+        elif self.zoom_overlay_corner == Qt.BottomRightCorner:
+            x = graph_geom.right() - width - margin
+            y = graph_geom.bottom() - height - margin
+        else:
+            x = graph_geom.right() - width - margin
+            y = graph_geom.top() + margin
+        self.zoom_overlay.setGeometry(x, y, width, height)
+
+    def graph_geometry_in_container(self):
+        """Return the graph widget geometry mapped to the spectrum container."""
+
+        if self.main.graph_layout is None:
+            return None
+        top_left = self.main.graph_layout.mapTo(self.spectrum_container, self.main.graph_layout.rect().topLeft())
+        return self.main.graph_layout.rect().translated(top_left)
+
     def set_plot_window_ratio(self, ratio: float | None) -> None:
         """Resize preference for the right plot window instead of stretching image content."""
 
         if ratio is None or not np.isfinite(ratio) or ratio <= 0:
             self.zoom_stack.setMinimumWidth(self._zoom_stack_base_min_width)
+            self.update_overlay_geometry()
             return
 
-        splitter_height = max(1, self.right_splitter.height())
-        target_width = int(np.clip(splitter_height * float(ratio), self._zoom_stack_base_min_width, 2200))
+        target_width = int(np.clip(320 * float(ratio), self._zoom_stack_base_min_width, 2200))
         self.zoom_stack.setMinimumWidth(target_width)
-
-        sizes = self.right_splitter.sizes()
-        if len(sizes) >= 2:
-            left_width = max(220, sizes[0])
-            self.right_splitter.setSizes([left_width, target_width])
+        self.update_overlay_geometry()
 
     def undock_right_panel(self, host_layout) -> None:
-        """Move the right splitter (gauges + zoom plot) into another layout."""
+        """Move the Zoom/Print display into another layout."""
 
-        if self.right_splitter.parent() is self.spectrum_container:
-            self.main.top_layout.removeWidget(self.right_splitter)
-        self.right_splitter.setParent(None)
-        host_layout.addWidget(self.right_splitter)
+        self.zoom_overlay.setParent(None)
+        host_layout.addWidget(self.zoom_overlay)
+        self._zoom_overlay_docked = False
+        self.zoom_overlay.show()
 
     def is_right_panel_docked(self) -> bool:
-        """Return whether the right splitter is currently in the main spectrum layout."""
+        """Return whether the Zoom/Print display is docked over the spectrum."""
 
-        return self.right_splitter.parent() is self.spectrum_container
+        return bool(getattr(self, "_zoom_overlay_docked", True))
 
     def dock_right_panel(self) -> None:
-        """Restore the right splitter next to the main spectrum plot."""
+        """Restore the Zoom/Print display as an overlay on the spectrum plot."""
 
-        if self.right_splitter.parent() is self.spectrum_container:
+        if self.is_right_panel_docked():
             return
-        self.right_splitter.setParent(None)
-        self.main.top_layout.addWidget(self.right_splitter, 1)
+        self.zoom_overlay.setParent(self.spectrum_container)
+        self._zoom_overlay_docked = True
+        self.zoom_overlay.show()
+        self.update_overlay_geometry()
+        self.zoom_overlay.raise_()
 
 
     def add_right_widget(self, widget) -> None:
