@@ -5,9 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import matplotlib.colors as mcolors
 
-from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QColor, QFont
 from PyQt5.QtWidgets import (
+    QAction,
     QAbstractItemView,
     QComboBox,
     QDoubleSpinBox,
@@ -34,6 +35,11 @@ from cedapp.widgets import (
     load_command_file,
     FitParamWidget,
 )
+from cedapp.widgets.menu_helpers import (
+    add_check_menu_action,
+    add_menu_action,
+    make_menu_button,
+)
 
 
 @dataclass
@@ -41,9 +47,9 @@ class UIState:
     """Container for UI widget references."""
 
     settings_button: QToolButton | None = None
-    help_toggle_btn: QPushButton | None = None
+    help_toggle_btn: QToolButton | None = None
     live_toggle_btn: QPushButton | None = None
-    clear_btn: QPushButton | None = None
+    clear_btn: QAction | None = None
     help_widget: QWidget | None = None
     CommandeLayout: QVBoxLayout | None = None
     help_entries: list[str] = field(default_factory=list)
@@ -52,11 +58,11 @@ class UIState:
     list_Commande_python: list[str] = field(default_factory=list)
     widget_python: QWidget | None = None
     text_edit: QTextEdit | None = None
-    execute_button: QPushButton | None = None
+    execute_button: QAction | None = None
     output_display: QTextEdit | None = None
-    ButtonPrint: QPushButton | None = None
-    ButtonLen: QPushButton | None = None
-    ButtonClearcode: QPushButton | None = None
+    ButtonPrint: QAction | None = None
+    ButtonLen: QAction | None = None
+    ButtonClearcode: QAction | None = None
     help_tab_index: int | None = None
     help_tab_visible: bool = False
 
@@ -64,9 +70,9 @@ class UIState:
     file_label_spectro: QLabel | None = None
     select_file_oscilo_button: QPushButton | None = None
     file_label_oscilo: QLabel | None = None
-    Calibration_DRX_button: QPushButton | None = None
-    detector_distance_button: QPushButton | None = None
-    plot_fit_toggle: QPushButton | None = None
+    Calibration_DRX_button: QAction | None = None
+    detector_distance_button: QAction | None = None
+    plot_fit_toggle: QAction | None = None
     setup_mode_button: QPushButton | None = None
     DRX_selector: QComboBox | None = None
     type_selector: QComboBox | None = None
@@ -97,17 +103,7 @@ class UIState:
     pt_solver_pfix_checkbox: QCheckBox | None = None
     listbox_pic: QListWidget | None = None
     right_view_tabs: QTabWidget | None = None
-    undock_panel_button: QPushButton | None = None
-
-
-class CalibrationButton(QPushButton):
-    """Push button that emits a double-click signal."""
-
-    doubleClicked = pyqtSignal()
-
-    def mouseDoubleClickEvent(self, event) -> None:  # type: ignore[override]
-        self.doubleClicked.emit()
-        super().mouseDoubleClickEvent(event)
+    undock_panel_button: QAction | None = None
 
 
 def build_command_panel(window) -> None:
@@ -116,13 +112,11 @@ def build_command_panel(window) -> None:
     state = window.ui_state
     box = QGroupBox("⬩")
     layout = QVBoxLayout()
-    state.settings_button = QToolButton()
-    state.settings_button.setText("⚙")
-    state.settings_button.clicked.connect(window.open_settings_dialog)
-    layout.addWidget(state.settings_button)
 
-    state.help_toggle_btn = QPushButton("Help", window)
-    state.help_toggle_btn.clicked.connect(window.toggle_help_box)
+    state.help_toggle_btn = make_menu_button("Aide ▾", window)
+    help_menu = state.help_toggle_btn.menu()
+    add_menu_action(help_menu, "Afficher / masquer l'aide", window.toggle_help_box)
+    add_menu_action(help_menu, "Paramètres application", window.open_settings_dialog)
     layout.addWidget(state.help_toggle_btn)
     
     state.live_toggle_btn = QPushButton("Live", window)
@@ -136,9 +130,12 @@ def build_command_panel(window) -> None:
     layout.addWidget(state.jungfrau_mode_box)
 
 
-    state.clear_btn = QPushButton("SAVE Summary")
-    state.clear_btn.clicked.connect(window.save_summary_CED)
-    layout.addWidget(state.clear_btn)
+    advanced_button = make_menu_button("Avancé ▾", window)
+    advanced_menu = advanced_button.menu()
+    state.clear_btn = add_menu_action(advanced_menu, "Exporter / Save Summary", window.save_summary_CED)
+    advanced_menu.addSeparator()
+    add_menu_action(advanced_menu, "Paramètres application", window.open_settings_dialog)
+    layout.addWidget(advanced_button)
 
     state.help_widget = QWidget()
     state.CommandeLayout = QVBoxLayout()
@@ -167,9 +164,16 @@ def build_command_panel(window) -> None:
     )
     prompt_layout.addWidget(state.text_edit)
 
-    state.execute_button = QPushButton("Click to run code (Shift + Entry)", window)
-    state.execute_button.clicked.connect(window.execute_code)
-    prompt_layout.addWidget(state.execute_button)
+    console_button = make_menu_button("Console Python ▾", window)
+    console_menu = console_button.menu()
+    state.execute_button = add_menu_action(
+        console_menu, "Exécuter le code (Shift + Entrée)", window.execute_code
+    )
+    console_menu.addSeparator()
+    state.ButtonPrint = add_menu_action(console_menu, "Insérer print(...)", window.code_print)
+    state.ButtonLen = add_menu_action(console_menu, "Insérer len(...)", window.code_len)
+    state.ButtonClearcode = add_menu_action(console_menu, "Vider la console", window.code_clear)
+    prompt_layout.addWidget(console_button)
 
     state.output_display = QTextEdit(window)
     state.output_display.setReadOnly(True)
@@ -178,18 +182,6 @@ def build_command_panel(window) -> None:
 
     state.widget_python.setLayout(prompt_layout)
     state.CommandeLayout.addWidget(state.widget_python)
-
-    state.ButtonPrint = QPushButton("print(...)")
-    state.ButtonPrint.clicked.connect(window.code_print)
-    state.CommandeLayout.addWidget(state.ButtonPrint)
-
-    state.ButtonLen = QPushButton("len(...)")
-    state.ButtonLen.clicked.connect(window.code_len)
-    state.CommandeLayout.addWidget(state.ButtonLen)
-
-    state.ButtonClearcode = QPushButton("Clear")
-    state.ButtonClearcode.clicked.connect(window.code_clear)
-    state.CommandeLayout.addWidget(state.ButtonClearcode)
 
     state.help_widget.setLayout(state.CommandeLayout)
     state.help_widget.setVisible(False)
@@ -225,38 +217,64 @@ def build_file_section(window) -> None:
     state.file_label_oscilo = QLabel("init", window)
     row_layout.addWidget(state.file_label_oscilo)
 
-    state.Calibration_DRX_button = CalibrationButton("Calibration", window)
-    state.Calibration_DRX_button.clicked.connect(window.Calibration_DRX)
-    state.Calibration_DRX_button.doubleClicked.connect(window._open_calibration_dialog)
-    row_layout.addWidget(state.Calibration_DRX_button)
+    file_menu_button = make_menu_button("Fichier ▾", window)
+    file_menu = file_menu_button.menu()
+    add_menu_action(file_menu, "Sélectionner un dossier…", window.select_folder_dict)
+    add_menu_action(file_menu, "Sauver la configuration", window.save_paths_to_txt)
+    add_menu_action(file_menu, "Setup mode", window._run_setup_mode)
+    file_menu.addSeparator()
+    add_menu_action(file_menu, "Exporter / Save Summary", window.save_summary_CED)
+    row_layout.addWidget(file_menu_button)
 
-    state.detector_distance_button = QPushButton("Dist detector", window)
-    state.detector_distance_button.clicked.connect(window.update_detector_distance_without_integration)
-    row_layout.addWidget(state.detector_distance_button)
+    calibration_menu_button = make_menu_button("Calibration ▾", window)
+    calibration_menu = calibration_menu_button.menu()
+    state.Calibration_DRX_button = add_menu_action(
+        calibration_menu, "Calibration rapide", window.Calibration_DRX
+    )
+    add_menu_action(calibration_menu, "Dialogue calibration avancé…", window._open_calibration_dialog)
+    state.detector_distance_button = add_menu_action(
+        calibration_menu, "Mettre à jour distance détecteur", window.update_detector_distance_without_integration
+    )
+    row_layout.addWidget(calibration_menu_button)
 
-    bouton_configue = QPushButton("Save config")
-    bouton_configue.clicked.connect(window.save_paths_to_txt)
-    row_layout.addWidget(bouton_configue)
-
-    state.setup_mode_button = QPushButton("Setup mode", window)
-    state.setup_mode_button.clicked.connect(window._run_setup_mode)
-    row_layout.addWidget(state.setup_mode_button)
-
-    state.plot_fit_toggle = QPushButton("Plot fit", window)
-    state.plot_fit_toggle.setCheckable(True)
+    display_menu_button = make_menu_button("Affichage ▾", window)
+    display_menu = display_menu_button.menu()
+    for label, source_action in (
+        ("Spectre brut", getattr(window, "act_show_raw", None)),
+        ("Spectre filtré", getattr(window, "act_show_filtered", None)),
+        ("Baseline", getattr(window, "act_show_baseline", None)),
+    ):
+        if source_action is None:
+            continue
+        mirror_action = add_check_menu_action(
+            display_menu, label, source_action.isChecked(), source_action.setChecked
+        )
+        source_action.toggled.connect(mirror_action.setChecked)
+    display_menu.addSeparator()
+    for label, checkbox in (
+        ("Sélection pic au clic", getattr(window, "select_clic_box", None)),
+        ("Zone Fit Spectrum", getattr(window, "zone_spectrum_box", None)),
+        ("vslmfit", getattr(window, "vslmfit", None)),
+    ):
+        if checkbox is None:
+            continue
+        mirror_action = add_check_menu_action(
+            display_menu, label, checkbox.isChecked(), checkbox.setChecked
+        )
+        checkbox.toggled.connect(mirror_action.setChecked)
+    display_menu.addSeparator()
     initial_plot_visibility = getattr(window.plot_fit_start, "isVisible", lambda: True)()
-    state.plot_fit_toggle.setChecked(initial_plot_visibility)
 
     def update_plot_fit(checked: bool) -> None:
         window.plot_fit_start.setVisible(checked)
-        color = "lightgreen" if checked else "lightcoral"
-        state.plot_fit_toggle.setStyleSheet(f"background-color: {color};")
         if checked:
             window.Print_fit_start()
 
-    state.plot_fit_toggle.toggled.connect(update_plot_fit)
+    state.plot_fit_toggle = add_check_menu_action(
+        display_menu, "Afficher le plot fit", initial_plot_visibility, update_plot_fit
+    )
     update_plot_fit(state.plot_fit_toggle.isChecked())
-    row_layout.addWidget(state.plot_fit_toggle)
+    row_layout.addWidget(display_menu_button)
 
     file_layout.addLayout(row_layout)
     file_layout.addWidget(state.text_box_msg)
@@ -292,10 +310,6 @@ def build_file_section(window) -> None:
     window.loaded_file_OSC = ""
     window.zones = []
     window.current_file_list = []
-
-    bouton_dossier = QPushButton("Select folder")
-    bouton_dossier.clicked.connect(window.select_folder_dict)
-    layout_fichiers.addWidget(bouton_dossier)
 
     group_fichiers.setLayout(layout_fichiers)
     window.grid_layout.addWidget(group_fichiers, 3, 0, 2, 2)
@@ -448,10 +462,15 @@ def build_gauge_section(window) -> None:
     state.right_view_tabs.currentChanged.connect(window.on_right_view_tab_changed)
     layout.addWidget(state.right_view_tabs)
 
-    state.undock_panel_button = QPushButton("Undock", window)
-    state.undock_panel_button.setCheckable(True)
-    state.undock_panel_button.toggled.connect(window.toggle_gauge_panel_dock)
-    layout.addWidget(state.undock_panel_button)
+    panel_menu_button = make_menu_button("Panneau ▾", window)
+    panel_menu = panel_menu_button.menu()
+    add_menu_action(panel_menu, "Afficher le zoom", lambda: state.right_view_tabs.setCurrentIndex(0))
+    add_menu_action(panel_menu, "Afficher le print", lambda: state.right_view_tabs.setCurrentIndex(1))
+    panel_menu.addSeparator()
+    state.undock_panel_button = add_check_menu_action(
+        panel_menu, "Détacher le panneau jauges", False, window.toggle_gauge_panel_dock
+    )
+    layout.addWidget(panel_menu_button)
 
     window.ensure_print_plate_widget()
 
