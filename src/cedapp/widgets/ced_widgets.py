@@ -271,10 +271,18 @@ class DdacWidget:
         grid_layout.addWidget(self._drx_container.ddac_box, 0, 3, 4, 2)
 
     def add_control_widget(self, widget) -> None:
-        """Append a control widget to the ddac control row."""
+        """Append an external dDAC toggle to the compact dDAC menu."""
+
         if widget is None:
             return
-        layout = getattr(self, "_controls_layout", None)
-        if layout is None:
+        button = getattr(self._drx_container, "ddac_options_button", None)
+        if button is None:
+            layout = getattr(self, "_controls_layout", None)
+            if layout is None:
+                return
+            layout.addWidget(widget)
             return
-        layout.addWidget(widget)
+
+        text = widget.text() if hasattr(widget, "text") and widget.text() else "Option"
+        action = add_check_menu_action(button.menu(), text, widget.isChecked(), widget.setChecked)
+        widget.toggled.connect(action.setChecked)

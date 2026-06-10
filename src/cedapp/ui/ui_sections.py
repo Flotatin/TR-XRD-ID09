@@ -78,6 +78,8 @@ class UIState:
     type_selector: QComboBox | None = None
     listbox_file: QListWidget | None = None
     search_bar: QLineEdit | None = None
+    main_controls_layout: QHBoxLayout | None = None
+    ddac_menu_button: QToolButton | None = None
 
     gauge_table: QTableWidget | None = None
     name_gauge: QLabel | None = None
@@ -192,7 +194,6 @@ def build_command_panel(window) -> None:
 
     state.help_tab_index = None
     state.help_tab_visible = False
-    window._update_help_button_color(state.help_tab_visible)
 
 
 def build_file_section(window) -> None:
@@ -276,12 +277,31 @@ def build_file_section(window) -> None:
     update_plot_fit(state.plot_fit_toggle.isChecked())
     row_layout.addWidget(display_menu_button)
 
+    panel_menu_button = make_menu_button("Panneau ▾", window)
+    panel_menu = panel_menu_button.menu()
+    state.right_view_zoom_action = add_check_menu_action(
+        panel_menu, "Afficher Zoom", True, lambda _checked: window.show_print_plate(False)
+    )
+    state.right_view_print_action = add_check_menu_action(
+        panel_menu, "Afficher Print", False, lambda _checked: window.show_print_plate(True)
+    )
+    panel_menu.addSeparator()
+    state.undock_panel_button = add_check_menu_action(
+        panel_menu, "Détacher le panneau", False, window.toggle_gauge_panel_dock
+    )
+    row_layout.addWidget(panel_menu_button)
+
+    state.ddac_menu_button = make_menu_button("dDAC ▾", window)
+    row_layout.addWidget(state.ddac_menu_button)
+
+    state.main_controls_layout = row_layout
     file_layout.addLayout(row_layout)
     file_layout.addWidget(state.text_box_msg)
     file_box.setLayout(file_layout)
     window.grid_layout.addWidget(file_box, 4, 2, 1, 3)
 
     group_fichiers = QGroupBox("File gestion")
+    group_fichiers.setMaximumWidth(420)
     layout_fichiers = QVBoxLayout()
     state.DRX_selector = QComboBox(window)
     if window.RUN is not None:
@@ -320,6 +340,7 @@ def build_tools_panel(window) -> None:
 
     state = window.ui_state
     param_box = QGroupBox("Tools")
+    param_box.setMaximumWidth(260)
     layout = QVBoxLayout()
 
     gauge_box = QGroupBox("Gauges overview")

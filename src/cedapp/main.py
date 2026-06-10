@@ -1405,9 +1405,10 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
     def _finalize_layout(self) -> None:
         """Apply stretch factors to the main grid layout."""
 
-        self.grid_layout.setColumnStretch(0, 1)
-        self.grid_layout.setColumnStretch(1, 1)
-        self.grid_layout.setColumnStretch(2, 6)
+        self.grid_layout.setColumnStretch(0, 0)
+        self.grid_layout.setColumnStretch(1, 0)
+        self.grid_layout.setColumnStretch(2, 7)
+        self.grid_layout.setColumnStretch(3, 4)
         self.grid_layout.setColumnStretch(4, 4)
         self.grid_layout.setRowStretch(0, 5)
         self.grid_layout.setRowStretch(1, 1)

@@ -195,6 +195,7 @@ class SpectrumSectionWidget:
         main.vslmfit.toggled.connect(main._refresh_fit_context_cache)
 
         self.dhkl_box = QGroupBox("dhkl")
+        self.dhkl_box.setMaximumWidth(180)
         main.layout_dhkl = QVBoxLayout()
         self.dhkl_box.setLayout(main.layout_dhkl)
 
