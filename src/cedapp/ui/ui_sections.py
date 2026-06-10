@@ -103,8 +103,6 @@ class UIState:
     pt_solver_pfix_checkbox: QCheckBox | None = None
     listbox_pic: QListWidget | None = None
     right_view_tabs: QTabWidget | None = None
-    right_view_zoom_action: QAction | None = None
-    right_view_print_action: QAction | None = None
     undock_panel_button: QAction | None = None
 
 
@@ -254,7 +252,7 @@ def build_file_section(window) -> None:
         source_action.toggled.connect(mirror_action.setChecked)
     display_menu.addSeparator()
     for label, checkbox in (
-        ("Sélection pic au clic (q)", getattr(window, "select_clic_box", None)),
+        ("Sélection pic au clic", getattr(window, "select_clic_box", None)),
         ("Zone Fit Spectrum", getattr(window, "zone_spectrum_box", None)),
         ("vslmfit", getattr(window, "vslmfit", None)),
     ):
@@ -462,9 +460,17 @@ def build_gauge_section(window) -> None:
     state.right_view_tabs.addTab(QWidget(), "Zoom")
     state.right_view_tabs.addTab(QWidget(), "Print")
     state.right_view_tabs.currentChanged.connect(window.on_right_view_tab_changed)
-    # Zoom/Print is controlled from the bottom action row; keep this tab
-    # object only as the internal state holder used by existing view logic.
-    state.right_view_tabs.setVisible(False)
+    layout.addWidget(state.right_view_tabs)
+
+    panel_menu_button = make_menu_button("Panneau ▾", window)
+    panel_menu = panel_menu_button.menu()
+    add_menu_action(panel_menu, "Afficher le zoom", lambda: state.right_view_tabs.setCurrentIndex(0))
+    add_menu_action(panel_menu, "Afficher le print", lambda: state.right_view_tabs.setCurrentIndex(1))
+    panel_menu.addSeparator()
+    state.undock_panel_button = add_check_menu_action(
+        panel_menu, "Détacher le panneau jauges", False, window.toggle_gauge_panel_dock
+    )
+    layout.addWidget(panel_menu_button)
 
     window.ensure_print_plate_widget()
 

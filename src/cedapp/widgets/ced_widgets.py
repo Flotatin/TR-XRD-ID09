@@ -246,7 +246,7 @@ class DdacWidget:
         host.ddac_options_button = make_menu_button("dDAC ▾", self._drx_container)
         ddac_menu = host.ddac_options_button.menu()
         spectrum_action = add_check_menu_action(
-            ddac_menu, "Clic spectrum (h)", host.spectrum_select_box.isChecked(), host.spectrum_select_box.setChecked
+            ddac_menu, "Clic spectrum", host.spectrum_select_box.isChecked(), host.spectrum_select_box.setChecked
         )
         host.spectrum_select_box.toggled.connect(spectrum_action.setChecked)
         ddac_menu.addSeparator()
