@@ -162,7 +162,13 @@ class Gauge:
                     self.a,self.b,self.c,self.rca,self.V,self.P=self.Element_ref.A,self.Element_ref.B,self.Element_ref.C,self.Element_ref.rCA,self.Element_ref.V0,0
                 else:
                     self.CALCUL(mini=mini,verbose=verbose)
-                self.study =pd.concat([pd.DataFrame(np.array([[self.a,self.b,self.c,self.rca,self.V,self.sigma_V,self.P,self.sigma_P]]) , columns=['a_'+self.name,'b_'+self.name,'c_'+self.name,'c/a_'+self.name,'V_'+self.name,'sigma_V_'+self.name,'P_'+self.name,'sigma_P_'+self.name]),self.study_add],axis=1)
+                self.study = pd.concat([
+                        pd.DataFrame(np.array([[self.a,self.b,self.c,self.rca,self.V,self.sigma_V,self.P,self.sigma_P,self.T,self.sigma_T]]),
+                                    columns=['a_'+self.name,'b_'+self.name,'c_'+self.name,'c/a_'+self.name,
+                                            'V_'+self.name,'sigma_V_'+self.name,'P_'+self.name,'sigma_P_'+self.name,
+                                            'T_'+self.name,'sigma_T_'+self.name]),
+                        self.study_add
+                    ], axis=1)
                 return           
             self.lamb_fit=round(self.pics[0].ctr[0],3)
 
@@ -748,7 +754,7 @@ class Element(Gauge):
         else:
             print("MAILLE != (cubic,tetra,hexa,ortho,rhombo) , A CODER")
                 
-    def calcul_P(self, V0c=None, T=298,verbose=False):
+    def calcul_P(self, V0c=None, T=None,verbose=False):
         if verbose:
             print("- - - - - - calcul_P - - - - - -")
         if V0c is None:
@@ -758,8 +764,10 @@ class Element(Gauge):
             print("PROBLEME V non calculé")
             return
 
-        # correction thermique éventuelle
-        self.T = T
+       # --- température ---
+        if T is not None:
+            self.T = float(T)   # on force Element à adopter la T demandée
+        # sinon on garde self.T (déjà initialisée depuis Element_ref)
         Pt = 0
         if getattr(self.Element_ref, "ALPHAKT", None) is not None:
             Pt = self.Element_ref.ALPHAKT * (self.T - 298)
