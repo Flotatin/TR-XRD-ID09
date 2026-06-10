@@ -561,7 +561,6 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
 #? Setup Main window parameters
 
         self._configure_window()
-        self._build_command_panel()
 
 #? Param treatement section
 
@@ -826,9 +825,6 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         central_widget.setLayout(self.grid_layout)
         self.setCentralWidget(central_widget)
 
-    def _build_command_panel(self) -> None:
-        """Create the settings panel together with the help/command widgets."""
-        ui_sections.build_command_panel(self)
 
     def _build_file_section(self) -> None:
         """Create the file loading controls and python tooling panel."""
@@ -1407,9 +1403,9 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
 
         self.grid_layout.setColumnStretch(0, 0)
         self.grid_layout.setColumnStretch(1, 0)
-        self.grid_layout.setColumnStretch(2, 7)
-        self.grid_layout.setColumnStretch(3, 4)
-        self.grid_layout.setColumnStretch(4, 4)
+        self.grid_layout.setColumnStretch(2, 6)
+        self.grid_layout.setColumnStretch(3, 6)
+        self.grid_layout.setColumnStretch(4, 0)
         self.grid_layout.setRowStretch(0, 5)
         self.grid_layout.setRowStretch(1, 1)
         self.grid_layout.setRowStretch(2, 1)
@@ -3822,12 +3818,6 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         if not visible:
             if self.print_plate_window is not None:
                 spectrum_section.show_zoom_replacement(self.print_plate_window, False)
-            if spectrum_section.is_right_panel_docked():
-                self.top_layout.setStretch(0, 3)
-                self.top_layout.setStretch(1, 1)
-            else:
-                self.top_layout.setStretch(0, 1)
-                self.top_layout.setStretch(1, 1)
             self.print_plate_active = False
             self._sync_view_toolbar(False)
             return
@@ -3841,9 +3831,6 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             mode_button.setChecked(self._print_plate_mode == "cake")
             mode_button.setText("Cake" if self._print_plate_mode == "cake" else "Image")
             mode_button.blockSignals(False)
-        if spectrum_section.is_right_panel_docked():
-            self.top_layout.setStretch(0, 1)
-            self.top_layout.setStretch(1, 2)
             
         self.print_plate_active = True
         self._sync_view_toolbar(True)

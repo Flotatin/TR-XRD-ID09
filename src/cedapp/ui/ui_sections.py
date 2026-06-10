@@ -108,101 +108,24 @@ class UIState:
     undock_panel_button: QAction | None = None
 
 
-def build_command_panel(window) -> None:
-    """Create the settings panel together with the help/command widgets."""
-
-    state = window.ui_state
-    box = QGroupBox("⬩")
-    layout = QVBoxLayout()
-
-    state.help_toggle_btn = make_menu_button("Aide ▾", window)
-    help_menu = state.help_toggle_btn.menu()
-    add_menu_action(help_menu, "Afficher / masquer l'aide", window.toggle_help_box)
-    add_menu_action(help_menu, "Paramètres application", window.open_settings_dialog)
-    layout.addWidget(state.help_toggle_btn)
-    
-    state.live_toggle_btn = QPushButton("Live", window)
-    state.live_toggle_btn.setCheckable(True)
-    state.live_toggle_btn.toggled.connect(window.toggle_live_mode)
-    layout.addWidget(state.live_toggle_btn)
-
-    state.jungfrau_mode_box = QComboBox(window)
-    state.jungfrau_mode_box.addItems(["Burst","Continue", "Oscillo"])
-    state.jungfrau_mode_box.currentTextChanged.connect(window.set_jungfrau_mode)
-    layout.addWidget(state.jungfrau_mode_box)
-
-
-    advanced_button = make_menu_button("Avancé ▾", window)
-    advanced_menu = advanced_button.menu()
-    state.clear_btn = add_menu_action(advanced_menu, "Exporter / Save Summary", window.save_summary_CED)
-    advanced_menu.addSeparator()
-    add_menu_action(advanced_menu, "Paramètres application", window.open_settings_dialog)
-    layout.addWidget(advanced_button)
-
-    state.help_widget = QWidget()
-    state.CommandeLayout = QVBoxLayout()
-    state.help_entries = []
-
-    # Help entries kept for the keyboard window only
-    state.helpLabel = QListWidget()
-    state.helpLabel.itemDoubleClicked.connect(window.try_command)
-    state.helpLabel.hide()
-
-
-    commands_title = QLabel("Commandes")
-    state.CommandeLayout.addWidget(commands_title)
-
-    state.list_Commande = QListWidget()
-    state.CommandeLayout.addWidget(state.list_Commande)
-    state.list_Commande.itemClicked.connect(window.display_command)
-
-    state.list_Commande_python = []
-    load_command_file(state.list_Commande, state.list_Commande_python, window.file_command)
-    state.widget_python = QWidget()
-    prompt_layout = QVBoxLayout()
-    state.text_edit = QTextEdit(window)
-    state.text_edit.setPlaceholderText(
-        "Enter your python code here, to use libraries start with CL., example: np.pi -> CL.np.pi..."
-    )
-    prompt_layout.addWidget(state.text_edit)
-
-    console_button = make_menu_button("Console Python ▾", window)
-    console_menu = console_button.menu()
-    state.execute_button = add_menu_action(
-        console_menu, "Exécuter le code (Shift + Entrée)", window.execute_code
-    )
-    console_menu.addSeparator()
-    state.ButtonPrint = add_menu_action(console_menu, "Insérer print(...)", window.code_print)
-    state.ButtonLen = add_menu_action(console_menu, "Insérer len(...)", window.code_len)
-    state.ButtonClearcode = add_menu_action(console_menu, "Vider la console", window.code_clear)
-    prompt_layout.addWidget(console_button)
-
-    state.output_display = QTextEdit(window)
-    state.output_display.setReadOnly(True)
-    state.output_display.setPlaceholderText("Output print...")
-    prompt_layout.addWidget(state.output_display)
-
-    state.widget_python.setLayout(prompt_layout)
-    state.CommandeLayout.addWidget(state.widget_python)
-
-    state.help_widget.setLayout(state.CommandeLayout)
-    state.help_widget.setVisible(False)
-    layout.addWidget(state.help_widget)
-
-    box.setLayout(layout)
-    window.grid_layout.addWidget(box, 0, 5, 3, 1)
-
-    state.help_tab_index = None
-    state.help_tab_visible = False
-
-
 def build_file_section(window) -> None:
     """Create the file loading controls and python tooling panel."""
 
     state = window.ui_state
-    file_box = QGroupBox("File loading")
+    file_box = QGroupBox("0.1 vXRD F.Dembele")
     file_layout = QVBoxLayout()
     row_layout = QHBoxLayout()
+
+    state.live_toggle_btn = QPushButton("Live", window)
+    state.live_toggle_btn.setCheckable(True)
+    state.live_toggle_btn.toggled.connect(window.toggle_live_mode)
+    row_layout.addWidget(state.live_toggle_btn)
+
+    state.jungfrau_mode_box = QComboBox(window)
+    state.jungfrau_mode_box.addItems(["Burst","Continue", "Oscillo"])
+    state.jungfrau_mode_box.currentTextChanged.connect(window.set_jungfrau_mode)
+    row_layout.addWidget(state.jungfrau_mode_box)
+
 
     state.select_file_DRX_button = QPushButton("f_DRX ", window)
     state.select_file_DRX_button.clicked.connect(window.select_file_DRX)
@@ -221,11 +144,8 @@ def build_file_section(window) -> None:
     file_menu_button = make_menu_button("Fichier ▾", window)
     file_menu = file_menu_button.menu()
     add_menu_action(file_menu, "Sélectionner un dossier…", window.select_folder_dict)
-    add_menu_action(file_menu, "Sauver la configuration", window.save_paths_to_txt)
-    add_menu_action(file_menu, "Setup mode", window._run_setup_mode)
-    file_menu.addSeparator()
-    add_menu_action(file_menu, "Exporter / Save Summary", window.save_summary_CED)
-    row_layout.addWidget(file_menu_button)
+    
+
 
     calibration_menu_button = make_menu_button("Calibration ▾", window)
     calibration_menu = calibration_menu_button.menu()
@@ -277,28 +197,115 @@ def build_file_section(window) -> None:
     update_plot_fit(state.plot_fit_toggle.isChecked())
     row_layout.addWidget(display_menu_button)
 
-    panel_menu_button = make_menu_button("Panneau ▾", window)
-    panel_menu = panel_menu_button.menu()
-    state.right_view_zoom_action = add_check_menu_action(
-        panel_menu, "Afficher Zoom", True, lambda _checked: window.show_print_plate(False)
-    )
-    state.right_view_print_action = add_check_menu_action(
-        panel_menu, "Afficher Print", False, lambda _checked: window.show_print_plate(True)
-    )
-    panel_menu.addSeparator()
-    state.undock_panel_button = add_check_menu_action(
-        panel_menu, "Détacher le panneau", False, window.toggle_gauge_panel_dock
-    )
-    row_layout.addWidget(panel_menu_button)
-
     state.ddac_menu_button = make_menu_button("dDAC ▾", window)
     row_layout.addWidget(state.ddac_menu_button)
+    
+    state.help_toggle_btn = make_menu_button(chr(0x2699), window)
+    help_menu = state.help_toggle_btn.menu()
+    add_menu_action(help_menu, "Module debug", window.toggle_help_box)
+    add_menu_action(help_menu, "Settings", window.open_settings_dialog)
+    
+    add_menu_action(help_menu, "Setup mode", window._run_setup_mode)
+    row_layout.addWidget(state.help_toggle_btn)
+
+    advanced_button = make_menu_button(chr(0x1F4BE), window)
+    advanced_menu = advanced_button.menu()
+    state.clear_btn = add_menu_action(advanced_menu, "Exporter / Save Summary", window.save_summary_CED)
+    add_menu_action(advanced_menu, "Sauver la configuration", window.save_paths_to_txt)
+    advanced_menu.addSeparator()
+    row_layout.addWidget(advanced_button)
+
+    state.ddac_options_button = make_menu_button("dDAC ▾", window)
+    ddac_menu = state.ddac_options_button.menu()
+    spectrum_action = add_check_menu_action(
+        ddac_menu, "Clic spectrum", state.spectrum_select_box.isChecked(), state.spectrum_select_box.setChecked
+    )
+    state.spectrum_select_box.toggled.connect(spectrum_action.setChecked)
+    ddac_menu.addSeparator()
+    zone_action = add_check_menu_action(
+        ddac_menu, "Zone dP/dt", state.btn_zone_dpdt.isChecked(), state.btn_zone_dpdt.setChecked
+    )
+    state.btn_zone_dpdt.toggled.connect(zone_action.setChecked)
+    time_action = add_check_menu_action(
+        ddac_menu, "Plage temps", state.btn_time_arg.isChecked(), state.btn_time_arg.setChecked
+    )
+    state.btn_time_arg.toggled.connect(time_action.setChecked)
+    row_layout.addWidget(state.ddac_options_button)
+
+    state.analysis_toggle = None
+    state.label_plot_metric = QLabel("Paramètre plot :", self._drx_container)
+    state.cedx_metric_combo = QComboBox(self._drx_container)
+    state.cedx_metric_combo.setToolTip(
+        "Sélectionne la grandeur du Summary à afficher (P, V, a, b, c, c/a, B/a, ...)."
+    )
+    
 
     state.main_controls_layout = row_layout
     file_layout.addLayout(row_layout)
     file_layout.addWidget(state.text_box_msg)
+
+    state.help_widget = QWidget()
+    state.CommandeLayout = QVBoxLayout()
+    state.help_entries = []
+
+    # Help entries kept for the keyboard window only
+    state.helpLabel = QListWidget()
+    state.helpLabel.itemDoubleClicked.connect(window.try_command)
+    state.helpLabel.hide()
+
+
+    commands_title = QLabel("Commandes")
+    state.CommandeLayout.addWidget(commands_title)
+
+    state.list_Commande = QListWidget()
+    state.CommandeLayout.addWidget(state.list_Commande)
+    state.list_Commande.itemClicked.connect(window.display_command)
+
+    state.list_Commande_python = []
+    load_command_file(state.list_Commande, state.list_Commande_python, window.file_command)
+    state.widget_python = QWidget()
+    prompt_layout = QVBoxLayout()
+    state.text_edit = QTextEdit(window)
+    state.text_edit.setPlaceholderText(
+        "Enter your python code here, to use libraries start with CL., example: np.pi -> CL.np.pi..."
+    )
+    prompt_layout.addWidget(state.text_edit)
+
+    console_button = make_menu_button("Console Python ▾", window)
+    console_menu = console_button.menu()
+    state.execute_button = add_menu_action(
+        console_menu, "Exécuter le code (Shift + Entrée)", window.execute_code
+    )
+    console_menu.addSeparator()
+    state.ButtonPrint = add_menu_action(console_menu, "Insérer print(...)", window.code_print)
+    state.ButtonLen = add_menu_action(console_menu, "Insérer len(...)", window.code_len)
+    state.ButtonClearcode = add_menu_action(console_menu, "Vider la console", window.code_clear)
+    prompt_layout.addWidget(console_button)
+
+    state.output_display = QTextEdit(window)
+    state.output_display.setReadOnly(True)
+    state.output_display.setPlaceholderText("Output print...")
+    prompt_layout.addWidget(state.output_display)
+
+    state.widget_python.setLayout(prompt_layout)
+    state.CommandeLayout.addWidget(state.widget_python)
+
+    state.help_widget.setLayout(state.CommandeLayout)
+    state.help_widget.setVisible(False)
+    file_layout.addWidget(state.help_widget)
+
+    
     file_box.setLayout(file_layout)
     window.grid_layout.addWidget(file_box, 4, 2, 1, 3)
+
+    state.help_tab_index = None
+    state.help_tab_visible = False
+
+
+
+
+
+
 
     group_fichiers = QGroupBox("File gestion")
     group_fichiers.setMaximumWidth(420)
@@ -376,48 +383,6 @@ def build_message_label(window) -> None:
 
     window.ui_state.text_box_msg = QLabel("Good Luck and Have Fun")
 
-'''
-def build_model_peak_section(window) -> None:
-    """Configure the model peak parameter widgets."""
-
-    state = window.ui_state
-    parampic_box = QGroupBox("Model peak")
-    state.ParampicLayout = QVBoxLayout()
-    state.fit_param_widget = FitParamWidget(window)
-    state.ParampicLayout.addWidget(state.fit_param_widget)
-
-    state.coef_dynamic_spinbox, state.coef_dynamic_label = [], []
-
-    state.model_pic_type_selector = QComboBox(window)
-    state.liste_type_model_pic = ["PearsonIV", "PseudoVoigt", "Moffat", "SplitLorentzian", "Gaussian"]
-    state.model_pic_type_selector.addItems(state.liste_type_model_pic)
-    tableau_colors = list(mcolors.TABLEAU_COLORS.values())
-    for ind in range(state.model_pic_type_selector.count()):
-        color = tableau_colors[ind % len(tableau_colors)]
-        item = state.model_pic_type_selector.model().item(ind)
-        if item is not None:
-            item.setBackground(QColor(color))
-    state.model_pic_type_selector.currentIndexChanged.connect(window.f_model_pic_type)
-    state.ParampicLayout.addWidget(state.model_pic_type_selector)
-    state.model_pic_fit = state.model_pic_type_selector.currentText()
-
-    state.spinbox_sigma = QDoubleSpinBox()
-    state.spinbox_sigma.valueChanged.connect(window.setFocus)
-    state.spinbox_sigma.valueChanged.connect(
-        lambda _value: window._update_fit_window() if getattr(window, "index_pic_select", None) is not None else None
-    )
-    state.spinbox_sigma.setRange(0.01, 10)
-    state.spinbox_sigma.setSingleStep(0.01)
-    state.spinbox_sigma.setValue(0.15)
-    state.ParampicLayout.addLayout(creat_spin_label(state.spinbox_sigma, "σ :"))
-
-    parampic_box.setLayout(state.ParampicLayout)
-    window.grid_layout.addWidget(parampic_box, 3, 5, 1, 2)
-
-    window.bit_bypass = True
-    window.f_model_pic_type()
-    window.bit_bypass = False
-'''
 
 def init_plot_widgets(window) -> None:
     """Initialise the main spectrum plot area and related items."""
@@ -437,7 +402,7 @@ def build_gauge_section(window) -> None:
     """Initialise widgets related to gauge information."""
 
     state = window.ui_state
-    add_box = QGroupBox("Gauge information")
+    add_box = QGroupBox("Sample section")
     layout = QHBoxLayout()
 
     gauge_layout = QVBoxLayout()
@@ -461,11 +426,11 @@ def build_gauge_section(window) -> None:
     layh4.addWidget(QLabel("K"))
     window.deltalambdaT = 0
 
-    state.apply_temp_all_gauges_checkbox = QCheckBox("TAll")
+    state.apply_temp_all_gauges_checkbox = QCheckBox(r"$T_{All}$")
     state.apply_temp_all_gauges_checkbox.setChecked(False)
     layh4.addWidget(state.apply_temp_all_gauges_checkbox)
 
-    state.pt_solver_pfix_checkbox = QCheckBox("Pfix")
+    state.pt_solver_pfix_checkbox = QCheckBox("$P_{fix}$")
     state.pt_solver_pfix_checkbox.setChecked(False)
     layh4.addWidget(state.pt_solver_pfix_checkbox)
     gauge_layout.addLayout(layh4)

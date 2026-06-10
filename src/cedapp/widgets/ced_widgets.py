@@ -34,7 +34,6 @@ class DdacWidget:
         self._connect_drx_events()
         self._configure_drx_layout()
 
-
     def _create_drx_plots(self) -> None:
         host = self._drx_container
         host.fig_DRX_dynamic = QSplitter(Qt.Vertical)
@@ -202,7 +201,6 @@ class DdacWidget:
         host.btn_time_arg.setCheckable(True)
         host.btn_time_arg.setChecked(False)
 
-
     def _connect_drx_events(self) -> None:
         host = self._drx_container
         host.ax_P.scene().sigMouseClicked.connect(
@@ -268,7 +266,7 @@ class DdacWidget:
 
     def add_to_layout(self, grid_layout) -> None:
         """Add the ddac widgets to the provided grid layout."""
-        grid_layout.addWidget(self._drx_container.ddac_box, 0, 3, 4, 2)
+        grid_layout.addWidget(self._drx_container.ddac_box, 0, 3, 4, 1)
 
     def add_control_widget(self, widget) -> None:
         """Append an external dDAC toggle to the compact dDAC menu."""
