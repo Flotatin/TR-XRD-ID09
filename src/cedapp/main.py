@@ -2112,7 +2112,10 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         self._update_help_button_color(visible)
 
     def _on_gauge_panel_dialog_closed(self) -> None:
-        """Re-dock the right panel and reset the undock toggle when dialog closes."""
+        """Re-dock the Zoom/Print overlay and reset the undock toggle when dialog closes."""
+        spectrum_section = getattr(self.ui_state, "spectrum_section_widget", None)
+        if spectrum_section is not None and not spectrum_section.is_right_panel_docked():
+            spectrum_section.dock_right_panel()
         undock_btn = getattr(self.ui_state, "undock_panel_button", None)
         if undock_btn is not None and undock_btn.isChecked():
             undock_btn.blockSignals(True)
@@ -2128,7 +2131,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         if undocked:
             if self._gauge_panel_dialog is None:
                 dialog = QDialog(self)
-                dialog.setWindowTitle("Gauge and zoom panel")
+                dialog.setWindowTitle("Zoom / Print détaché")
                 dialog_layout = QVBoxLayout(dialog)
                 dialog_layout.setContentsMargins(8, 8, 8, 8)
                 dialog.finished.connect(lambda _result: self._on_gauge_panel_dialog_closed())
@@ -3790,6 +3793,23 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         layout.addWidget(plate_widget, 4)
 
         spectrum_section.set_zoom_replacement_widget(self.print_plate_window)
+
+
+    def set_zoom_print_overlay_visible(self, visible: bool) -> None:
+        """Show or hide the in-spectrum Zoom/Print display."""
+
+        spectrum_section = getattr(self.ui_state, "spectrum_section_widget", None)
+        if spectrum_section is None:
+            return
+        spectrum_section.set_overlay_visible(visible)
+        if not visible:
+            for action_name in ("right_view_zoom_action", "right_view_print_action"):
+                action = getattr(self.ui_state, action_name, None)
+                if action is None:
+                    continue
+                action.blockSignals(True)
+                action.setChecked(False)
+                action.blockSignals(False)
 
     def show_print_plate(self, visible: Optional[bool] = None) -> None:
         spectrum_section = getattr(self.ui_state, "spectrum_section_widget", None)

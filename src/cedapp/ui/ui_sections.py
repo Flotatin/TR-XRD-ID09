@@ -438,8 +438,9 @@ def build_gauge_section(window) -> None:
 
     state = window.ui_state
     add_box = QGroupBox("Gauge information")
-    layout = QVBoxLayout()
+    layout = QHBoxLayout()
 
+    gauge_layout = QVBoxLayout()
     layh4 = QHBoxLayout()
     layh4.addWidget(QLabel("P="), alignment=Qt.AlignRight)
     state.spinbox_P = QDoubleSpinBox()
@@ -459,7 +460,6 @@ def build_gauge_section(window) -> None:
     layh4.addWidget(state.spinbox_T)
     layh4.addWidget(QLabel("K"))
     window.deltalambdaT = 0
-    layout.addLayout(layh4)
 
     state.apply_temp_all_gauges_checkbox = QCheckBox("TAll")
     state.apply_temp_all_gauges_checkbox.setChecked(False)
@@ -468,34 +468,14 @@ def build_gauge_section(window) -> None:
     state.pt_solver_pfix_checkbox = QCheckBox("Pfix")
     state.pt_solver_pfix_checkbox.setChecked(False)
     layh4.addWidget(state.pt_solver_pfix_checkbox)
-
+    gauge_layout.addLayout(layh4)
 
     state.listbox_pic = QListWidget()
     state.listbox_pic.doubleClicked.connect(window.select_pic)
-    layout.addWidget(state.listbox_pic)
-    add_box.setLayout(layout)
-    
-    state.right_view_tabs = QTabWidget(window)
-    state.right_view_tabs.setDocumentMode(True)
-    state.right_view_tabs.setUsesScrollButtons(False)
-    state.right_view_tabs.addTab(QWidget(), "Zoom")
-    state.right_view_tabs.addTab(QWidget(), "Print")
-    state.right_view_tabs.currentChanged.connect(window.on_right_view_tab_changed)
-    layout.addWidget(state.right_view_tabs)
+    gauge_layout.addWidget(state.listbox_pic)
+    layout.addLayout(gauge_layout, 2)
 
-    panel_menu_button = make_menu_button("Panneau ▾", window)
-    panel_menu = panel_menu_button.menu()
-    add_menu_action(panel_menu, "Afficher le zoom", lambda: state.right_view_tabs.setCurrentIndex(0))
-    add_menu_action(panel_menu, "Afficher le print", lambda: state.right_view_tabs.setCurrentIndex(1))
-    panel_menu.addSeparator()
-    state.undock_panel_button = add_check_menu_action(
-        panel_menu, "Détacher le panneau jauges", False, window.toggle_gauge_panel_dock
-    )
-    layout.addWidget(panel_menu_button)
-
-    window.ensure_print_plate_widget()
-
-
+    control_layout = QVBoxLayout()
     parampic_box = QGroupBox("Model peak")
     state.ParampicLayout = QVBoxLayout()
     state.fit_param_widget = FitParamWidget(window)
@@ -515,50 +495,55 @@ def build_gauge_section(window) -> None:
     state.model_pic_type_selector.currentIndexChanged.connect(window.f_model_pic_type)
     state.ParampicLayout.addWidget(state.model_pic_type_selector)
     state.model_pic_fit = state.model_pic_type_selector.currentText()
-    
 
     state.spinbox_sigma = QDoubleSpinBox()
     state.spinbox_sigma.valueChanged.connect(window.setFocus)
     state.spinbox_sigma.valueChanged.connect(
         lambda _value: window._update_fit_window() if getattr(window, "index_pic_select", None) is not None else None
     )
-    
+
     state.spinbox_sigma.setRange(0.01, 10)
     state.spinbox_sigma.setSingleStep(0.01)
     state.spinbox_sigma.setValue(0.15)
     state.ParampicLayout.addLayout(creat_spin_label(state.spinbox_sigma, "σ :"))
 
     parampic_box.setLayout(state.ParampicLayout)
-    layout.addWidget(parampic_box)
+    control_layout.addWidget(parampic_box)
 
-    bottom_action_layout = QHBoxLayout()
-    view_menu_button = make_menu_button("Vue ▾", window)
-    view_menu = view_menu_button.menu()
-
-    def select_right_view(show_print: bool):
-        window.show_print_plate(show_print)
-
-    state.right_view_zoom_action = add_check_menu_action(
-        view_menu, "Zoom", True, lambda _checked: select_right_view(False)
+    view_buttons_layout = QHBoxLayout()
+    state.right_view_zoom_action = QPushButton("Zoom", window)
+    state.right_view_zoom_action.setCheckable(True)
+    state.right_view_zoom_action.setChecked(True)
+    state.right_view_zoom_action.clicked.connect(
+        lambda checked: window.show_print_plate(False) if checked else window.set_zoom_print_overlay_visible(False)
     )
-    state.right_view_print_action = add_check_menu_action(
-        view_menu, "Print", False, lambda _checked: select_right_view(True)
-    )
-    bottom_action_layout.addWidget(view_menu_button)
+    view_buttons_layout.addWidget(state.right_view_zoom_action)
 
-    panel_menu_button = make_menu_button("Panneau ▾", window)
-    panel_menu = panel_menu_button.menu()
-    state.undock_panel_button = add_check_menu_action(
-        panel_menu, "Détacher le panneau jauges", False, window.toggle_gauge_panel_dock
+    state.right_view_print_action = QPushButton("Print", window)
+    state.right_view_print_action.setCheckable(True)
+    state.right_view_print_action.setChecked(False)
+    state.right_view_print_action.clicked.connect(
+        lambda checked: window.show_print_plate(True) if checked else window.set_zoom_print_overlay_visible(False)
     )
-    bottom_action_layout.addWidget(panel_menu_button)
-    layout.addLayout(bottom_action_layout)
+    view_buttons_layout.addWidget(state.right_view_print_action)
+
+    state.undock_panel_button = QPushButton("Undock", window)
+    state.undock_panel_button.setCheckable(True)
+    state.undock_panel_button.toggled.connect(window.toggle_gauge_panel_dock)
+    view_buttons_layout.addWidget(state.undock_panel_button)
+    control_layout.addLayout(view_buttons_layout)
+    layout.addLayout(control_layout, 1)
+
+    add_box.setLayout(layout)
+
+    window.ensure_print_plate_widget()
 
     window.AddBox = add_box
     if getattr(window.ui_state, "spectrum_section_widget", None) is not None:
         window.ui_state.spectrum_section_widget.add_right_widget(add_box)
     window.bit_modif_PTlambda = False
-    
+    window.bit_modif_PTlambda = False
+
     window.bit_bypass = True
     window.f_model_pic_type()
     window.bit_bypass = False
