@@ -220,11 +220,11 @@ def _method_action(method_name: str) -> Callable[["MainWindow"], None]:
 
 
 def _toggle_checkbox_action(attribute: str) -> Callable[["MainWindow"], None]:
-    """Return a callable toggling the checkbox stored in ``attribute``."""
+    """Return a callable toggling the checkable widget/action stored in ``attribute``."""
 
     def _caller(self: "MainWindow") -> None:
-        checkbox = getattr(self, attribute)
-        checkbox.setChecked(not checkbox.isChecked())
+        control = getattr(self, attribute)
+        control.setChecked(not control.isChecked())
 
     return _caller
 
@@ -401,6 +401,20 @@ KEYBOARD_SHORTCUTS: Dict[Tuple[int, int], Dict[str, Any]] = {
         "category": "Spectrum",
         "requires_box": True,
         "allow_extra_modifiers": True,
+    },
+
+    (Qt.Key_Q, Qt.NoModifier): {
+        "handler": _toggle_checkbox_action("select_clic_box"),
+        "name": "Select clic pic",
+        "description": "Toggle click-to-select peak mode",
+        "category": "Spectrum",
+    },
+
+    (Qt.Key_H, Qt.NoModifier): {
+        "handler": _toggle_checkbox_action("spectrum_select_box"),
+        "name": "Clic spectrum",
+        "description": "Toggle click-to-select spectrum mode",
+        "category": "CEDX",
     },
 
     # ======================
@@ -1460,15 +1474,17 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             super().keyPressEvent(event)
             return
 
-        method_name = action.get("handler")
-        if not method_name:
+        handler = action.get("handler")
+        if not handler:
             return
 
-        if not hasattr(self, method_name):
-            logger.warning("Shortcut method '%s' not found", method_name)
-            return
-
-        method = getattr(self, method_name)
+        if callable(handler):
+            method = lambda: handler(self)
+        else:
+            if not hasattr(self, handler):
+                logger.warning("Shortcut method '%s' not found", handler)
+                return
+            method = getattr(self, handler)
 
         try:
             if action.get("requires_box"):

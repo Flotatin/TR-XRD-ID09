@@ -254,7 +254,7 @@ def build_file_section(window) -> None:
         source_action.toggled.connect(mirror_action.setChecked)
     display_menu.addSeparator()
     for label, checkbox in (
-        ("Sélection pic au clic", getattr(window, "select_clic_box", None)),
+        ("Sélection pic au clic (q)", getattr(window, "select_clic_box", None)),
         ("Zone Fit Spectrum", getattr(window, "zone_spectrum_box", None)),
         ("vslmfit", getattr(window, "vslmfit", None)),
     ):
