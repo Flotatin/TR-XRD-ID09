@@ -2139,15 +2139,25 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             undock_btn.blockSignals(False)
 
     def _sync_view_toolbar(self, show_print: bool) -> None:
-        """Keep the gauge toolbar tabs aligned with the current right-panel view."""
+        """Keep the right-panel view actions aligned with the active Zoom/Print view."""
 
-        tabs = getattr(self.ui_state, "right_view_tabs", None)
-        if tabs is None:
-            return
         target_index = 1 if show_print else 0
-        tabs.blockSignals(True)
-        tabs.setCurrentIndex(target_index)
-        tabs.blockSignals(False)
+        tabs = getattr(self.ui_state, "right_view_tabs", None)
+        if tabs is not None:
+            tabs.blockSignals(True)
+            tabs.setCurrentIndex(target_index)
+            tabs.blockSignals(False)
+
+        for action_name, checked in (
+            ("right_view_zoom_action", not show_print),
+            ("right_view_print_action", show_print),
+        ):
+            action = getattr(self.ui_state, action_name, None)
+            if action is None:
+                continue
+            action.blockSignals(True)
+            action.setChecked(checked)
+            action.blockSignals(False)
 
     def on_right_view_tab_changed(self, tab_index: int) -> None:
         """Switch right panel content from the toolbar tab selection."""
@@ -6127,9 +6137,58 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
 #########################################################################################################################################################################################
 #? COMMANDE UNLOAD
     def save_summary_CED(self):
-        self.RUN.Summary["Time"]=self.RUN.Time_spectrum
-        self.RUN.Summary.to_csv(os.path.basename(self.RUN.CEDd_path), index=False)
-        #self.RUN.Summary.to_csv(os.path.join(self.folder_outpout,CL.os.path.basename(self.RUN.CEDd_path)), index=False)
+        """Export the current CEDX summary after asking for the destination CSV file."""
+
+        if self.RUN is None or getattr(self.RUN, "Summary", None) is None:
+            QMessageBox.warning(self, "Export Summary", "Aucun RUN / Summary à exporter.")
+            return
+
+        summary = self.RUN.Summary.copy()
+        if summary.empty:
+            QMessageBox.warning(self, "Export Summary", "Le Summary est vide.")
+            return
+
+        time_spectrum = getattr(self.RUN, "Time_spectrum", None)
+        if time_spectrum is not None:
+            time_values = np.asarray(time_spectrum)
+            if len(time_values) == len(summary.index):
+                summary["Time"] = time_values
+            else:
+                summary["Time"] = np.nan
+                n_values = min(len(time_values), len(summary.index))
+                if n_values:
+                    summary.loc[summary.index[:n_values], "Time"] = time_values[:n_values]
+
+        run_path = str(getattr(self.RUN, "CEDd_path", "") or "")
+        run_name = os.path.basename(run_path) if run_path and run_path != "not_save" else self._get_cedx_base_name()
+        if run_name.lower().endswith(".cedx"):
+            default_name = run_name[:-5]
+        else:
+            default_name = os.path.splitext(run_name)[0] or "Summary"
+        default_name = f"{default_name}.csv"
+
+        default_folder = ""
+        if run_path and run_path != "not_save":
+            default_folder = os.path.dirname(run_path)
+        if not default_folder:
+            default_folder = self.folder_start or os.getcwd()
+        default_path = os.path.join(default_folder, default_name)
+
+        file_path, _selected_filter = QFileDialog.getSaveFileName(
+            self,
+            "Enregistrer le Summary",
+            default_path,
+            "CSV files (*.csv);;All files (*)",
+        )
+        if not file_path:
+            return
+
+        if not os.path.splitext(file_path)[1]:
+            file_path = f"{file_path}.csv"
+
+        summary.to_csv(file_path, index=False)
+        if getattr(self, "text_box_msg", None) is not None:
+            self.text_box_msg.setText(f"Summary exporté : {file_path}")
         
     
 
