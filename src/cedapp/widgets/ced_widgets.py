@@ -243,13 +243,10 @@ class DdacWidget:
         layhrun.addWidget(host.label_dpdt_smooth)
         layhrun.addWidget(host.spinbox_dpdt_smooth)
 
-        host.ddac_options_button = getattr(host.ui_state, "ddac_menu_button", None)
-        if host.ddac_options_button is None:
-            host.ddac_options_button = make_menu_button("dDAC ▾", self._drx_container)
-            layhrun.addWidget(host.ddac_options_button)
+        host.ddac_options_button = make_menu_button("dDAC ▾", self._drx_container)
         ddac_menu = host.ddac_options_button.menu()
         spectrum_action = add_check_menu_action(
-            ddac_menu, "Clic spectrum (h)", host.spectrum_select_box.isChecked(), host.spectrum_select_box.setChecked
+            ddac_menu, "Clic spectrum", host.spectrum_select_box.isChecked(), host.spectrum_select_box.setChecked
         )
         host.spectrum_select_box.toggled.connect(spectrum_action.setChecked)
         ddac_menu.addSeparator()
@@ -261,7 +258,9 @@ class DdacWidget:
             ddac_menu, "Plage temps", host.btn_time_arg.isChecked(), host.btn_time_arg.setChecked
         )
         host.btn_time_arg.toggled.connect(time_action.setChecked)
-        ddac_menu.addSeparator()
+        layhrun.addWidget(host.ddac_options_button)
+        if getattr(host, "analysis_toggle", None) is not None:
+            layhrun.addWidget(host.analysis_toggle)
         ddac_layout.addLayout(layhrun)
         self._controls_layout = layhrun
 

@@ -105,8 +105,6 @@ class UIState:
     pt_solver_pfix_checkbox: QCheckBox | None = None
     listbox_pic: QListWidget | None = None
     right_view_tabs: QTabWidget | None = None
-    right_view_zoom_action: QAction | None = None
-    right_view_print_action: QAction | None = None
     undock_panel_button: QAction | None = None
 
 
@@ -116,6 +114,30 @@ def build_command_panel(window) -> None:
     state = window.ui_state
     box = QGroupBox("⬩")
     layout = QVBoxLayout()
+
+    state.help_toggle_btn = make_menu_button("Aide ▾", window)
+    help_menu = state.help_toggle_btn.menu()
+    add_menu_action(help_menu, "Afficher / masquer l'aide", window.toggle_help_box)
+    add_menu_action(help_menu, "Paramètres application", window.open_settings_dialog)
+    layout.addWidget(state.help_toggle_btn)
+    
+    state.live_toggle_btn = QPushButton("Live", window)
+    state.live_toggle_btn.setCheckable(True)
+    state.live_toggle_btn.toggled.connect(window.toggle_live_mode)
+    layout.addWidget(state.live_toggle_btn)
+
+    state.jungfrau_mode_box = QComboBox(window)
+    state.jungfrau_mode_box.addItems(["Burst","Continue", "Oscillo"])
+    state.jungfrau_mode_box.currentTextChanged.connect(window.set_jungfrau_mode)
+    layout.addWidget(state.jungfrau_mode_box)
+
+
+    advanced_button = make_menu_button("Avancé ▾", window)
+    advanced_menu = advanced_button.menu()
+    state.clear_btn = add_menu_action(advanced_menu, "Exporter / Save Summary", window.save_summary_CED)
+    advanced_menu.addSeparator()
+    add_menu_action(advanced_menu, "Paramètres application", window.open_settings_dialog)
+    layout.addWidget(advanced_button)
 
     state.help_widget = QWidget()
     state.CommandeLayout = QVBoxLayout()
@@ -196,30 +218,6 @@ def build_file_section(window) -> None:
     state.file_label_oscilo = QLabel("init", window)
     row_layout.addWidget(state.file_label_oscilo)
 
-    state.help_toggle_btn = make_menu_button("Aide ▾", window)
-    help_menu = state.help_toggle_btn.menu()
-    add_menu_action(help_menu, "Afficher / masquer l'aide", window.toggle_help_box)
-    add_menu_action(help_menu, "Paramètres application", window.open_settings_dialog)
-    row_layout.addWidget(state.help_toggle_btn)
-    window._update_help_button_color(state.help_tab_visible)
-
-    state.live_toggle_btn = QPushButton("Live", window)
-    state.live_toggle_btn.setCheckable(True)
-    state.live_toggle_btn.toggled.connect(window.toggle_live_mode)
-    row_layout.addWidget(state.live_toggle_btn)
-
-    state.jungfrau_mode_box = QComboBox(window)
-    state.jungfrau_mode_box.addItems(["Burst", "Continue", "Oscillo"])
-    state.jungfrau_mode_box.currentTextChanged.connect(window.set_jungfrau_mode)
-    row_layout.addWidget(state.jungfrau_mode_box)
-
-    advanced_button = make_menu_button("Avancé ▾", window)
-    advanced_menu = advanced_button.menu()
-    state.clear_btn = add_menu_action(advanced_menu, "Exporter / Save Summary", window.save_summary_CED)
-    advanced_menu.addSeparator()
-    add_menu_action(advanced_menu, "Paramètres application", window.open_settings_dialog)
-    row_layout.addWidget(advanced_button)
-
     file_menu_button = make_menu_button("Fichier ▾", window)
     file_menu = file_menu_button.menu()
     add_menu_action(file_menu, "Sélectionner un dossier…", window.select_folder_dict)
@@ -255,7 +253,7 @@ def build_file_section(window) -> None:
         source_action.toggled.connect(mirror_action.setChecked)
     display_menu.addSeparator()
     for label, checkbox in (
-        ("Sélection pic au clic (q)", getattr(window, "select_clic_box", None)),
+        ("Sélection pic au clic", getattr(window, "select_clic_box", None)),
         ("Zone Fit Spectrum", getattr(window, "zone_spectrum_box", None)),
         ("vslmfit", getattr(window, "vslmfit", None)),
     ):
@@ -483,9 +481,17 @@ def build_gauge_section(window) -> None:
     state.right_view_tabs.addTab(QWidget(), "Zoom")
     state.right_view_tabs.addTab(QWidget(), "Print")
     state.right_view_tabs.currentChanged.connect(window.on_right_view_tab_changed)
-    # Zoom/Print is controlled from the bottom action row; keep this tab
-    # object only as the internal state holder used by existing view logic.
-    state.right_view_tabs.setVisible(False)
+    layout.addWidget(state.right_view_tabs)
+
+    panel_menu_button = make_menu_button("Panneau ▾", window)
+    panel_menu = panel_menu_button.menu()
+    add_menu_action(panel_menu, "Afficher le zoom", lambda: state.right_view_tabs.setCurrentIndex(0))
+    add_menu_action(panel_menu, "Afficher le print", lambda: state.right_view_tabs.setCurrentIndex(1))
+    panel_menu.addSeparator()
+    state.undock_panel_button = add_check_menu_action(
+        panel_menu, "Détacher le panneau jauges", False, window.toggle_gauge_panel_dock
+    )
+    layout.addWidget(panel_menu_button)
 
     window.ensure_print_plate_widget()
 
@@ -524,6 +530,29 @@ def build_gauge_section(window) -> None:
 
     parampic_box.setLayout(state.ParampicLayout)
     layout.addWidget(parampic_box)
+
+    bottom_action_layout = QHBoxLayout()
+    view_menu_button = make_menu_button("Vue ▾", window)
+    view_menu = view_menu_button.menu()
+
+    def select_right_view(show_print: bool):
+        window.show_print_plate(show_print)
+
+    state.right_view_zoom_action = add_check_menu_action(
+        view_menu, "Zoom", True, lambda _checked: select_right_view(False)
+    )
+    state.right_view_print_action = add_check_menu_action(
+        view_menu, "Print", False, lambda _checked: select_right_view(True)
+    )
+    bottom_action_layout.addWidget(view_menu_button)
+
+    panel_menu_button = make_menu_button("Panneau ▾", window)
+    panel_menu = panel_menu_button.menu()
+    state.undock_panel_button = add_check_menu_action(
+        panel_menu, "Détacher le panneau jauges", False, window.toggle_gauge_panel_dock
+    )
+    bottom_action_layout.addWidget(panel_menu_button)
+    layout.addLayout(bottom_action_layout)
 
     window.AddBox = add_box
     if getattr(window.ui_state, "spectrum_section_widget", None) is not None:
