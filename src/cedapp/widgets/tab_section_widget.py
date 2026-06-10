@@ -2,22 +2,9 @@
 
 from __future__ import annotations
 
-from PyQt5.QtWidgets import (
-    QCheckBox,
-    QTabWidget,
-    QToolBar,
-    QVBoxLayout,
-    QWidget,
-    QLabel,
-    QLineEdit,
-    QPushButton,
-    QVBoxLayout,
-    QWidget,
-)
-
-
 from PyQt5.QtGui import QColor
 from PyQt5.QtWidgets import (
+    QAction,
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
@@ -26,12 +13,13 @@ from PyQt5.QtWidgets import (
     QLineEdit,
     QPushButton,
     QSpinBox,
-    QToolBar,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
 from .helpers import creat_spin_label
+from .menu_helpers import add_check_menu_action, add_menu_action, make_menu_button
 
 try:
     import matplotlib.cm as cm
@@ -50,13 +38,11 @@ class SampleWidget(QWidget):
         #name = QLabel("Gauge section - - -")
         #layout.addWidget(name)
 
-        main.folder_bib_gauge = QPushButton("Add element", main)
-        main.folder_bib_gauge.clicked.connect(main.f_select_bib_gauge)
-        layout.addWidget(main.folder_bib_gauge)
-
-        main.edit_bib_gauge = QPushButton("Edit element", main)
-        main.edit_bib_gauge.clicked.connect(main.f_edit_gauge)
-        layout.addWidget(main.edit_bib_gauge)
+        gauge_menu_button = make_menu_button("Bibliothèque jauges ▾", main)
+        gauge_menu = gauge_menu_button.menu()
+        main.folder_bib_gauge = add_menu_action(gauge_menu, "Ajouter un élément", main.f_select_bib_gauge)
+        main.edit_bib_gauge = add_menu_action(gauge_menu, "Éditer un élément", main.f_edit_gauge)
+        layout.addWidget(gauge_menu_button)
 
         if cm and mcolors:
             main.gauge_colors = [mcolors.to_hex(cm.get_cmap("tab10")(i)) for i in range(10)]
@@ -335,25 +321,19 @@ class FitSelectWidget(QWidget):
         super().__init__()
         layout = QVBoxLayout()
         
-        main.add_btn = QPushButton("add")
-        main.add_btn.clicked.connect(main.ajouter_zone)
-        layout.addWidget(main.add_btn)
-
-        main.remove_btn = QPushButton("dell")
-        main.remove_btn.clicked.connect(main.supprimer_zone)
+        fit_actions_button = make_menu_button("Actions fit ▾", main)
+        fit_actions_menu = fit_actions_button.menu()
+        main.add_btn = add_menu_action(fit_actions_menu, "Ajouter une zone", main.ajouter_zone)
+        main.remove_btn = add_menu_action(fit_actions_menu, "Supprimer la zone", main.supprimer_zone)
         main.remove_btn.setEnabled(False)
-        layout.addWidget(main.remove_btn)
-        
-        main.multi_spec_toolbar = QToolBar()
-        main.multi_spec_action = main.multi_spec_toolbar.addAction("Multi")
-        main.multi_spec_action.setCheckable(True)
-        main.multi_spec_action.setChecked(False)
-        main.multi_spec_action.toggled.connect(main.set_ddac_multi_zone_visibility)
-        main.spec_zone_action = main.multi_spec_toolbar.addAction("Spec")
-        main.spec_zone_action.setCheckable(True)
-        main.spec_zone_action.setChecked(False)
-        main.spec_zone_action.toggled.connect(main.set_find_peaks_zones_visibility)
-        layout.addWidget(main.multi_spec_toolbar)
+        fit_actions_menu.addSeparator()
+        main.multi_spec_action = add_check_menu_action(
+            fit_actions_menu, "Zone multi dDAC", False, main.set_ddac_multi_zone_visibility
+        )
+        main.spec_zone_action = add_check_menu_action(
+            fit_actions_menu, "Zones spectre", False, main.set_find_peaks_zones_visibility
+        )
+        layout.addWidget(fit_actions_button)
 
 
         main.index_start_entry = QSpinBox()
@@ -368,13 +348,8 @@ class FitSelectWidget(QWidget):
         main.index_stop_entry.valueChanged.connect(main._refresh_batch_range_cache)
         layout.addLayout(creat_spin_label(main.index_stop_entry, "idx stop"))
 
-        main.fit_select_button = QPushButton("Find Compo")
-        main.fit_select_button.clicked.connect(main._CEDX_auto_compo)
-        layout.addWidget(main.fit_select_button)
-
-        main.multi_fit_button = QPushButton("Multi fit")
-        main.multi_fit_button.clicked.connect(main._CEDX_multi_fit)
-        layout.addWidget(main.multi_fit_button)
+        add_menu_action(fit_actions_menu, "Find Compo", main._CEDX_auto_compo)
+        add_menu_action(fit_actions_menu, "Multi fit", main._CEDX_multi_fit)
 
         main.skip_ui_update_checkbox = QCheckBox(
             "no refresh"
@@ -385,9 +360,10 @@ class FitSelectWidget(QWidget):
         main.skip_ui_update_checkbox.toggled.connect(main._set_skip_ui_update)
         layout.addWidget(main.skip_ui_update_checkbox)
 
-        main.clear_gauges_button = QPushButton("remove gauges")
-        main.clear_gauges_button.clicked.connect(main.clear_gauges_range)
-        layout.addWidget(main.clear_gauges_button)
+        fit_actions_menu.addSeparator()
+        main.clear_gauges_button = add_menu_action(
+            fit_actions_menu, "Supprimer les jauges sur la plage", main.clear_gauges_range
+        )
 
 
         self.setLayout(layout)
@@ -401,19 +377,18 @@ class TabSectionWidget(QWidget):
         layout = QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
 
-        main.spectrum_toolbar = QToolBar()
-        main.act_show_raw = main.spectrum_toolbar.addAction("brut")
+        main.act_show_raw = QAction("brut", main)
         main.act_show_raw.setCheckable(True)
         main.act_show_raw.setChecked(False)
-        main.act_show_filtered = main.spectrum_toolbar.addAction("filtré")
+        main.act_show_filtered = QAction("filtré", main)
         main.act_show_filtered.setCheckable(True)
         main.act_show_filtered.setChecked(False)
-        main.act_show_baseline = main.spectrum_toolbar.addAction("baseline")
+        main.act_show_baseline = QAction("baseline", main)
         main.act_show_baseline.setCheckable(True)
         main.act_show_baseline.setChecked(False)
-        main.act_show_raw.triggered.connect(main.update_spectrum_overlays)
-        main.act_show_filtered.triggered.connect(main.update_spectrum_overlays)
-        main.act_show_baseline.triggered.connect(main.update_spectrum_overlays)
+        main.act_show_raw.toggled.connect(lambda _checked: main.update_spectrum_overlays())
+        main.act_show_filtered.toggled.connect(lambda _checked: main.update_spectrum_overlays())
+        main.act_show_baseline.toggled.connect(lambda _checked: main.update_spectrum_overlays())
 
         main.widget_baseline = BaselineWidget(main)
         main.widget_baseline.setVisible(True)
@@ -424,7 +399,6 @@ class TabSectionWidget(QWidget):
         main.data_processing_tab = QWidget()
         data_processing_layout = QVBoxLayout()
         data_processing_layout.setContentsMargins(0, 0, 0, 0)
-        data_processing_layout.addWidget(main.spectrum_toolbar)
         data_processing_layout.addWidget(main.widget_baseline)
         data_processing_layout.addWidget(main.widget_filtre)
         main.data_processing_tab.setLayout(data_processing_layout)

@@ -7,9 +7,8 @@ import pyqtgraph as pg
 from pyqtgraph import GraphicsLayoutWidget
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
-    QCheckBox,
+    QAction,
     QGroupBox,
-    QHBoxLayout,
     QSizePolicy,
     QSplitter,
     QVBoxLayout,
@@ -178,24 +177,25 @@ class SpectrumSectionWidget:
 
         main.init_session_vars()
 
-        layout_check = QHBoxLayout()
-        main.select_clic_box = QCheckBox("Select clic pic (q)", main)
+        # Interaction toggles are intentionally kept as menu-backed actions instead
+        # of visible checkboxes; the visible control surface is built in the
+        # Affichage menu from ui_sections.build_file_section.
+        main.select_clic_box = QAction("Select clic pic (q)", main)
+        main.select_clic_box.setCheckable(True)
         main.select_clic_box.setChecked(True)
-        layout_check.addWidget(main.select_clic_box)
 
-        main.zone_spectrum_box = QCheckBox("Zone Fit Spectrum (Z)", main)
+        main.zone_spectrum_box = QAction("Zone Fit Spectrum (Z)", main)
+        main.zone_spectrum_box.setCheckable(True)
         main.zone_spectrum_box.setChecked(True)
         main.zone_spectrum_box.toggled.connect(main._refresh_fit_context_cache)
-        layout_check.addWidget(main.zone_spectrum_box)
 
-        main.vslmfit = QCheckBox("vslmfit", main)
+        main.vslmfit = QAction("vslmfit", main)
+        main.vslmfit.setCheckable(True)
         main.vslmfit.setChecked(False)
         main.vslmfit.toggled.connect(main._refresh_fit_context_cache)
-        layout_check.addWidget(main.vslmfit)
-
-        main.spectra_layout.addLayout(layout_check)
 
         self.dhkl_box = QGroupBox("dhkl")
+        self.dhkl_box.setMaximumWidth(180)
         main.layout_dhkl = QVBoxLayout()
         self.dhkl_box.setLayout(main.layout_dhkl)
 

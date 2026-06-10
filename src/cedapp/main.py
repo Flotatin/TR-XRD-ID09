@@ -220,11 +220,11 @@ def _method_action(method_name: str) -> Callable[["MainWindow"], None]:
 
 
 def _toggle_checkbox_action(attribute: str) -> Callable[["MainWindow"], None]:
-    """Return a callable toggling the checkbox stored in ``attribute``."""
+    """Return a callable toggling the checkable widget/action stored in ``attribute``."""
 
     def _caller(self: "MainWindow") -> None:
-        checkbox = getattr(self, attribute)
-        checkbox.setChecked(not checkbox.isChecked())
+        control = getattr(self, attribute)
+        control.setChecked(not control.isChecked())
 
     return _caller
 
@@ -401,6 +401,20 @@ KEYBOARD_SHORTCUTS: Dict[Tuple[int, int], Dict[str, Any]] = {
         "category": "Spectrum",
         "requires_box": True,
         "allow_extra_modifiers": True,
+    },
+
+    (Qt.Key_Q, Qt.NoModifier): {
+        "handler": _toggle_checkbox_action("select_clic_box"),
+        "name": "Select clic pic",
+        "description": "Toggle click-to-select peak mode",
+        "category": "Spectrum",
+    },
+
+    (Qt.Key_H, Qt.NoModifier): {
+        "handler": _toggle_checkbox_action("spectrum_select_box"),
+        "name": "Clic spectrum",
+        "description": "Toggle click-to-select spectrum mode",
+        "category": "CEDX",
     },
 
     # ======================
@@ -1391,9 +1405,10 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
     def _finalize_layout(self) -> None:
         """Apply stretch factors to the main grid layout."""
 
-        self.grid_layout.setColumnStretch(0, 1)
-        self.grid_layout.setColumnStretch(1, 1)
-        self.grid_layout.setColumnStretch(2, 6)
+        self.grid_layout.setColumnStretch(0, 0)
+        self.grid_layout.setColumnStretch(1, 0)
+        self.grid_layout.setColumnStretch(2, 7)
+        self.grid_layout.setColumnStretch(3, 4)
         self.grid_layout.setColumnStretch(4, 4)
         self.grid_layout.setRowStretch(0, 5)
         self.grid_layout.setRowStretch(1, 1)
@@ -1460,15 +1475,17 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             super().keyPressEvent(event)
             return
 
-        method_name = action.get("handler")
-        if not method_name:
+        handler = action.get("handler")
+        if not handler:
             return
 
-        if not hasattr(self, method_name):
-            logger.warning("Shortcut method '%s' not found", method_name)
-            return
-
-        method = getattr(self, method_name)
+        if callable(handler):
+            method = lambda: handler(self)
+        else:
+            if not hasattr(self, handler):
+                logger.warning("Shortcut method '%s' not found", handler)
+                return
+            method = getattr(self, handler)
 
         try:
             if action.get("requires_box"):
@@ -2139,15 +2156,25 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             undock_btn.blockSignals(False)
 
     def _sync_view_toolbar(self, show_print: bool) -> None:
-        """Keep the gauge toolbar tabs aligned with the current right-panel view."""
+        """Keep the right-panel view actions aligned with the active Zoom/Print view."""
 
-        tabs = getattr(self.ui_state, "right_view_tabs", None)
-        if tabs is None:
-            return
         target_index = 1 if show_print else 0
-        tabs.blockSignals(True)
-        tabs.setCurrentIndex(target_index)
-        tabs.blockSignals(False)
+        tabs = getattr(self.ui_state, "right_view_tabs", None)
+        if tabs is not None:
+            tabs.blockSignals(True)
+            tabs.setCurrentIndex(target_index)
+            tabs.blockSignals(False)
+
+        for action_name, checked in (
+            ("right_view_zoom_action", not show_print),
+            ("right_view_print_action", show_print),
+        ):
+            action = getattr(self.ui_state, action_name, None)
+            if action is None:
+                continue
+            action.blockSignals(True)
+            action.setChecked(checked)
+            action.blockSignals(False)
 
     def on_right_view_tab_changed(self, tab_index: int) -> None:
         """Switch right panel content from the toolbar tab selection."""
@@ -6127,9 +6154,58 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
 #########################################################################################################################################################################################
 #? COMMANDE UNLOAD
     def save_summary_CED(self):
-        self.RUN.Summary["Time"]=self.RUN.Time_spectrum
-        self.RUN.Summary.to_csv(os.path.basename(self.RUN.CEDd_path), index=False)
-        #self.RUN.Summary.to_csv(os.path.join(self.folder_outpout,CL.os.path.basename(self.RUN.CEDd_path)), index=False)
+        """Export the current CEDX summary after asking for the destination CSV file."""
+
+        if self.RUN is None or getattr(self.RUN, "Summary", None) is None:
+            QMessageBox.warning(self, "Export Summary", "Aucun RUN / Summary à exporter.")
+            return
+
+        summary = self.RUN.Summary.copy()
+        if summary.empty:
+            QMessageBox.warning(self, "Export Summary", "Le Summary est vide.")
+            return
+
+        time_spectrum = getattr(self.RUN, "Time_spectrum", None)
+        if time_spectrum is not None:
+            time_values = np.asarray(time_spectrum)
+            if len(time_values) == len(summary.index):
+                summary["Time"] = time_values
+            else:
+                summary["Time"] = np.nan
+                n_values = min(len(time_values), len(summary.index))
+                if n_values:
+                    summary.loc[summary.index[:n_values], "Time"] = time_values[:n_values]
+
+        run_path = str(getattr(self.RUN, "CEDd_path", "") or "")
+        run_name = os.path.basename(run_path) if run_path and run_path != "not_save" else self._get_cedx_base_name()
+        if run_name.lower().endswith(".cedx"):
+            default_name = run_name[:-5]
+        else:
+            default_name = os.path.splitext(run_name)[0] or "Summary"
+        default_name = f"{default_name}.csv"
+
+        default_folder = ""
+        if run_path and run_path != "not_save":
+            default_folder = os.path.dirname(run_path)
+        if not default_folder:
+            default_folder = self.folder_start or os.getcwd()
+        default_path = os.path.join(default_folder, default_name)
+
+        file_path, _selected_filter = QFileDialog.getSaveFileName(
+            self,
+            "Enregistrer le Summary",
+            default_path,
+            "CSV files (*.csv);;All files (*)",
+        )
+        if not file_path:
+            return
+
+        if not os.path.splitext(file_path)[1]:
+            file_path = f"{file_path}.csv"
+
+        summary.to_csv(file_path, index=False)
+        if getattr(self, "text_box_msg", None) is not None:
+            self.text_box_msg.setText(f"Summary exporté : {file_path}")
         
     
 

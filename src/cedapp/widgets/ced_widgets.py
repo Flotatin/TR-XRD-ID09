@@ -8,16 +8,17 @@ import pyqtgraph as pg
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont
 from PyQt5.QtWidgets import (
-    QCheckBox,
+    QAction,
     QGroupBox,
     QComboBox,
     QHBoxLayout,
     QLabel,
-    QPushButton,
     QSplitter,
     QVBoxLayout,
     QSpinBox,
 )
+
+from .menu_helpers import add_check_menu_action, make_menu_button
 
 
 class DdacWidget:
@@ -167,7 +168,8 @@ class DdacWidget:
         host.label_CED.setFont(QFont("Arial", 6))
         host.label_CED.setMaximumHeight(100)
 
-        host.spectrum_select_box = QCheckBox("clic spectrum (h)", self._drx_container )
+        host.spectrum_select_box = QAction("clic spectrum (h)", self._drx_container)
+        host.spectrum_select_box.setCheckable(True)
         host.spectrum_select_box.setChecked(True)
         
         host.analysis_toggle = None
@@ -193,10 +195,10 @@ class DdacWidget:
             "UnivariateSpline(time,pressures,s=smooth) pour lisser la courbe moyenne dP/dt."
         )
 
-        host.btn_zone_dpdt = QPushButton("Zone dP/dt", self._drx_container)
+        host.btn_zone_dpdt = QAction("Zone dP/dt", self._drx_container)
         host.btn_zone_dpdt.setCheckable(True)
         host.btn_zone_dpdt.setChecked(False)
-        host.btn_time_arg = QPushButton("Plage temps", self._drx_container)
+        host.btn_time_arg = QAction("Plage temps", self._drx_container)
         host.btn_time_arg.setCheckable(True)
         host.btn_time_arg.setChecked(False)
 
@@ -234,17 +236,32 @@ class DdacWidget:
 
         layhrun = QHBoxLayout()
         layhrun.addWidget(host.label_CED)
-        layhrun.addWidget(host.spectrum_select_box)
         layhrun.addWidget(host.label_plot_metric)
         layhrun.addWidget(host.cedx_metric_combo)
         layhrun.addWidget(host.label_dpdt_points)
         layhrun.addWidget(host.spinbox_dpdt_points)
         layhrun.addWidget(host.label_dpdt_smooth)
         layhrun.addWidget(host.spinbox_dpdt_smooth)
-        layhrun.addWidget(host.btn_zone_dpdt)
-        layhrun.addWidget(host.btn_time_arg)
-        if getattr(host, "analysis_toggle", None) is not None:
-            layhrun.addWidget(host.analysis_toggle)
+
+        host.ddac_options_button = getattr(host.ui_state, "ddac_menu_button", None)
+        if host.ddac_options_button is None:
+            host.ddac_options_button = make_menu_button("dDAC ▾", self._drx_container)
+            layhrun.addWidget(host.ddac_options_button)
+        ddac_menu = host.ddac_options_button.menu()
+        spectrum_action = add_check_menu_action(
+            ddac_menu, "Clic spectrum (h)", host.spectrum_select_box.isChecked(), host.spectrum_select_box.setChecked
+        )
+        host.spectrum_select_box.toggled.connect(spectrum_action.setChecked)
+        ddac_menu.addSeparator()
+        zone_action = add_check_menu_action(
+            ddac_menu, "Zone dP/dt", host.btn_zone_dpdt.isChecked(), host.btn_zone_dpdt.setChecked
+        )
+        host.btn_zone_dpdt.toggled.connect(zone_action.setChecked)
+        time_action = add_check_menu_action(
+            ddac_menu, "Plage temps", host.btn_time_arg.isChecked(), host.btn_time_arg.setChecked
+        )
+        host.btn_time_arg.toggled.connect(time_action.setChecked)
+        ddac_menu.addSeparator()
         ddac_layout.addLayout(layhrun)
         self._controls_layout = layhrun
 
@@ -255,10 +272,18 @@ class DdacWidget:
         grid_layout.addWidget(self._drx_container.ddac_box, 0, 3, 4, 2)
 
     def add_control_widget(self, widget) -> None:
-        """Append a control widget to the ddac control row."""
+        """Append an external dDAC toggle to the compact dDAC menu."""
+
         if widget is None:
             return
-        layout = getattr(self, "_controls_layout", None)
-        if layout is None:
+        button = getattr(self._drx_container, "ddac_options_button", None)
+        if button is None:
+            layout = getattr(self, "_controls_layout", None)
+            if layout is None:
+                return
+            layout.addWidget(widget)
             return
-        layout.addWidget(widget)
+
+        text = widget.text() if hasattr(widget, "text") and widget.text() else "Option"
+        action = add_check_menu_action(button.menu(), text, widget.isChecked(), widget.setChecked)
+        widget.toggled.connect(action.setChecked)
