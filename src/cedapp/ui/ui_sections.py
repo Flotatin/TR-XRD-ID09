@@ -510,6 +510,29 @@ def build_gauge_section(window) -> None:
     parampic_box.setLayout(state.ParampicLayout)
     layout.addWidget(parampic_box)
 
+    bottom_action_layout = QHBoxLayout()
+    view_menu_button = make_menu_button("Vue ▾", window)
+    view_menu = view_menu_button.menu()
+
+    def select_right_view(show_print: bool):
+        window.show_print_plate(show_print)
+
+    state.right_view_zoom_action = add_check_menu_action(
+        view_menu, "Zoom", True, lambda _checked: select_right_view(False)
+    )
+    state.right_view_print_action = add_check_menu_action(
+        view_menu, "Print", False, lambda _checked: select_right_view(True)
+    )
+    bottom_action_layout.addWidget(view_menu_button)
+
+    panel_menu_button = make_menu_button("Panneau ▾", window)
+    panel_menu = panel_menu_button.menu()
+    state.undock_panel_button = add_check_menu_action(
+        panel_menu, "Détacher le panneau jauges", False, window.toggle_gauge_panel_dock
+    )
+    bottom_action_layout.addWidget(panel_menu_button)
+    layout.addLayout(bottom_action_layout)
+
     window.AddBox = add_box
     if getattr(window.ui_state, "spectrum_section_widget", None) is not None:
         window.ui_state.spectrum_section_widget.add_right_widget(add_box)
