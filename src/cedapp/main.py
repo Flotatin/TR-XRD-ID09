@@ -11,36 +11,17 @@ import numpy as np
 import ast
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
-from PyQt5.QtWidgets import (QApplication,
-                             QSizePolicy,
-                             QMainWindow,
-                             QLabel,
-                             QPushButton,
-                             QFileDialog,
-                             QGridLayout,
-                             QWidget,
-                             QTableWidget,
-                             QComboBox,
-                             QVBoxLayout,
-                             QHBoxLayout,
-                             QTableWidgetItem,
-                             QDoubleSpinBox,
-                             QGroupBox,
-                             QTableView,
-                             QStyledItemDelegate,
-                             QTabWidget,
-                             QLineEdit,
-                             QMessageBox,
-                             QCheckBox,
-                             QListWidget,
-                             QTextEdit,
-                             QSpinBox,
-                             QDialog,
-                             QDesktopWidget,
-                             QToolButton,
-                             QAbstractItemView,
-                            QInputDialog,
-                             )
+from PyQt5.QtWidgets import (
+    QApplication,
+    QMainWindow,
+    QFileDialog,
+    QWidget,
+    QTableWidgetItem,
+    QTabWidget,
+    QMessageBox,
+    QDialog,
+    QInputDialog,
+)
 
 try:
     from PyQt5.QtWidgets import QProgressBar  # type: ignore
@@ -187,14 +168,11 @@ import Bibli_python
 
 from cedapp.controllers import (
     ANALYSE_COLUMNS,
-    AnalysisController,
     ConfigurationMixin,
-    DdacController,
-    FileSelectionController,
-    GaugeController,
     GaugeLibraryMixin,
-    SpectrumController,
     ensure_analyse_dataframe,
+    initialize_file_selection_controller,
+    initialize_main_controllers,
 )
 
 from cedapp.widgets import (
@@ -536,7 +514,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         self.file_help = str(file_help)
         self.file_variables = str(file_variables)
         
-        self.file_controller = FileSelectionController(self)
+        initialize_file_selection_controller(self)
         self.loaded_drx_scan_name = ""
         self.live_timer = QTimer(self)
         self.live_timer.setInterval(100)
@@ -815,15 +793,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
 
     def _configure_window(self) -> None:
         """Configure the base window layout."""
-
-        self.setWindowTitle("0.1 vXRD © F.Dembele")
-        self.grid_layout = QGridLayout()
-        self.setMinimumSize(1200, 780)
-        self.grid_layout.setContentsMargins(6, 6, 6, 6)
-        self.grid_layout.setSpacing(6)
-        central_widget = QWidget()
-        central_widget.setLayout(self.grid_layout)
-        self.setCentralWidget(central_widget)
+        ui_sections.configure_main_window(self)
 
 
     def _build_file_section(self) -> None:
@@ -939,6 +909,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
     def _build_ddac_section(self) -> None:
         """Create the dDAC plots widget."""
         ui_sections.build_ddac_section(self)
+        ui_sections.populate_ddac_menu(self)
 
     def _build_gauge_section(self) -> None:
         """Initialise widgets related to gauge information."""
@@ -946,75 +917,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
 
     def _init_controllers(self) -> None:
         """Instantiate domain controllers bound to the active widgets."""
-
-        self.ddac_controller = DdacController(self)
-        self.spectrum_controller = SpectrumController(
-            spectrum_getter=lambda: self.Spectrum,
-            run_getter=lambda: self.RUN,
-            ax_spectrum=self.ax_spectrum,
-            remove_button=getattr(self, "remove_btn", None),
-        )
-        self._connect_ddac_multi_zone_signals()
-        self._connect_time_arg_zone_signals()
-        self.gauge_controller = GaugeController(
-            spectrum_getter=lambda: self.Spectrum,
-            gauge_getter=lambda: self.gauge_select,
-            gauge_setter=lambda value: setattr(self, "gauge_select", value),
-            ax_spectrum=self.ax_spectrum,
-            ax_dy=self.ax_dy,
-            layout_dhkl=self.layout_dhkl,
-            lamb0_entry=getattr(self, "lamb0_entry", None),
-            name_spe_entry=getattr(self, "name_spe_entry", None),
-            spinbox_p=self.spinbox_P,
-            spinbox_t=self.spinbox_T,
-            get_bit_modif_PTlambda=lambda: self.bit_modif_PTlambda,
-            set_bit_modif_PTlambda=lambda value: setattr(self, "bit_modif_PTlambda", value),
-            get_bit_load_jauge=lambda: self.bit_load_jauge,
-            get_bit_modif_jauge=lambda: self.bit_modif_jauge,
-            get_index_jauge=lambda: self.index_jauge,
-            set_save_value=lambda value: setattr(self, "save_value", value),
-            run_getter=lambda: self.RUN,
-            library_getter=lambda: getattr(self.ClassDRX, "Bibli_elements", {}),
-            get_apply_temperature_to_all=lambda: bool(
-                getattr(self, "apply_temp_all_gauges_checkbox", None)
-                and self.apply_temp_all_gauges_checkbox.isChecked()
-            ),
-            get_use_fixed_pressure_solver=lambda: bool(
-                getattr(self, "pt_solver_pfix_checkbox", None)
-                and self.pt_solver_pfix_checkbox.isChecked()
-            ),
-            gauge_color_getter=lambda name: self._get_gauge_color(name),
-            cl_module=CL,
-        )
-        self.spinbox_P.valueChanged.connect(self.gauge_controller.handle_spinbox_pt_changed)
-        self.spinbox_T.valueChanged.connect(self.gauge_controller.handle_spinbox_pt_changed)
-        if getattr(self, "pt_solver_pfix_checkbox", None) is not None:
-            self.pt_solver_pfix_checkbox.toggled.connect(self.gauge_controller.update_pt_mode_spinbox_colors)
-            self.pt_solver_pfix_checkbox.toggled.connect(self._on_pt_solver_mode_toggled)
-        self.bit_load_jauge = False
-        self.bit_modif_jauge = False
-
-        self._analysis_overlays = []
-        self.analysis_ctl = None
-        self.cb_piezo_consigne = None
-        if getattr(self, "ax_P", None) is not None:
-            self.analysis_ctl = AnalysisController(
-                self,
-                self.ax_P,
-                dpdt_plot=getattr(self, "ax_dPdt", None),
-                x_axis="time_ms",
-            )
-            self.cb_piezo_consigne = QCheckBox("piézo")
-            self.cb_piezo_consigne.setChecked(True)
-            self.cb_piezo_consigne.toggled.connect(self._set_piezo_setpoint_visible)
-            ddac_widget = getattr(self.ui_state, "ddac_widget", None)
-            if ddac_widget is not None:
-                ddac_widget.add_control_widget(self.analysis_ctl.cb_analysis)
-                ddac_widget.add_control_widget(self.cb_piezo_consigne)
-            else:
-                logger.debug("dDAC widget unavailable for analysis toggle placement.")
-        else:
-            logger.debug("Analysis controller not created: ax_P not available.")
+        initialize_main_controllers(self, CL, logger)
 
     def _set_analysis_overlays_visible(self, visible: bool) -> None:
         """Hook to toggle visibility of additional analysis overlays."""
@@ -2126,12 +2029,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         undock_btn = getattr(self.ui_state, "undock_panel_button", None)
         if undocked:
             if self._gauge_panel_dialog is None:
-                dialog = QDialog(self)
-                dialog.setWindowTitle("Zoom / Print détaché")
-                dialog_layout = QVBoxLayout(dialog)
-                dialog_layout.setContentsMargins(8, 8, 8, 8)
-                dialog.finished.connect(lambda _result: self._on_gauge_panel_dialog_closed())
-                self._gauge_panel_dialog = dialog
+                self._gauge_panel_dialog = ui_sections.create_gauge_panel_dialog(self)
                 
             if spectrum_section.is_right_panel_docked():
                 spectrum_section.undock_right_panel(self._gauge_panel_dialog.layout())
@@ -3262,7 +3160,6 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         pic_exemple=Pics(model_fit=self.model_pic_fit)
         
         for i, coef in enumerate(pic_exemple.name_coef_spe):
-            layh=QHBoxLayout()
             lim_min,lim_max=-10,10
             v_start=1
             if coef == "fraction":            
@@ -3283,17 +3180,9 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
             elif coef=="skew":
                 text="\u03C5"
                 v_start=0
-            coef_label = QLabel(text+":", self)
-            layh.addWidget(coef_label)
-            spinbox_coef = QDoubleSpinBox(self)
-            spinbox_coef.valueChanged.connect(self.setFocus)
-            spinbox_coef.setRange(lim_min, lim_max)
-            spinbox_coef.setSingleStep(0.01)
-            spinbox_coef.setValue(v_start)
-            layh.addWidget(spinbox_coef)
-            self.ParampicLayout.addLayout(layh)
-            self.coef_dynamic_label.append(coef_label)
-            self.coef_dynamic_spinbox.append(spinbox_coef)
+            ui_sections.add_model_peak_coefficient_control(
+                self, text, lim_min, lim_max, v_start
+            )
     
     def _resolve_drx_file_for_print(self) -> str:
         run = getattr(self, "RUN", None)
@@ -3753,42 +3642,7 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
 
     def ensure_print_plate_widget(self) -> None:
         """Create the print-plate replacement widget once during UI initialization."""
-
-        spectrum_section = getattr(self.ui_state, "spectrum_section_widget", None)
-        if spectrum_section is None or self.print_plate_window is not None:
-            return
-
-        self.print_plate_window = QWidget(self)
-        layout = QVBoxLayout(self.print_plate_window)
-        controls_layout = QHBoxLayout()
-        self._print_plate_mode_button = QPushButton("Image", self.print_plate_window)
-        self._print_plate_mode_button.setCheckable(True)
-        self._print_plate_mode_button.clicked.connect(self._on_print_plate_mode_toggled)
-        controls_layout.addWidget(self._print_plate_mode_button)
-        layout.addLayout(controls_layout)
-
-        hist_widget = pg.PlotWidget()
-        hist_plot = hist_widget.getPlotItem()
-        hist_plot.setLabel("left", "Counts")
-        hist_plot.setLabel("bottom", "Pixel value")
-        self._print_plate_hist_curve = pg.PlotDataItem([], [], pen=pg.mkPen("k", width=1))
-        hist_plot.addItem(self._print_plate_hist_curve)
-        self._print_plate_hist_region = pg.LinearRegionItem(values=(0, 1), orientation=pg.LinearRegionItem.Vertical)
-        self._print_plate_hist_region.sigRegionChanged.connect(self._on_print_plate_levels_changed)
-        hist_plot.addItem(self._print_plate_hist_region)
-        layout.addWidget(hist_widget, 1)
-
-        plate_widget = pg.PlotWidget()
-        self.print_plate_plot = plate_widget.getPlotItem()
-        self.print_plate_plot.setLabel("left", "pixel Y")
-        self.print_plate_plot.setLabel("bottom", "pixel X")
-        self.print_plate_plot.invertY(True)
-        self.print_plate_image_item = pg.ImageItem(np.zeros((1, 1), dtype=float))
-        self.print_plate_plot.addItem(self.print_plate_image_item)
-        self.print_plate_plot.scene().sigMouseClicked.connect(self._on_print_plate_clicked)
-        layout.addWidget(plate_widget, 4)
-
-        spectrum_section.set_zoom_replacement_widget(self.print_plate_window)
+        ui_sections.build_print_plate_widget(self)
 
 
     def set_zoom_print_overlay_visible(self, visible: bool) -> None:

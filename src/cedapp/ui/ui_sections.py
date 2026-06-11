@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import matplotlib.colors as mcolors
+import numpy as np
+import pyqtgraph as pg
 
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QColor, QFont
@@ -18,10 +20,13 @@ from PyQt5.QtWidgets import (
     QLineEdit,
     QListWidget,
     QCheckBox,
+    QDialog,
+    QGridLayout,
     QPushButton,
     QTableWidget,
     QTabWidget,
     QTextEdit,
+    QSpinBox,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -80,6 +85,7 @@ class UIState:
     search_bar: QLineEdit | None = None
     main_controls_layout: QHBoxLayout | None = None
     ddac_menu_button: QToolButton | None = None
+    jungfrau_mode_box: QComboBox | None = None
 
     gauge_table: QTableWidget | None = None
     name_gauge: QLabel | None = None
@@ -99,13 +105,122 @@ class UIState:
 
     spectrum_section_widget: SpectrumSectionWidget | None = None
     ddac_widget: DdacWidget | None = None
+    label_CED: QLabel | None = None
+    spectrum_select_box: QAction | None = None
+    analysis_toggle: QCheckBox | None = None
+    cb_piezo_consigne: QCheckBox | None = None
+    label_plot_metric: QLabel | None = None
+    cedx_metric_combo: QComboBox | None = None
+    label_dpdt_points: QLabel | None = None
+    spinbox_dpdt_points: QSpinBox | None = None
+    label_dpdt_smooth: QLabel | None = None
+    spinbox_dpdt_smooth: QSpinBox | None = None
+    btn_zone_dpdt: QAction | None = None
+    btn_time_arg: QAction | None = None
     spinbox_P: QDoubleSpinBox | None = None
     spinbox_T: QDoubleSpinBox | None = None
     apply_temp_all_gauges_checkbox: QCheckBox | None = None
     pt_solver_pfix_checkbox: QCheckBox | None = None
     listbox_pic: QListWidget | None = None
     right_view_tabs: QTabWidget | None = None
-    undock_panel_button: QAction | None = None
+    right_view_zoom_action: QPushButton | None = None
+    right_view_print_action: QPushButton | None = None
+    undock_panel_button: QPushButton | None = None
+
+
+def configure_main_window(window) -> None:
+    """Configure the base main-window container and grid layout."""
+
+    window.setWindowTitle("0.1 vXRD © F.Dembele")
+    window.grid_layout = QGridLayout()
+    window.setMinimumSize(1200, 780)
+    window.grid_layout.setContentsMargins(6, 6, 6, 6)
+    window.grid_layout.setSpacing(6)
+    central_widget = QWidget()
+    central_widget.setLayout(window.grid_layout)
+    window.setCentralWidget(central_widget)
+
+
+def create_piezo_consigne_checkbox(window) -> QCheckBox:
+    """Create the piezo setpoint toggle used by the dDAC menu."""
+
+    state = window.ui_state
+    state.cb_piezo_consigne = QCheckBox("piézo")
+    state.cb_piezo_consigne.setChecked(True)
+    state.cb_piezo_consigne.toggled.connect(window._set_piezo_setpoint_visible)
+    return state.cb_piezo_consigne
+
+
+def add_model_peak_coefficient_control(window, text: str, minimum: float, maximum: float, value: float) -> None:
+    """Add one dynamic coefficient spinbox to the model-peak parameter panel."""
+
+    row_layout = QHBoxLayout()
+    coef_label = QLabel(f"{text}:", window)
+    row_layout.addWidget(coef_label)
+
+    spinbox_coef = QDoubleSpinBox(window)
+    spinbox_coef.valueChanged.connect(window.setFocus)
+    spinbox_coef.setRange(minimum, maximum)
+    spinbox_coef.setSingleStep(0.01)
+    spinbox_coef.setValue(value)
+    row_layout.addWidget(spinbox_coef)
+
+    window.ParampicLayout.addLayout(row_layout)
+    window.coef_dynamic_label.append(coef_label)
+    window.coef_dynamic_spinbox.append(spinbox_coef)
+
+
+def create_gauge_panel_dialog(window):
+    """Create the floating dialog that receives the right gauge/print panel."""
+
+    dialog = QDialog(window)
+    dialog.setWindowTitle("Zoom / Print détaché")
+    dialog_layout = QVBoxLayout(dialog)
+    dialog_layout.setContentsMargins(8, 8, 8, 8)
+    dialog.finished.connect(lambda _result: window._on_gauge_panel_dialog_closed())
+    return dialog
+
+
+def build_print_plate_widget(window) -> None:
+    """Create the print-plate replacement widget once during UI initialization."""
+
+    spectrum_section = getattr(window.ui_state, "spectrum_section_widget", None)
+    if spectrum_section is None or window.print_plate_window is not None:
+        return
+
+    window.print_plate_window = QWidget(window)
+    layout = QVBoxLayout(window.print_plate_window)
+    controls_layout = QHBoxLayout()
+    window._print_plate_mode_button = QPushButton("Image", window.print_plate_window)
+    window._print_plate_mode_button.setCheckable(True)
+    window._print_plate_mode_button.clicked.connect(window._on_print_plate_mode_toggled)
+    controls_layout.addWidget(window._print_plate_mode_button)
+    layout.addLayout(controls_layout)
+
+    hist_widget = pg.PlotWidget()
+    hist_plot = hist_widget.getPlotItem()
+    hist_plot.setLabel("left", "Counts")
+    hist_plot.setLabel("bottom", "Pixel value")
+    window._print_plate_hist_curve = pg.PlotDataItem([], [], pen=pg.mkPen("k", width=1))
+    hist_plot.addItem(window._print_plate_hist_curve)
+    window._print_plate_hist_region = pg.LinearRegionItem(
+        values=(0, 1), orientation=pg.LinearRegionItem.Vertical
+    )
+    window._print_plate_hist_region.sigRegionChanged.connect(window._on_print_plate_levels_changed)
+    hist_plot.addItem(window._print_plate_hist_region)
+    layout.addWidget(hist_widget, 1)
+
+    plate_widget = pg.PlotWidget()
+    window.print_plate_plot = plate_widget.getPlotItem()
+    window.print_plate_plot.setLabel("left", "pixel Y")
+    window.print_plate_plot.setLabel("bottom", "pixel X")
+    window.print_plate_plot.invertY(True)
+    window.print_plate_image_item = pg.ImageItem(np.zeros((1, 1), dtype=float))
+    window.print_plate_plot.addItem(window.print_plate_image_item)
+    window.print_plate_plot.scene().sigMouseClicked.connect(window._on_print_plate_clicked)
+    layout.addWidget(plate_widget, 4)
+
+    spectrum_section.set_zoom_replacement_widget(window.print_plate_window)
 
 
 def build_file_section(window) -> None:
@@ -215,30 +330,7 @@ def build_file_section(window) -> None:
     advanced_menu.addSeparator()
     row_layout.addWidget(advanced_button)
 
-    state.ddac_options_button = make_menu_button("dDAC ▾", window)
-    ddac_menu = state.ddac_options_button.menu()
-    spectrum_action = add_check_menu_action(
-        ddac_menu, "Clic spectrum", state.spectrum_select_box.isChecked(), state.spectrum_select_box.setChecked
-    )
-    state.spectrum_select_box.toggled.connect(spectrum_action.setChecked)
-    ddac_menu.addSeparator()
-    zone_action = add_check_menu_action(
-        ddac_menu, "Zone dP/dt", state.btn_zone_dpdt.isChecked(), state.btn_zone_dpdt.setChecked
-    )
-    state.btn_zone_dpdt.toggled.connect(zone_action.setChecked)
-    time_action = add_check_menu_action(
-        ddac_menu, "Plage temps", state.btn_time_arg.isChecked(), state.btn_time_arg.setChecked
-    )
-    state.btn_time_arg.toggled.connect(time_action.setChecked)
-    row_layout.addWidget(state.ddac_options_button)
-
     state.analysis_toggle = None
-    state.label_plot_metric = QLabel("Paramètre plot :", self._drx_container)
-    state.cedx_metric_combo = QComboBox(self._drx_container)
-    state.cedx_metric_combo.setToolTip(
-        "Sélectionne la grandeur du Summary à afficher (P, V, a, b, c, c/a, B/a, ...)."
-    )
-    
 
     state.main_controls_layout = row_layout
     file_layout.addLayout(row_layout)
@@ -340,6 +432,41 @@ def build_file_section(window) -> None:
 
     group_fichiers.setLayout(layout_fichiers)
     window.grid_layout.addWidget(group_fichiers, 3, 0, 2, 2)
+
+
+def populate_ddac_menu(window) -> None:
+    """Populate the top dDAC menu once the dDAC controls exist."""
+
+    state = window.ui_state
+    button = state.ddac_menu_button
+    if button is None:
+        return
+
+    menu = button.menu()
+    menu.clear()
+
+    spectrum_box = getattr(window, "spectrum_select_box", None)
+    if spectrum_box is not None:
+        spectrum_action = add_check_menu_action(
+            menu, "Clic spectrum", spectrum_box.isChecked(), spectrum_box.setChecked
+        )
+        spectrum_box.toggled.connect(spectrum_action.setChecked)
+
+    menu.addSeparator()
+
+    zone_button = getattr(window, "btn_zone_dpdt", None)
+    if zone_button is not None:
+        zone_action = add_check_menu_action(
+            menu, "Zone dP/dt", zone_button.isChecked(), zone_button.setChecked
+        )
+        zone_button.toggled.connect(zone_action.setChecked)
+
+    time_button = getattr(window, "btn_time_arg", None)
+    if time_button is not None:
+        time_action = add_check_menu_action(
+            menu, "Plage temps", time_button.isChecked(), time_button.setChecked
+        )
+        time_button.toggled.connect(time_action.setChecked)
 
 
 def build_tools_panel(window) -> None:
