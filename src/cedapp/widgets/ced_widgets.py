@@ -18,7 +18,7 @@ from PyQt5.QtWidgets import (
     QSpinBox,
 )
 
-from .menu_helpers import add_check_menu_action, make_menu_button
+from .menu_helpers import add_check_menu_action
 
 
 class DdacWidget:
@@ -241,24 +241,6 @@ class DdacWidget:
         layhrun.addWidget(host.label_dpdt_smooth)
         layhrun.addWidget(host.spinbox_dpdt_smooth)
 
-        host.ddac_options_button = make_menu_button("dDAC ▾", self._drx_container)
-        ddac_menu = host.ddac_options_button.menu()
-        spectrum_action = add_check_menu_action(
-            ddac_menu, "Clic spectrum", host.spectrum_select_box.isChecked(), host.spectrum_select_box.setChecked
-        )
-        host.spectrum_select_box.toggled.connect(spectrum_action.setChecked)
-        ddac_menu.addSeparator()
-        zone_action = add_check_menu_action(
-            ddac_menu, "Zone dP/dt", host.btn_zone_dpdt.isChecked(), host.btn_zone_dpdt.setChecked
-        )
-        host.btn_zone_dpdt.toggled.connect(zone_action.setChecked)
-        time_action = add_check_menu_action(
-            ddac_menu, "Plage temps", host.btn_time_arg.isChecked(), host.btn_time_arg.setChecked
-        )
-        host.btn_time_arg.toggled.connect(time_action.setChecked)
-        layhrun.addWidget(host.ddac_options_button)
-        if getattr(host, "analysis_toggle", None) is not None:
-            layhrun.addWidget(host.analysis_toggle)
         ddac_layout.addLayout(layhrun)
         self._controls_layout = layhrun
 
@@ -273,7 +255,10 @@ class DdacWidget:
 
         if widget is None:
             return
-        button = getattr(self._drx_container, "ddac_options_button", None)
+        ui_state = getattr(self._drx_container, "ui_state", None)
+        button = getattr(ui_state, "ddac_menu_button", None)
+        if button is None:
+            button = getattr(self._drx_container, "ddac_options_button", None)
         if button is None:
             layout = getattr(self, "_controls_layout", None)
             if layout is None:
