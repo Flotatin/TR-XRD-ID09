@@ -2260,8 +2260,14 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
         file_type = self.type_selector.currentText()
         # Fonction pour parcourir un dossier et afficher ses fichiers
         options = QFileDialog.Options()
-        self.dict_folders[file_type] = QFileDialog.getExistingDirectory(self, f"Sélectionner un dossier pour {file_type}", options=options,directory=self.dict_folders[file_type])
-        if self.dict_folders[file_type] :
+        folder = QFileDialog.getExistingDirectory(
+            self,
+            f"Sélectionner un dossier pour {file_type}",
+            options=options,
+            directory=self.dict_folders[file_type],
+        )
+        if folder:
+            self.dict_folders[file_type] = folder
             self.f_change_file_type()
 
     def _refresh_drx_view(self) -> None:
@@ -2619,11 +2625,26 @@ class MainWindow(ConfigurationMixin, GaugeLibraryMixin, QMainWindow):
 
     def select_folder_DRX(self):
         options = QFileDialog.Options()
-        self.dict_folders["DRX"] = QFileDialog.getExistingDirectory(self, "F_DRX", options=options,directory=os.path.dirname(self.dict_folders["DRX"]))
+        folder = QFileDialog.getExistingDirectory(
+            self, "F_DRX", options=options, directory=self.dict_folders["DRX"]
+        )
+        if folder:
+            self.dict_folders["DRX"] = folder
+            if self.type_selector.currentText() == "DRX":
+                self.f_change_file_type()
         
     def select_folder_oscilo(self):
         options = QFileDialog.Options()
-        self.dict_folders["Oscilloscope"] = QFileDialog.getExistingDirectory(self, "F_Oscilo", options=options, directory=os.path.dirname(self.dict_folders["Oscilloscope"]))
+        folder = QFileDialog.getExistingDirectory(
+            self,
+            "F_Oscilo",
+            options=options,
+            directory=self.dict_folders["Oscilloscope"],
+        )
+        if folder:
+            self.dict_folders["Oscilloscope"] = folder
+            if self.type_selector.currentText() == "Oscilloscope":
+                self.f_change_file_type()
 
     def select_file_DRX(self):
         options = QFileDialog.Options()
