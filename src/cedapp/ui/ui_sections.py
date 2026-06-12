@@ -71,9 +71,9 @@ class UIState:
     help_tab_index: int | None = None
     help_tab_visible: bool = False
 
-    select_file_DRX_button: QPushButton | None = None
+    select_file_DRX_button: QAction | None = None
     file_label_spectro: QLabel | None = None
-    select_file_oscilo_button: QPushButton | None = None
+    select_file_oscilo_button: QAction | None = None
     file_label_oscilo: QLabel | None = None
     Calibration_DRX_button: QAction | None = None
     detector_distance_button: QAction | None = None
@@ -242,24 +242,25 @@ def build_file_section(window) -> None:
     row_layout.addWidget(state.jungfrau_mode_box)
 
 
-    state.select_file_DRX_button = QPushButton("f_DRX ", window)
-    state.select_file_DRX_button.clicked.connect(window.select_file_DRX)
-    row_layout.addWidget(state.select_file_DRX_button)
+    file_menu_button = make_menu_button("Fichier ▾", window)
+    file_menu = file_menu_button.menu()
+    state.select_file_DRX_button = add_menu_action(
+        file_menu, "Ouvrir un fichier DRX…", window.select_file_DRX
+    )
+    state.select_file_oscilo_button = add_menu_action(
+        file_menu, "Ouvrir un fichier oscillo…", window.select_file_oscilo
+    )
+    file_menu.addSeparator()
+    add_menu_action(file_menu, "Sélectionner le dossier affiché…", window.select_folder_dict)
+    add_menu_action(file_menu, "Sélectionner le dossier DRX…", window.select_folder_DRX)
+    add_menu_action(file_menu, "Sélectionner le dossier oscillo…", window.select_folder_oscilo)
+    row_layout.addWidget(file_menu_button)
 
     state.file_label_spectro = QLabel("init", window)
     row_layout.addWidget(state.file_label_spectro)
 
-    state.select_file_oscilo_button = QPushButton("f_Oscillo", window)
-    state.select_file_oscilo_button.clicked.connect(window.select_file_oscilo)
-    row_layout.addWidget(state.select_file_oscilo_button)
-
     state.file_label_oscilo = QLabel("init", window)
     row_layout.addWidget(state.file_label_oscilo)
-
-    file_menu_button = make_menu_button("Fichier ▾", window)
-    file_menu = file_menu_button.menu()
-    add_menu_action(file_menu, "Sélectionner un dossier…", window.select_folder_dict)
-    
 
 
     calibration_menu_button = make_menu_button("Calibration ▾", window)
