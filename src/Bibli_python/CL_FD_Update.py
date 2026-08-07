@@ -182,7 +182,7 @@ class Element_Bibli:
         try:
             self.V = inversefunc(
                 lambda x: Birch_M(x, V0T, self.K0, self.K0P),
-                y_values=float(P),
+                y_values=np.array(P),
                 domain=[V0T * self.Vmin, V0T * 1.05],
             )
         except Exception as e:
@@ -1869,22 +1869,62 @@ class CEDd:
         else:
             print("end > number of spectre !")
 
-    def Corr_Summary(self,num_spec=None,All=True,lambda_error=None,):
-        if All ==True :
+    def Corr_Summary(self, num_spec=None, All=True, lambda_error=None, N_MC=0, verbose=False):
+        if All == True:
             for i in range(len(self.Spectra)):
+                spec = self.Spectra[i]
+
                 for j in range(len(self.Gauges_init)):
-                    self.Spectra[i].Gauges[j].lamb0=self.Gauges_init[j].lamb0
-                    self.Spectra[i].Gauges[j].f_P=self.Gauges_init[j].f_P
-                    self.Spectra[i].Gauges[j].inv_f_P=self.Gauges_init[j].inv_f_P
-                if lambda_error is not None: #
-                    self.Spectra[i].lambda_error=lambda_error
-                self.Spectra[i].Calcul_study()
-                self.Summary.iloc[i]=pd.concat([pd.DataFrame({"n°Spec": [int(i)]}),self.Spectra[i].study],ignore_index=False,axis=1)
+                    spec.Gauges[j].lamb0 = self.Gauges_init[j].lamb0
+                    spec.Gauges[j].f_P = self.Gauges_init[j].f_P
+                    spec.Gauges[j].inv_f_P = self.Gauges_init[j].inv_f_P
+                if lambda_error is not None:
+                    spec.lambda_error = lambda_error
+
+                try:
+                    spec.estimate_all_sigma_noise(N_MC)
+                except Exception as e:
+                    print(f"⚠️ Estimation bruit échouée sur spectre {i}: {e}")
+
+                for G in spec.Gauges:
+                    for p in G.pics:
+                        if hasattr(p, "sigma_ctr_stat"):
+                            p.sigma_ctr_total = float(p.sigma_ctr_stat)
+
+                spec.Calcul_study()
+
+                row = pd.concat(
+                    [pd.DataFrame({"n°Spec": [int(i)]}), spec.study],
+                    ignore_index=False, axis=1
+                ).iloc[0]                      # <-- Series 1D, pas DataFrame
+
+                self.Summary.iloc[i] = row
+
+                if verbose:
+                    print(f"✅ Spectre {i+1}/{len(self.Spectra)} mis à jour.")
         else:
             if num_spec is not None:
-                i=np.where(np.array(self.Summary["n°Spec"]) == num_spec)[0][0]
-                self.Spectra[i].Calcul_study()
-                self.Summary.iloc[i]=pd.concat([pd.DataFrame({"n°Spec": [int(num_spec)]}),self.Spectra[i].study],ignore_index=False,axis=1)
+                i = np.where(np.array(self.Summary["n°Spec"]) == num_spec)[0][0]
+                spec = self.Spectra[i]
+
+                try:
+                    spec.estimate_all_sigma_noise(N_MC)
+                except Exception as e:
+                    print(f"⚠️ Estimation bruit échouée sur spectre {i}: {e}")
+
+                for G in spec.Gauges:
+                    for p in G.pics:
+                        if hasattr(p, "sigma_ctr_stat"):
+                            p.sigma_ctr_total = float(p.sigma_ctr_stat)
+
+                spec.Calcul_study()
+
+                row = pd.concat(
+                    [pd.DataFrame({"n°Spec": [int(num_spec)]}), spec.study],
+                    ignore_index=False, axis=1
+                ).iloc[0]
+
+                self.Summary.iloc[i] = row
            
     def Corr_Movie(self,folder_Movie=None,fps=None):
             if fps != None and folder_Movie==None:

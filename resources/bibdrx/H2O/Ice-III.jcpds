@@ -1,7 +1,7 @@
 VERSION:   4
-COMMENT: H2O Ice III /T[0,300]/P[-1,1]/Z=18
-K0:       11.0
-K0P:      5.5
+COMMENT: H2O Ice III /T[0,300]/P[-1,1]/Z=18/fu=12 #, P41212, tetragonal, a=6.73 A, c=6.83 A. CIF fourni par l'utilisateur (VESTA). Intensites = facteurs de structure calcules (O+H, poids ~Z). | K0=9.9(3) GPa, K0'=6 (Journaux et al. 2020, J. Geophys. Res. Planets, ajustement Mie-Gruneisen). Convention K0/K0' reportee formellement a T0=300K (cf. Bezacier et al. 2014) bien que la glace III ne soit stable qu'entre ~240-260K -- extrapolation formelle pour usage jcpds.
+K0:       9.9
+K0P:      6.0
 DK0DT:    0.0
 DK0PDT:   0.0
 SYMMETRY: TETRAGONAL

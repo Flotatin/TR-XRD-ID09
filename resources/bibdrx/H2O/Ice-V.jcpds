@@ -1,7 +1,7 @@
 VERSION:   4
-COMMENT: H2O Ice V /T[0,300]/P[-1,1]/Z=18
-K0:       11.0
-K0P:      5.5
+COMMENT: H2O Ice V /T[0,300]/P[-1,1]/Z=18/fu=28 #C2/c (reglage standard, equivalent A2/a), monoclinique, a=9.22 b=7.54 c=10.35 A, beta=109.2 deg. CIF fourni par l'utilisateur (VESTA), H a occupation 0.5 (desordre). Intensites = facteurs de structure calcules (O+H, poids ~Z). | K0=13.2(3) GPa, K0'=6 (Journaux et al. 2020, J. Geophys. Res. Planets, ajustement Mie-Gruneisen). Convention K0/K0' reportee formellement a T0=300K (cf. Bezacier et al. 2014) bien que la glace V ne soit stable qu'entre ~250-270K -- extrapolation formelle pour usage jcpds.
+K0:       13.2
+K0P:      6.0
 DK0DT:    0.0
 DK0PDT:   0.0
 SYMMETRY: MONOCLINIC

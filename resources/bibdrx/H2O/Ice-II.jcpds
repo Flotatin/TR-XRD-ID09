@@ -1,5 +1,5 @@
 VERSION:   4
-COMMENT: H2O Ice II /T[0,300]/P[-1,1]/Z=18
+COMMENT: H2O Ice II /T[0,300]/P[-1,1]/Z=18/fu=12
 K0:       11.0
 K0P:      5.5
 DK0DT:    0.0

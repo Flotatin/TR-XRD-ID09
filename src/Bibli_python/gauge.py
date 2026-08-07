@@ -163,7 +163,7 @@ class Gauge:
                 else:
                     self.CALCUL(mini=mini,verbose=verbose)
                 self.study = pd.concat([
-                        pd.DataFrame(np.array([[self.a,self.b,self.c,self.rca,self.V,self.sigma_V,self.P,self.sigma_P,self.T,self.sigma_T]]),
+                        pd.DataFrame(np.array([[self.a,self.b,self.c,self.rca,self.V,self.sigma_V,self.P,self.sigma_P,self.T,getattr(self,"sigma_T",0)]]),
                                     columns=['a_'+self.name,'b_'+self.name,'c_'+self.name,'c/a_'+self.name,
                                             'V_'+self.name,'sigma_V_'+self.name,'P_'+self.name,'sigma_P_'+self.name,
                                             'T_'+self.name,'sigma_T_'+self.name]),
@@ -175,12 +175,12 @@ class Gauge:
             sigmal = lambda_error
             if self.state == "Y":
                 par = self.name + '_p1center'
-                if (self.fit is not None) and (par in self.fit.params) and (self.fit.params[par].stderr is not None):
+                if hasattr(self.fit,"params"): #is not None) and (par in self.fit.params) and (self.fit.params[par].stderr is not None):
                     if self.fit.params[par].stderr > lambda_error:
                         sigmal = float(self.fit.params[par].stderr)
                 # fallback si stderr absent/faible mais estimation bruit dispo
                 if (sigmal == lambda_error) and hasattr(self.pics[0], "sigma_ctr_total") and self.pics[0].sigma_ctr_total :
-                    sigmal = float(self.pics[0].sigma_ctr_total )
+                    sigmal = float(self.pics[0].sigma_ctr_total)
                 self.fwhm=round(self.pics[0].sigma[0],5)
                 #self.fwhm=self.fit.best_values[self.name+'_p1sigma']
 
@@ -739,8 +739,19 @@ class Element(Gauge):
                                     (self.a*self.c*self.sigma_b)**2 +
                                     (self.a*self.b*self.sigma_c)**2)
                     elif key == "RHOMBOHEDRAL":
-                        # approximation linéaire, pas trivial -> on peut laisser TODO
-                        pass
+                        alpha_rad = np.deg2rad(self.alpha)
+                        u = 1 - 3*np.cos(alpha_rad)**2 + 2*np.cos(alpha_rad)**3
+                        f = np.sqrt(u)
+
+                        dVda = 3 * self.a**2 * f
+                        dVdalpha = (3 * self.a**3 * np.sin(alpha_rad) * np.cos(alpha_rad)
+                                    * (1 - np.cos(alpha_rad)) / f)
+
+                        # sigma_alpha n'existe que si alpha est traité comme incertain (fixe avec
+                        # incertitude externe) ; alpha n'étant pas affiné ici, on le met à 0 par défaut
+                        sigma_alpha_rad = np.deg2rad(getattr(self, "sigma_alpha", 0.0))
+
+                        dV = np.sqrt((dVda * self.sigma_a)**2 + (dVdalpha * sigma_alpha_rad)**2)
 
                 if dV is not None:
                     if verbose:
