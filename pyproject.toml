@@ -28,6 +28,8 @@ dependencies = [
   "deap>=1.4.0",
   "dill>=0.3.7",
   "fabio>=2023.4.0",
+  "h5py>=3.7",
+  "hdf5plugin>=4.0",
   "lecroyscope>=1.0.0",
   "lmfit>=1.2.0",
   "matplotlib>=3.7.0",
@@ -46,12 +48,20 @@ dependencies = [
   "tqdm>=4.66.0",
 ]
 
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
 [project.scripts]
 cedapp = "cedapp.main:main"
+trxrd = "trxrd.cli:main"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["cedapp*"]
+include = ["cedapp*", "trxrd*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore::SyntaxWarning", "ignore::DeprecationWarning:pybaselines.*"]

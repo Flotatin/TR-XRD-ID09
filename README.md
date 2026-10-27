@@ -1,6 +1,23 @@
 Python graphical application dedicated to X-ray diffraction (XRD) data processing and visualization.
 The software centralizes detector control, 1D image integration, and spectral analysis for laboratory experiments or synchrotron beamlines.
 
+New architecture (work in progress): `trxrd`
+
+A clean rewrite lives in `src/trxrd/` next to the current application (`src/cedapp`, unchanged).
+Runs are saved as open, versioned HDF5 files (`*.trxrd.h5`) instead of dill pickles, and can be read in a
+notebook without the GUI:
+
+    pip install -e .[dev]
+    trxrd build RAW_DATA/water02/water02_0001/scan0027/scan_jf1m_0000.h5 --poni calib.poni --mask det.mask --tth-min 8 --tth-max 25 --phases resources/bibdrx/H2O -o analysis/
+    trxrd convert "F:/ESRF/2024 Juin HC-5719 id09/Fichier_CED_DRX"     # old .CEDX/.CEDXUp files -> .trxrd.h5
+    python -m pytest
+
+    from trxrd import XRDRun
+    run = XRDRun("analysis/water02_0001_scan0027.trxrd.h5")
+    run.summary; run.plot_pressure()
+
+Design, file format specification and roadmap (in French): docs/ARCHITECTURE.md
+
 Requirements
 
 Python 3.8 or newer
