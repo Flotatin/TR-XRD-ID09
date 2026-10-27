@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "trxrd"
+version = "0.2.0"
+description = "DRX résolue en temps (ID09, DAC dynamique) : intégration, ajustement, pression, fichiers HDF5."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Florian Dembele" }]
+# Keep this list minimal: tests/test_architecture.py checks that every import
+# of the package is declared here and that every dependency is used.
+dependencies = [
+  "numpy>=1.24",
+  "scipy>=1.10",
+  "pandas>=1.5",
+  "h5py>=3.7",
+  "hdf5plugin>=4.0",
+  "fabio>=2023.4",
+  "pyFAI>=2023.9",
+  "pybaselines>=1.1",
+]
+
+[project.optional-dependencies]
+notebook = ["matplotlib>=3.7"]
+gui = ["PySide6>=6.5", "pyqtgraph>=0.13.4"]
+dev = ["pytest>=7", "matplotlib>=3.7"]
+
+[project.scripts]
+trxrd = "trxrd.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore::SyntaxWarning", "ignore::DeprecationWarning:pybaselines.*"]
