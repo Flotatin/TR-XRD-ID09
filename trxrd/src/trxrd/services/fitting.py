@@ -54,11 +54,15 @@ def initial_phase_fit(
 
 
 def corrected_signal(spectrum: Spectrum) -> np.ndarray:
-    """Smoothed intensity minus background (the background is computed if missing)."""
+    """Raw intensity minus background (the background is computed if missing).
+
+    The fit is done on the raw signal: smoothing would shift the maximum of
+    asymmetric peaks and correlate the noise, i.e. bias the positions and
+    underestimate their errors. Smoothing is only for detection and display.
+    """
     if spectrum.baseline is None:
         background.apply(spectrum)
-    smoothed = background.smooth(spectrum.two_theta, spectrum.intensity, spectrum.processing)
-    return smoothed - spectrum.baseline
+    return np.asarray(spectrum.intensity, dtype=float) - spectrum.baseline
 
 
 def _window(spectrum: Spectrum, fit_range: Optional[Tuple[float, float]]) -> Tuple[float, float]:

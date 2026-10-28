@@ -43,3 +43,20 @@ def volume_from_pressure(
         )
     i = int(crossings[0])
     return float(brentq(lambda v: birch_murnaghan(v, v0, k0, k0p) - pressure, volumes[i + 1], volumes[i]))
+
+
+def volumes_from_pressures(
+    pressures, v0: float, k0: float, k0p: float, v_min_ratio: float = 0.6, n_grid: int = 4000
+) -> np.ndarray:
+    """Vectorised P -> V on the physical branch (NaN outside the EoS range).
+
+    P(V) is tabulated from 1.05*V0 down to v_min_ratio*V0 and kept up to its
+    first maximum, where it is monotonic, then interpolated.
+    """
+    volumes = np.linspace(v0 * 1.05, v0 * v_min_ratio, n_grid)
+    table = birch_murnaghan(volumes, v0, k0, k0p)
+    rising = np.flatnonzero(np.diff(table) <= 0)
+    end = int(rising[0]) + 1 if rising.size else n_grid
+    pressures = np.asarray(pressures, dtype=float)
+    out = np.interp(pressures, table[:end], volumes[:end], left=np.nan, right=np.nan)
+    return out

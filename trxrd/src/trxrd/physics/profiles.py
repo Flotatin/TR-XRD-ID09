@@ -79,6 +79,18 @@ def evaluate(name: str, x, center: float, height: float, width: float, shape: Se
     return profile.function(np.asarray(x, dtype=float), center, height, width, *shape)
 
 
+def width_from_fwhm(name: str, fwhm_value: float, shape: Sequence[float] = ()) -> float:
+    """`width` parameter giving a measured FWHM (symmetric profile assumed)."""
+    profile = model(name)
+    shape = tuple(shape) or profile.shape_default
+    if name == "Gaussian":
+        return fwhm_value / (2 * np.sqrt(2 * LN2))
+    if name == "PearsonIV" or name == "Moffat":
+        exponent = shape[0]  # m or beta
+        return fwhm_value / (2 * np.sqrt(2 ** (1 / exponent) - 1))
+    return fwhm_value / 2  # PseudoVoigt, SplitLorentzian: HWHM
+
+
 def fwhm(name: str, width: float, shape: Sequence[float] = ()) -> float:
     """Full width at half maximum, computed numerically (valid for every model)."""
     x = np.linspace(-50 * width, 50 * width, 200001)

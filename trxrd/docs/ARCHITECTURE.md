@@ -17,7 +17,10 @@ des anciens fichiers, l'interface graphique prévue et la feuille de route.
 | Ancien programme | Conservé tel quel pour les anciennes données. Le nouveau programme ira dans un **dépôt séparé** une fois bien avancé (§10). |
 | Jauges de spectroscopie (rubis, Sm, SrFCl, rhodamine) | **Abandonnées.** Seules les phases DRX existent. Le convertisseur les ignore en le signalant. |
 | Interface graphique | **PySide6** + pyqtgraph : nouveau programme, nouvelle interface (§8). |
-| Ajustement des pics | `scipy.optimize.curve_fit`. **lmfit n'est plus utilisé.** |
+| Ajustement des pics | `scipy.optimize.curve_fit`. **lmfit n'est plus utilisé.** Ajustement sur le signal brut moins le fond, sans lissage (§6.2). |
+| Profil des pics | **Pearson IV par défaut** : pics asymétriques du synchrotron et de la compression dynamique. |
+| Recherche automatique de phases | L'algorithme génétique (deap) est **remplacé** par une recherche déterministe (§6.5) : pas de doublons, même résultat à chaque exécution, et plus juste et plus rapide sur nos essais (§6.6). |
+| Détection des pics | Seuils exprimés en nombre de σ du **bruit local**, largeurs en degrés, épaulements détectés (§6.5). |
 | Résolution en 2θ | Pas besoin de refaire l'intégration de l'ancien code (601 points). Par défaut, le pas est égal à la taille angulaire du plus petit pixel (§6.1). |
 | Axes | Affichage en 2θ (°), **Q (Å⁻¹)** ou d (Å). Le stockage reste en 2θ, l'unité native de l'intégration. |
 | Dépendances | Le strict nécessaire, vérifié par un test (§3.2). |
@@ -117,15 +120,17 @@ trxrd/
 │   │   ├── timing.py           ✅ détection des triggers sur l'oscilloscope
 │   │   ├── peakfit.py          ✅ ajustement simultané des pics (curve_fit)
 │   │   ├── cell.py             ✅ affinement de maille → V → P, avec incertitudes
-│   │   └── phase_search.py     🔜 détection de pics + recherche automatique de composition
+│   │   ├── peaks.py            ✅ détection des pics (bruit local, épaulements)
+│   │   └── phase_search.py     ✅ quelles phases, à quelles pressions (recherche déterministe)
 │   ├── services/
 │   │   ├── run_builder.py      ✅ scan brut → Run (intégration, fond, oscilloscope, base de temps)
 │   │   ├── fitting.py          ✅ ajuster un spectre ou une série (en suivant l'évolution)
+│   │   ├── identification.py   ✅ analyse automatique : détection → phases → ajustement → P
 │   │   └── session.py          ✅ état de l'application pour le GUI (run courant, sélection, événements)
 │   ├── notebook.py             ✅ XRDRun : lecture seule pour notebooks
-│   ├── cli.py                  ✅ trxrd build | convert | info
+│   ├── cli.py                  ✅ trxrd build | auto | convert | info
 │   └── gui/                    🔜 vues PySide6 + presenters (§8)
-└── tests/                      78 tests ; data/ = scan TUTO, calibration, ancien fichier .CEDX d'exemple
+└── tests/                      94 tests ; data/ = scan TUTO, calibration, ancien fichier .CEDX d'exemple
 ```
 
 ## 5. Le format de fichier `trxrd-run` (HDF5)
@@ -196,6 +201,11 @@ Tous les pics actifs de la fenêtre d'ajustement sont ajustés **ensemble**, ave
 bornes propres à chaque profil. Les erreurs viennent de la covariance, mise à l'échelle par la variance
 des résidus.
 
+L'ajustement se fait sur **l'intensité brute moins le fond, sans lissage**. Lisser un pic asymétrique
+déplace son maximum ; sur nos essais, le lissage de l'ancien code biaisait P de −0,01 à −0,02 GPa, pour
+une incertitude annoncée de 0,002. Lisser corrèle aussi le bruit, et les erreurs sont alors sous-estimées.
+Le lissage ne sert donc qu'à la détection et à l'affichage. Le profil par défaut est **Pearson IV**.
+
 Les profils (`physics/profiles.py`) partagent la signature `f(x, center, height, width, *shape)`.
 `center` est la position du **maximum**, `height` sa valeur. Ce sont les conventions des anciens modèles
 lmfit : les pics convertis donnent exactement les mêmes courbes, à 10⁻¹⁴ près.
@@ -227,6 +237,69 @@ lmfit : les pics convertis donnent exactement les mêmes courbes, à 10⁻¹⁴ 
   suit une compression rapide sans perdre les pics.
 
 Sur des spectres synthétiques, la pression est retrouvée à ±0,05 GPa (`tests/test_fitting.py`).
+
+### 6.5 Analyse automatique : détection → phases → ajustement
+
+**Détection des pics** (`processing/peaks.py`). C'était le point faible de l'ancienne chaîne : si un pic
+n'est pas détecté, aucune recherche ne peut le retrouver.
+
+- Le bruit est estimé **localement** : on retire un filtre de Savitzky-Golay court, puis on prend la
+  médiane glissante des résidus, avec la correction exacte pour du bruit blanc. Cela suit le bruit de
+  Poisson, qui augmente avec l'intensité. Sur des spectres synthétiques, l'estimation tombe à 1 % du vrai σ.
+- Un pic est retenu si sa **hauteur au-dessus du niveau local** dépasse `min_snr` σ (5 par défaut). Le seuil
+  ne dépend **jamais de l'intensité du pic le plus fort**, si bien qu'un pic faible voisin d'un pic très
+  intense est conservé. La prominence, mesurée localement, ne sert qu'à écarter les bosses sur le flanc d'un
+  autre pic. Les largeurs sont en degrés.
+- Les **épaulements**, ces pics sans maximum propre qu'on observe quand deux phases se chevauchent, sont
+  cherchés sur la dérivée seconde.
+- Les 0,25° aux bords du diagramme sont ignorés : filtres et fond n'y sont pas fiables.
+
+**Composition** (`processing/phase_search.py`), à la place de l'algorithme génétique :
+
+1. Pour chaque phase, les positions 2θ de toutes ses raies sont tabulées sur une grille fine de pressions
+   (0,01 GPa), une seule fois par run et de façon vectorisée. On retient comme candidates les pressions où
+   la phase, à elle seule, explique le mieux les pics, en gardant une pression par ensemble de pics
+   expliqués différent.
+2. **Toutes** les combinaisons de 1 à `max_phases` phases et de leurs pressions candidates sont évaluées,
+   chacune **une seule fois**, en un calcul vectorisé. Il n'y a donc ni doublons ni tirage aléatoire : la
+   même entrée donne toujours la même réponse.
+3. Les meilleures combinaisons sont affinées par moindres carrés (`scipy.optimize.least_squares`) sur les
+   positions appariées, puis reclassées.
+
+Le coût à minimiser s'exprime en « pics forts non expliqués » :
+
+| Terme | Signification |
+|---|---|
+| Σ s_j · min(1, (d_j/tol)²) | distance de chaque pic détecté à la raie la plus proche (1 s'il n'y en a aucune à moins de `tolerance`) ; s_j = min(1, SNR/10) pondère par la significativité |
+| 0,5 × Σ intensités des raies fortes absentes | une raie forte attendue mais non vue pénalise, sans exclure (texture, grains) |
+| 0,6 × nombre de phases | une phase n'est ajoutée que si elle explique assez de pics |
+| ((P_max − P_min) / `max_pressure_spread`)² | option : les phases d'un même échantillon voient des P proches |
+| 1 × phases apparues ou disparues | continuité avec le spectre précédent dans une série |
+
+Les raies faibles d'une fiche peuvent expliquer un pic (texture, anneaux ponctués), mais seules les raies
+au-dessus de `min_line_intensity` (5 %) sont exigées. `max_pressure_step` limite, si on le souhaite, la
+variation de P d'un spectre au suivant.
+
+**Enchaînement** (`services/identification.py`, `trxrd auto`) : pour chaque spectre, détection, puis
+composition (avec le spectre précédent comme a priori), puis pics **Pearson IV** placés sur les raies
+appariées (position, hauteur et largeur détectées), puis ajustement, maille et P.
+
+```bash
+trxrd auto analyse/water02_0001_scan0027.trxrd.h5 --phases H2O_Ice_VI H2O_Ice_VII --pmax 10 --frames 0:200
+```
+
+### 6.6 Comparaison avec l'ancienne chaîne (spectres synthétiques, Poisson, pics Pearson IV asymétriques)
+
+| | Ancien | Nouveau |
+|---|---|---|
+| Détection : 20 spectres × 10 pics (dont un pic faible, un pic voisin d'un pic 300 fois plus fort et un épaulement non résolu) | 40/200 trouvés, 0 faux | **161/200 trouvés, 0 faux** |
+| Composition : 8 spectres, bibliothèque H2O + Sn (14 phases), 0–20 GPa, un pic parasite, texture aléatoire ; mêmes pics détectés pour les deux | 0/8 correctes, 113 s | **8/8 correctes, 2,7 s** |
+| Série avec transition glace VI → VII (6 spectres), après ajustement | – | composition juste partout, P à ±0,02 GPa de la vérité |
+
+Les pics manqués par la nouvelle détection sont au niveau du bruit : 3σ par point, ou noyés dans la queue
+d'un pic 300 fois plus intense. L'algorithme génétique a été lancé avec les réglages d'`Auto_dif`
+(300 générations, population de 150). Sur ces essais, il confond les glaces de basse pression (II, III,
+IV) avec la glace VII.
 
 ## 7. Lire un run dans un notebook : `XRDRun`
 
@@ -307,8 +380,8 @@ git push <url-du-nouveau-depot> trxrd-only:main
 |---|---|---|
 | 1 | Domaine, physique, format HDF5, lecture ESRF, intégration, fond, timing, notebook, conversion, CLI | ✅ |
 | 2 | Profils de pics, ajustement `curve_fit`, affinement de maille, P et incertitudes, séries de spectres, axes Q/d | ✅ |
-| 3 | GUI « lecteur » PySide6 sur `Session` | 🔜 |
-| 4 | `processing/phase_search.py` : détection de pics + recherche de composition | 🔜 |
+| 3 | Détection de pics, recherche de composition déterministe, analyse automatique (`trxrd auto`) | ✅ |
+| 4 | GUI « lecteur » PySide6 sur `Session` | 🔜 |
 | 5 | GUI complet : création de run, ajustement interactif, zones, calibration, vue oscilloscope | 🔜 |
 | 6 | Nouveau dépôt (§10) | 🔜 |
 
@@ -325,11 +398,17 @@ git push <url-du-nouveau-depot> trxrd-only:main
   601 points de l'ancien code.
 - **Ajustement** : tous les pics sont ajustés ensemble, au lieu d'une phase après l'autre. La pondération de
   la maille est 1/σ_d², alors que l'ancien code y ajoutait un poids proportionnel à l'amplitude relative.
+- **Ajustement sur le signal brut** moins le fond, au lieu du signal lissé (§6.2).
+- **Détection des pics** : seuils en σ du bruit local au lieu de fractions du maximum (§6.5).
+- **Recherche de composition** déterministe au lieu de l'algorithme génétique (§6.5, §6.6).
 - **Fond SNIP et détection des triggers** : résultats identiques à l'ancien code.
 
 ## 13. Questions ouvertes
 
-1. **Recherche automatique de phases** (ancien `F_Find_compo`, algorithme génétique avec deap) : la porter
-   telle quelle, ou la remplacer par `scipy.optimize.differential_evolution` (pas de dépendance en plus) ?
-2. **Profil par défaut** des nouveaux pics : Pearson IV (ancien choix pour la DRX) ou pseudo-Voigt (plus
-   robuste quand le signal est faible) ?
+1. **Validation sur des données réelles.** Les réglages par défaut (tolérance 0,1°, coûts 0,5 / 0,6,
+   SNR 5) ont été calés sur des spectres synthétiques. Il faudrait un ou deux runs réels représentatifs,
+   déjà analysés avec l'ancien programme : le scan brut, la calibration et le `.CEDX`. On pourrait alors
+   comparer et ajuster ces réglages.
+2. **Phases à la même pression ?** Dans vos échantillons, les phases coexistantes (par exemple glace VI et
+   glace VII pendant la transition, ou l'échantillon et le milieu transmetteur) sont-elles à des pressions
+   proches ? Si oui, activer `max_pressure_spread` par défaut rendrait la recherche plus robuste.

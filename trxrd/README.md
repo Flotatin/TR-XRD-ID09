@@ -10,7 +10,7 @@ fichier et la feuille de route sont décrits dans [docs/ARCHITECTURE.md](docs/AR
 
 ```bash
 pip install -e "./trxrd[notebook,dev]"     # depuis la racine du dépôt (ou ".[notebook,dev]" depuis trxrd/)
-python -m pytest trxrd                      # 78 tests
+python -m pytest trxrd                      # 94 tests
 ```
 
 ## Ligne de commande
@@ -20,6 +20,9 @@ python -m pytest trxrd                      # 78 tests
 trxrd build RAW_DATA/water02/water02_0001/scan0027/scan_jf1m_0000.h5 \
       --poni calib.poni --mask det.mask --tth-min 8 --tth-max 25 \
       --phases trxrd/resources/phases/H2O -o analyse/
+
+# Analyse automatique : détection des pics -> phases et pressions -> ajustement Pearson IV -> P(t)
+trxrd auto analyse/water02_0001_scan0027.trxrd.h5 --phases H2O_Ice_VI H2O_Ice_VII --pmax 10
 
 # Anciens fichiers dill (.CEDX, .CEDXUp) -> .trxrd.h5 (l'ancien programme n'est pas nécessaire)
 trxrd convert "F:/ESRF/2024 Juin HC-5719 id09/Fichier_CED_DRX" -o converti/
@@ -33,9 +36,11 @@ trxrd info analyse/water02_0001_scan0027.trxrd.h5
 from trxrd import XRDRun
 from trxrd.io.h5store import load_run, save_run
 from trxrd.services.fitting import fit_spectra
+from trxrd.services.identification import auto_analyse
 
 run = load_run("analyse/water02_0001_scan0027.trxrd.h5")
-fit_spectra(run, range(len(run)), {"H2O_Ice_VII": 2.0})      # pression de départ en GPa
+auto_analyse(run, range(len(run)), ["H2O_Ice_VI", "H2O_Ice_VII"])   # tout automatique
+# ou, phases connues : fit_spectra(run, range(len(run)), {"H2O_Ice_VII": 2.0})  (P de départ en GPa)
 save_run(run, "analyse/water02_0001_scan0027.trxrd.h5")
 
 r = XRDRun("analyse/water02_0001_scan0027.trxrd.h5")

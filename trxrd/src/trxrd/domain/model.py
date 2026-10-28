@@ -136,6 +136,24 @@ class PhaseCard:
             self.symmetry, self.cell, self.volume_from_pressure(pressure, temperature)
         )
 
+    def reference_d_spacings(self) -> np.ndarray:
+        """d (Å) of every reflection for the reference cell of the card."""
+        return np.array([lattice.d_spacing(self.symmetry, self.cell, r.hkl) for r in self.reflections])
+
+    def two_theta_table(self, pressures, energy_ev: float, temperature: float = eos.T_REF) -> np.ndarray:
+        """2θ (deg) of every reflection for every pressure: array [n_pressures, n_reflections].
+
+        Vectorised version of two_theta_lines (isotropic compression: all d
+        scale by (V/V_ref)^(1/3)); NaN outside the EoS range or above 180°.
+        """
+        volumes = eos.volumes_from_pressures(
+            pressures, self.v0_at(temperature), self.k0, self.k0p, v_min_ratio=self.v_min_ratio
+        )
+        scale = (volumes / lattice.cell_volume(self.symmetry, self.cell)) ** (1.0 / 3.0)
+        d = scale[:, None] * self.reference_d_spacings()[None, :]
+        with np.errstate(invalid="ignore"):
+            return np.degrees(2 * np.arcsin(energy_to_wavelength(energy_ev) * 1e10 / (2 * d)))
+
     def two_theta_lines(
         self, pressure: float, energy_ev: float, temperature: float = eos.T_REF, max_lines: int = 30
     ) -> List[Tuple[float, Reflection]]:
