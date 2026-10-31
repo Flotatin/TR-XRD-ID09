@@ -320,8 +320,9 @@ def legacy_to_run(obj: Any, name: str) -> Run:
                 skipped.add(str(getattr(gauge, "name", "?")))
                 continue
             gauges.append(gauge)
-            if gauge.name not in phases:
-                phases[gauge.name] = _phase_card(gauge.name, ref)
+            phase_name = str(gauge.name)  # old files mix str and numpy.str_ names
+            if phase_name not in phases:
+                phases[phase_name] = _phase_card(phase_name, ref)
         fits = [_phase_fit(g) for g in gauges]
         index_x = getattr(legacy, "indexX", None)
         fit_range = None

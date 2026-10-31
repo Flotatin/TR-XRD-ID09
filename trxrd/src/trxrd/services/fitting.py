@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 import logging
 from dataclasses import dataclass
-from typing import Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -27,6 +27,9 @@ class FitOptions:
     center_tolerance: float = 0.3  # how far a peak centre may move during the fit (deg)
     min_intensity: float = 0.0  # reflections of the card weaker than this (%) are not used
     temperature: float = eos.T_REF
+    local_window: Optional[float] = 0.3  # deg: only points this close to a peak are fitted (None: whole range)
+    exclude: Optional[Sequence[Tuple[float, float]]] = None  # 2θ zones left out of the fit (gasket, diamond...)
+    max_center_err: float = 0.1  # deg: peaks known worse than this do not enter the cell refinement
 
 
 def initial_phase_fit(
@@ -73,12 +76,15 @@ def _window(spectrum: Spectrum, fit_range: Optional[Tuple[float, float]]) -> Tup
     return float(np.nanmin(spectrum.two_theta)), float(np.nanmax(spectrum.two_theta))
 
 
-def _update_phase(run: Run, phase_fit: PhaseFit, temperature: float) -> None:
+def _update_phase(run: Run, phase_fit: PhaseFit, options: FitOptions) -> None:
     card = run.phases.get(phase_fit.phase)
     calib = run.calibration
+    temperature = options.temperature
     reflexes = []
     for peak in phase_fit.peaks:
-        if peak.enabled and peak.hkl is not None and np.isfinite(peak.center):
+        badly_known = np.isfinite(peak.center_err) and peak.center_err > options.max_center_err
+        vanished = np.isfinite(peak.height) and peak.height <= 0
+        if peak.enabled and peak.hkl is not None and np.isfinite(peak.center) and not badly_known and not vanished:
             sigma = peak.center_err if np.isfinite(peak.center_err) else 0.0
             if calib is not None and calib.sigma_distance_m:
                 geometric = sigma_two_theta_from_distance(peak.center, calib.distance_m, calib.sigma_distance_m)
@@ -96,6 +102,17 @@ def _update_phase(run: Run, phase_fit: PhaseFit, temperature: float) -> None:
     phase_fit.temperature = temperature
 
 
+def fit_mask(x: np.ndarray, window: Tuple[float, float], centers: Sequence[float], options: FitOptions) -> np.ndarray:
+    """Points used by the fit: inside the window, near a peak, outside the excluded zones."""
+    mask = (x >= window[0]) & (x <= window[1])
+    if options.local_window and len(centers):
+        near = np.min(np.abs(x[:, None] - np.asarray(centers)[None, :]), axis=1) <= options.local_window
+        mask &= near
+    for lo, hi in options.exclude or ():
+        mask &= ~((x >= lo) & (x <= hi))
+    return mask
+
+
 def fit_spectrum(
     run: Run,
     index: int,
@@ -103,12 +120,19 @@ def fit_spectrum(
     *,
     fit_range: Optional[Tuple[float, float]] = None,
     options: Optional[FitOptions] = None,
+    extra_peaks: Sequence[Peak] = (),
 ) -> Spectrum:
     """Fit spectrum `index` and refine every fitted phase (in place).
 
     `phases` maps phase names to a starting pressure and (re)creates their
     peaks from the cards; otherwise the peaks already on the spectrum are the
     starting point. Phases whose state is not "fitted" are left untouched.
+
+    Only the points within `local_window` of a peak are fitted, outside the
+    `exclude` zones: a strong peak that belongs to no phase (gasket,
+    diamond) cannot drag the fit. `extra_peaks` (peaks seen but assigned to no
+    phase) are fitted alongside so that they do not bias their neighbours,
+    then dropped.
     """
     options = options or FitOptions()
     spectrum = run.spectra[index]
@@ -123,16 +147,22 @@ def fit_spectrum(
 
     x = np.asarray(spectrum.two_theta, dtype=float)
     y = corrected_signal(spectrum)
-    inside = (x >= window[0]) & (x <= window[1])
     active = [f for f in spectrum.phases if f.state == FitState.FITTED]
     peaks = [p for f in active for p in f.peaks if p.enabled and window[0] <= p.center <= window[1]]
-    result = fit_peaks(x[inside], y[inside], peaks, center_tolerance=options.center_tolerance)
+    centers = [p.center for p in peaks]
+    reach = 2 * (options.local_window or np.inf)  # free peaks far from every phase peak are irrelevant
+    extra = [
+        p for p in extra_peaks
+        if window[0] <= p.center <= window[1] and centers and min(abs(p.center - c) for c in centers) <= reach
+    ]
+    mask = fit_mask(x, window, centers + [p.center for p in extra], options)
+    result = fit_peaks(x[mask], y[mask], peaks + extra, center_tolerance=options.center_tolerance)
     if not result.success:
         logger.warning("Spectrum %d: %s", index, result.message)
-    fitted = {id(old): new for old, new in zip(peaks, result.peaks)}
+    fitted = {id(old): new for old, new in zip(peaks, result.peaks[: len(peaks)])}
     for phase_fit in active:
         phase_fit.peaks = [fitted.get(id(p), p) for p in phase_fit.peaks]
-        _update_phase(run, phase_fit, options.temperature)
+        _update_phase(run, phase_fit, options)
     spectrum.model = total_curve(x, [p for f in active for p in f.peaks if window[0] <= p.center <= window[1]])
     return spectrum
 

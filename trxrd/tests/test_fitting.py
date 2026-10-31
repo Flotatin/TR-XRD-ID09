@@ -92,3 +92,15 @@ def test_fit_spectra_follows_a_compression():
     assert done == [0, 1, 2, 3, 4] and steps == [1, 2, 3, 4, 5]
     found = [s.phase_fit("H2O_Ice_VII").pressure for s in run.spectra]
     np.testing.assert_allclose(found, pressures, atol=0.05)
+
+
+def test_two_stage_fit_frees_the_shape_only_if_it_helps():
+    rng = np.random.default_rng(4)
+    x = np.linspace(10, 11, 200)
+    y = profiles.pearson_iv(x, 10.5, 200, 0.03, 1.4, 1.2) + rng.normal(0, 1.0, x.size)
+    start = [Peak("a", "PearsonIV", center=10.48, width=0.02)]
+    fixed = fit_peaks(x, y, start, free_shape=False)
+    free = fit_peaks(x, y, start)
+    assert fixed.peaks[0].shape == profiles.MODELS["PearsonIV"].shape_default
+    assert free.reduced_chi2 < fixed.reduced_chi2
+    assert free.peaks[0].center == pytest.approx(10.5, abs=0.003)

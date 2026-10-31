@@ -1,3 +1,4 @@
+import numpy as np
 import pytest
 
 from conftest import LIBRARY
@@ -57,3 +58,28 @@ def test_previous_spectrum_restricts_the_pressure(library):
 
 def test_no_peak_no_solution(tables):
     assert search_composition([], tables) == []
+
+
+def test_phase_with_a_forest_of_lines_is_not_chosen_by_chance(library, tables):
+    # ice XXI has ~70 lines in the window: it "explains" anything, but only by chance
+    for truth in ({"H2O_Ice_VII": 1.4, "Sn_Beta": 2.0}, {"H2O_Ice_VI": 1.0, "Sn_Beta": 1.4}):
+        best = search_composition(detected(library, truth, texture=0.3), tables)[0]
+        assert set(best.pressures) == set(truth)
+
+
+def test_continuity_is_counted_per_family(library):
+    tables = LineTables(library, ENERGY, (X[0], X[-1]), SearchOptions(pressure_range=(0, 20)))
+    peaks = detected(library, {"H2O_Ice_VI": 1.0, "Sn_Beta": 1.4})
+    # ice VII -> ice VI is a transformation of the same sample: cheap
+    best = search_composition(peaks, tables, previous={"H2O_Ice_VII": 1.5, "Sn_Beta": 1.6})[0]
+    assert set(best.pressures) == {"H2O_Ice_VI", "Sn_Beta"}
+
+
+def test_lines_in_excluded_zones_are_neither_seen_nor_missed(library):
+    card = library["H2O_Ice_VII"]
+    line_110 = card.two_theta_lines(3.0, ENERGY)[0][0]
+    options = SearchOptions(pressure_range=(0, 20), exclude=[(line_110 - 0.2, line_110 + 0.2)])
+    tables = LineTables({"H2O_Ice_VII": card}, ENERGY, (X[0], X[-1]), options)
+    phase = tables.phases["H2O_Ice_VII"]
+    row = np.argmin(np.abs(phase.pressures - 3.0))
+    assert np.isnan(phase.lines[row]).sum() >= 1  # the (110) line is masked at 3 GPa

@@ -72,11 +72,12 @@ def _cmd_auto(args: argparse.Namespace) -> int:
     from trxrd.io.jcpds import read_library
     from trxrd.processing.peaks import DetectionOptions
     from trxrd.processing.phase_search import SearchOptions
-    from trxrd.services.identification import AutoOptions, auto_analyse
+    from trxrd.services.identification import AutoOptions, auto_analyse, find_static_peaks
 
     run = load_run(args.run)
     if args.library:
-        run.phases.update(read_library(args.library))
+        for name, card in read_library(args.library).items():
+            run.phases.setdefault(name, card)  # the cards already in the run (those really used) win
     options = AutoOptions(
         detection=DetectionOptions(min_snr=args.min_snr),
         search=SearchOptions(
@@ -84,8 +85,15 @@ def _cmd_auto(args: argparse.Namespace) -> int:
             max_pressure_step=args.max_step, max_pressure_spread=args.max_spread,
         ),
         window=(args.tth_min, args.tth_max) if args.tth_min is not None and args.tth_max is not None else None,
+        exclude=[tuple(float(v) for v in zone.split(":")) for zone in args.exclude or []] or None,
     )
-    results = auto_analyse(run, _frames(args.frames, len(run)), args.phases or None, options)
+    frames = _frames(args.frames, len(run))
+    if len(frames) >= 5:
+        for peak in find_static_peaks(run, frames, options.window, options.detection):
+            if not any(lo <= peak.position <= hi for lo, hi in options.exclude or ()):
+                print(f"note: peak at {peak.position:.3f}° does not move (seen in {peak.fraction:.0%} of the spectra, "
+                      f"±{peak.spread:.3f}°): gasket/diamond? if so use --exclude {peak.zone()[0]}:{peak.zone()[1]}")
+    results = auto_analyse(run, frames, args.phases or None, options)
     for result in results:
         spectrum = run.spectra[result.index]
         found = ", ".join(f"{f.phase} {f.pressure:.3f}±{f.pressure_err:.3f}" for f in spectrum.phases) or "-"
@@ -107,7 +115,10 @@ def _cmd_info(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="trxrd", description="Time-resolved XRD runs (HDF5)")
+    from trxrd import __version__
+
+    parser = argparse.ArgumentParser(prog="trxrd", description=f"TR-XRD v2 ({__version__}): time-resolved XRD runs (HDF5)")
+    parser.add_argument("--version", action="version", version=f"trxrd {__version__}")
     parser.add_argument("-v", "--verbose", action="store_true")
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -135,7 +146,7 @@ def build_parser() -> argparse.ArgumentParser:
     auto = sub.add_parser("auto", help="detect peaks, identify phases and pressures, fit (Pearson IV)")
     auto.add_argument("run", help=".trxrd.h5 run file (updated in place unless -o)")
     auto.add_argument("--phases", nargs="*", help="candidate phases (default: every phase of the run)")
-    auto.add_argument("--library", nargs="*", help=".jcpds files or folders added to the run first")
+    auto.add_argument("--library", nargs="*", help=".jcpds files or folders: extra candidate phases (cards already in the run are kept)")
     auto.add_argument("--pmin", type=float, default=0.0, help="GPa")
     auto.add_argument("--pmax", type=float, default=30.0, help="GPa")
     auto.add_argument("--frames", help="spectra to analyse, python slice, e.g. 10:200")
@@ -144,6 +155,7 @@ def build_parser() -> argparse.ArgumentParser:
     auto.add_argument("--min-snr", type=float, default=5.0, help="detection threshold (local noise sigmas)")
     auto.add_argument("--max-step", type=float, help="max pressure change between spectra (GPa)")
     auto.add_argument("--max-spread", type=float, help="soft limit on the pressure difference between phases (GPa)")
+    auto.add_argument("--exclude", nargs="*", help="2θ zones to ignore, e.g. 18.35:18.85 (gasket, diamond...)")
     auto.add_argument("--tth-min", type=float)
     auto.add_argument("--tth-max", type=float)
     auto.add_argument("-o", "--out", help="output file")

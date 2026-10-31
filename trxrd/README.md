@@ -1,16 +1,19 @@
-# trxrd
+# trxrd — TR-XRD v2
+
+**Nouvelle version (v2)** du programme. L'ancienne version (v1, `cedapp`, PyQt5, fichiers `.CEDX`) reste à la
+racine du dépôt, figée, pour relire les anciennes données ; son dernier état porte le tag git `v1-cedapp`.
 
 Traitement de la DRX résolue en temps (ID09, DAC dynamique) : intégration des images, ajustement des pics,
 maille, volume et pression, sauvegarde en HDF5 ouvert et lecture en notebook.
 
-Nouveau programme, qui remplace à terme l'application historique `cedapp`. L'architecture, le format de
-fichier et la feuille de route sont décrits dans [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+L'architecture, le format de fichier, les choix d'algorithmes et leur validation sont décrits dans
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Installation
 
 ```bash
 pip install -e "./trxrd[notebook,dev]"     # depuis la racine du dépôt (ou ".[notebook,dev]" depuis trxrd/)
-python -m pytest trxrd                      # 94 tests
+python -m pytest trxrd                      # 101 tests
 ```
 
 ## Ligne de commande
@@ -22,7 +25,9 @@ trxrd build RAW_DATA/water02/water02_0001/scan0027/scan_jf1m_0000.h5 \
       --phases trxrd/resources/phases/H2O -o analyse/
 
 # Analyse automatique : détection des pics -> phases et pressions -> ajustement Pearson IV -> P(t)
-trxrd auto analyse/water02_0001_scan0027.trxrd.h5 --phases H2O_Ice_VI H2O_Ice_VII --pmax 10
+# (les pics fixes, joint/diamant, sont signalés avec la zone --exclude à utiliser)
+trxrd auto analyse/water02_0001_scan0027.trxrd.h5 --library trxrd/resources/phases/H2O trxrd/resources/phases/Sn \
+      --pmax 10 --exclude 18.48:18.68
 
 # Anciens fichiers dill (.CEDX, .CEDXUp) -> .trxrd.h5 (l'ancien programme n'est pas nécessaire)
 trxrd convert "F:/ESRF/2024 Juin HC-5719 id09/Fichier_CED_DRX" -o converti/

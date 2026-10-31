@@ -1,4 +1,6 @@
-"""TR-XRD: time-resolved X-ray diffraction analysis (ID09 dynamic DAC).
+"""TR-XRD v2: time-resolved X-ray diffraction analysis (ID09 dynamic DAC).
+
+Version 2 of the program; version 1 is the legacy `cedapp` application.
 
 Notebook entry point::
 
@@ -7,7 +9,7 @@ Notebook entry point::
     run.summary
 """
 
-__version__ = "0.2.0"
+__version__ = "2.0.0a1"
 
 
 def __getattr__(name):

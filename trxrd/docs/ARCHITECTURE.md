@@ -1,8 +1,9 @@
-# Architecture du programme `trxrd`
+# Architecture de TR-XRD v2 (`trxrd`)
 
-`trxrd` est le nouveau programme de traitement DRX résolu en temps (ID09, DAC dynamique). Il est écrit de
-zéro et vit pour l'instant dans le dossier `trxrd/` du dépôt historique. L'ancien programme (`src/cedapp`,
-`main.py`) n'est pas modifié : il reste disponible pour relire les anciennes données.
+`trxrd` est la **version 2** du programme de traitement DRX résolu en temps (ID09, DAC dynamique). Elle est
+écrite de zéro et vit pour l'instant dans le dossier `trxrd/` du dépôt historique. La **version 1**
+(`cedapp` : `main.py`, `src/cedapp`, `src/Bibli_python`) n'est pas modifiée ; elle reste disponible pour relire
+les anciennes données, et son dernier état porte le tag git `v1-cedapp`.
 
 Ce document décrit les couches du programme, le format de fichier, l'accès depuis un notebook, la conversion
 des anciens fichiers, l'interface graphique prévue et la feuille de route.
@@ -14,6 +15,7 @@ des anciens fichiers, l'interface graphique prévue et la feuille de route.
 | Sujet | Décision |
 |---|---|
 | Sauvegarde | Un fichier d'analyse HDF5 **séparé** des données brutes, avec un lien externe vers elles (§5). Les fichiers bruts ne sont jamais modifiés. |
+| Versions | **v1 = `cedapp`** (ancienne, figée, tag `v1-cedapp`, fichiers `.CEDX`) ; **v2 = `trxrd`** (nouvelle, `2.0.0a1`, fichiers `.trxrd.h5`). |
 | Ancien programme | Conservé tel quel pour les anciennes données. Le nouveau programme ira dans un **dépôt séparé** une fois bien avancé (§10). |
 | Jauges de spectroscopie (rubis, Sm, SrFCl, rhodamine) | **Abandonnées.** Seules les phases DRX existent. Le convertisseur les ignore en le signalant. |
 | Interface graphique | **PySide6** + pyqtgraph : nouveau programme, nouvelle interface (§8). |
@@ -130,7 +132,7 @@ trxrd/
 │   ├── notebook.py             ✅ XRDRun : lecture seule pour notebooks
 │   ├── cli.py                  ✅ trxrd build | auto | convert | info
 │   └── gui/                    🔜 vues PySide6 + presenters (§8)
-└── tests/                      94 tests ; data/ = scan TUTO, calibration, ancien fichier .CEDX d'exemple
+└── tests/                      101 tests ; data/ = scan TUTO, calibration, ancien fichier .CEDX d'exemple
 ```
 
 ## 5. Le format de fichier `trxrd-run` (HDF5)
@@ -253,6 +255,9 @@ n'est pas détecté, aucune recherche ne peut le retrouver.
 - Les **épaulements**, ces pics sans maximum propre qu'on observe quand deux phases se chevauchent, sont
   cherchés sur la dérivée seconde.
 - Les 0,25° aux bords du diagramme sont ignorés : filtres et fond n'y sont pas fiables.
+- **Pics fixes** (`find_static_peaks`) : un pic présent au même 2θ (±0,1°) dans au moins 80 % des spectres
+  d'une série est signalé par `trxrd auto`, avec la zone `--exclude` à utiliser (joint, diamant...). Ce
+  n'est qu'une suggestion, jamais appliquée seule : dans un run statique, tous les pics sont fixes.
 
 **Composition** (`processing/phase_search.py`), à la place de l'algorithme génétique :
 
@@ -272,13 +277,26 @@ Le coût à minimiser s'exprime en « pics forts non expliqués » :
 |---|---|
 | Σ s_j · min(1, (d_j/tol)²) | distance de chaque pic détecté à la raie la plus proche (1 s'il n'y en a aucune à moins de `tolerance`) ; s_j = min(1, SNR/10) pondère par la significativité |
 | 0,5 × Σ intensités des raies fortes absentes | une raie forte attendue mais non vue pénalise, sans exclure (texture, grains) |
-| 0,6 × nombre de phases | une phase n'est ajoutée que si elle explique assez de pics |
-| ((P_max − P_min) / `max_pressure_spread`)² | option : les phases d'un même échantillon voient des P proches |
-| 1 × phases apparues ou disparues | continuité avec le spectre précédent dans une série |
+| 1 × Σ_phases p_hasard · Σ s_j | **pics qu'une phase expliquerait par hasard** : p_hasard = nombre de raies dans la fenêtre × 2·tol / largeur. Une phase à « forêt de raies » (glace XXI : 72 raies entre 8 et 25°) explique tout par hasard et n'est créditée que de ce qu'elle explique au-delà |
+| 0,5 × nombre de phases | une phase n'est ajoutée que si elle explique assez de pics |
+| ((P_max − P_min) / 1,5 GPa)² | les phases d'un même échantillon voient des P proches (souple, réglable par `max_pressure_spread`, `None` pour désactiver) |
+| 1 × familles apparues ou disparues, 0,2 × phases changées | continuité avec le spectre précédent ; la famille est le début du nom (`H2O_Ice_VII` → `H2O`) : un changement de polymorphe (VII → VI → Ih) est peu coûteux, la disparition de l'échantillon l'est |
 
 Les raies faibles d'une fiche peuvent expliquer un pic (texture, anneaux ponctués), mais seules les raies
-au-dessus de `min_line_intensity` (5 %) sont exigées. `max_pressure_step` limite, si on le souhaite, la
-variation de P d'un spectre au suivant.
+au-dessus de `min_line_intensity` (5 %) sont exigées. Quand des raies de deux phases se chevauchent, le pic
+va à la raie attendue la plus forte (une raie à 100 % de Sn plutôt qu'une raie à 5 % de la glace VI).
+`max_pressure_step` limite, si on le souhaite, la variation de P d'un spectre au suivant.
+
+**Zones exclues** (`--exclude`, joint ou diamant) : aucune phase n'y est appariée, et les raies qui y tombent ne
+comptent pas comme absentes. Les pics qui s'y trouvent restent toutefois **modélisés comme pics libres**
+dans l'ajustement : sans cela, leur queue biaise les raies voisines.
+
+**Ajustement automatique** : seuls les points à moins de 0,3° d'un pic sont ajustés, comme le faisaient les
+zones d'ajustement manuelles de la v1. Un pic intense qui n'appartient à aucune phase ne peut donc pas tirer
+l'ajustement. Les pics détectés mais non attribués sont ajustés comme pics libres. L'ajustement se fait en
+deux temps : d'abord à forme fixe (position, hauteur, largeur), puis avec la forme Pearson IV libre, gardée
+seulement si elle améliore l'ajustement. Un pic dont la position est connue à plus de 0,1° près n'entre
+pas dans le calcul de la maille.
 
 **Enchaînement** (`services/identification.py`, `trxrd auto`) : pour chaque spectre, détection, puis
 composition (avec le spectre précédent comme a priori), puis pics **Pearson IV** placés sur les raies
@@ -300,6 +318,25 @@ Les pics manqués par la nouvelle détection sont au niveau du bruit : 3σ par p
 d'un pic 300 fois plus intense. L'algorithme génétique a été lancé avec les réglages d'`Auto_dif`
 (300 générations, population de 150). Sur ces essais, il confond les glaces de basse pression (II, III,
 IV) avec la glace VII.
+
+### 6.7 Validation sur des données réelles : Water05, scan 9 (ID09, janvier 2026)
+
+Décompression rapide de ~6,4 à ~0,2 GPa en 0,25 ms (16 spectres), avec les transitions glace VII → VI → Ih
+et Sn β tout du long. Le fichier `.CEDX` analysé à la main avec la v1 a été converti, puis réanalysé **à
+l'aveugle** par `trxrd auto`, avec toute la bibliothèque H2O + Sn (14 phases), 0–10 GPa, et la zone du pic
+fixe (18,48–18,68°) exclue, telle que proposée par `find_static_peaks`.
+
+| | Résultat |
+|---|---|
+| Détection | 59 des 61 pics ajustés à la main retrouvés (les 2 manqués sont des raies faibles de la glace VI) |
+| Composition | **identique à l'analyse manuelle dans 15 spectres sur 16** ; dans le spectre 8 (coexistence VII + VI), la VI n'est pas retenue : un seul pic faible (SNR 10) la soutient |
+| Pression des glaces VII, VI, Ih | écart ≤ 0,03 GPa avec l'analyse manuelle |
+| Pression de Sn β | écart ≤ 0,16 GPa, la v2 donnant en moyenne ~0,1 GPa de moins (raie (301) en plus, forme Pearson IV ajustée différemment) : à examiner avec les images brutes |
+| Temps | ~8 s pour les 16 spectres |
+
+Ce run a révélé les points corrigés ci-dessus : un pic fixe non modélisé qui faussait l'ajustement, la glace
+XXI qui expliquait tout par hasard, la continuité trop chère pendant une transition, les pics partagés
+entre deux phases, et un ajustement qui ne convergeait pas quand la forme Pearson IV était mal déterminée.
 
 ## 7. Lire un run dans un notebook : `XRDRun`
 
@@ -380,7 +417,7 @@ git push <url-du-nouveau-depot> trxrd-only:main
 |---|---|---|
 | 1 | Domaine, physique, format HDF5, lecture ESRF, intégration, fond, timing, notebook, conversion, CLI | ✅ |
 | 2 | Profils de pics, ajustement `curve_fit`, affinement de maille, P et incertitudes, séries de spectres, axes Q/d | ✅ |
-| 3 | Détection de pics, recherche de composition déterministe, analyse automatique (`trxrd auto`) | ✅ |
+| 3 | Détection de pics, recherche de composition déterministe, analyse automatique (`trxrd auto`), validation sur un run réel | ✅ |
 | 4 | GUI « lecteur » PySide6 sur `Session` | 🔜 |
 | 5 | GUI complet : création de run, ajustement interactif, zones, calibration, vue oscilloscope | 🔜 |
 | 6 | Nouveau dépôt (§10) | 🔜 |
@@ -405,10 +442,8 @@ git push <url-du-nouveau-depot> trxrd-only:main
 
 ## 13. Questions ouvertes
 
-1. **Validation sur des données réelles.** Les réglages par défaut (tolérance 0,1°, coûts 0,5 / 0,6,
-   SNR 5) ont été calés sur des spectres synthétiques. Il faudrait un ou deux runs réels représentatifs,
-   déjà analysés avec l'ancien programme : le scan brut, la calibration et le `.CEDX`. On pourrait alors
-   comparer et ajuster ces réglages.
-2. **Phases à la même pression ?** Dans vos échantillons, les phases coexistantes (par exemple glace VI et
-   glace VII pendant la transition, ou l'échantillon et le milieu transmetteur) sont-elles à des pressions
-   proches ? Si oui, activer `max_pressure_spread` par défaut rendrait la recherche plus robuste.
+1. **Plus de runs réels.** Water05 a permis de corriger cinq défauts. Deux ou trois autres runs de natures
+   différentes (compression, autre échantillon, signal faible), avec leur `.CEDX`, consolideraient les
+   réglages par défaut.
+2. **Sn β à basse pression** : la v2 donne ~0,1 GPa de moins que l'analyse manuelle. Avec les images brutes
+   (scan + `.poni` + masque) de Water05, on pourrait réintégrer le run et trancher.

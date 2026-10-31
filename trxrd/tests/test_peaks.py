@@ -45,3 +45,5 @@ def test_width_in_degrees_and_options():
     assert peaks[0].fwhm == pytest.approx(expected_fwhm, rel=0.35)  # 3 points per FWHM: coarse
     only = detect_peaks(X, corrected(y), DetectionOptions(windows=[(15, 21)]))
     assert [round(p.position, 1) for p in only] == [20.0]
+    without = detect_peaks(X, corrected(y), DetectionOptions(exclude=[(19.8, 20.2)]))
+    assert [round(p.position, 1) for p in without] == [10.0]

@@ -90,3 +90,13 @@ def test_rejects_foreign_or_future_files(tmp_path):
         f.attrs["format_version"] = "99.0"
     with pytest.raises(FormatError):
         load_run(foreign)
+
+
+def test_numpy_string_names_are_written_as_plain_strings(tmp_path, sample_run):
+    """Old files hold some names as numpy.str_, which HDF5 attributes refuse."""
+    card = sample_run.phases.pop("H2O_Ice_VI")
+    card.name = np.str_("H2O_Ice_VI")
+    sample_run.phases[np.str_("H2O_Ice_VI")] = card
+    loaded = load_run(save_run(sample_run, tmp_path / "run.h5"))
+    assert list(loaded.phases) == ["H2O_Ice_VII", "H2O_Ice_VI"]
+    assert type(loaded.phases["H2O_Ice_VI"].name) is str

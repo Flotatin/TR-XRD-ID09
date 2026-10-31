@@ -132,11 +132,11 @@ def _write_calibration(entry: h5py.Group, calib: Calibration) -> None:
 
 def _write_phases(entry: h5py.Group, phases: Dict[str, PhaseCard]) -> None:
     root = nx_group(entry, "phases", "NXcollection")
-    root.attrs["order"] = list(phases)  # HDF5 lists groups alphabetically
+    root.attrs["order"] = [str(k) for k in phases]  # HDF5 lists groups alphabetically
     for key, card in phases.items():
-        group = nx_group(root, key, "NXcollection")
-        group.attrs["name"] = card.name
-        group.attrs["symmetry"] = card.symmetry
+        group = nx_group(root, str(key), "NXcollection")
+        group.attrs["name"] = str(card.name)
+        group.attrs["symmetry"] = str(card.symmetry)
         for attr in ("a", "b", "c", "alpha", "beta", "gamma", "v0", "k0", "k0p", "alpha_t", "v_min_ratio"):
             group.attrs[attr] = nan_if_none(getattr(card, attr))
         for attr in ("t_range", "p_range"):
@@ -165,8 +165,8 @@ def _write_oscilloscope(entry: h5py.Group, osc: Oscilloscope) -> None:
     names = list(osc.channels)
     signal = osc.trigger_channel if osc.trigger_channel in osc.channels else (names[0] if names else "time")
     group = nx_group(entry, "oscilloscope", "NXdata", signal=signal, axes="time")
-    group.attrs["channels"] = names
-    group.attrs["trigger_channel"] = osc.trigger_channel
+    group.attrs["channels"] = [str(n) for n in names]
+    group.attrs["trigger_channel"] = str(osc.trigger_channel)
     group["time"] = np.asarray(osc.time, dtype=float)
     for name, values in osc.channels.items():
         group[name] = np.asarray(values, dtype=float)

@@ -15,9 +15,18 @@ Cost of a combination (lower is better), in units of "one unexplained strong pea
 
     Σ_peaks  s_j · min(1, (d_j / tol)²)        distance to the nearest line, 1 if none within tol
   + cost_missing_line · Σ_strong lines not observed (relative intensity)
+  + cost_chance · Σ_phases p_chance · Σ_j s_j        (peaks a phase would explain by pure chance)
   + cost_phase · n_phases                        (a phase must explain enough to be added)
+
+p_chance = n_lines_in_window · 2·tol / window width: a phase with a forest of
+lines (ice XXI: 72 lines between 8 and 25°) explains any pattern by chance
+and must be credited only for what it explains beyond that.
   + ((P_max − P_min) / max_pressure_spread)²     (optional: phases of one sample see similar P)
-  + cost_phase_change · (phases added or removed w.r.t. the previous spectrum)
+  + cost_family_change · (families added or removed w.r.t. the previous spectrum)
+  + cost_phase_change · (phases added or removed)    (a polymorph change inside a family is cheap)
+
+The family of a phase is the start of its name ("H2O_Ice_VII" -> "H2O",
+"Sn_Beta" -> "Sn"): the sample does not vanish, it transforms.
 
 s_j = min(1, snr_j / snr_full) weighs each detected peak by its significance.
 Weak lines of a card may explain a peak (texture, spotty rings) but only the
@@ -53,12 +62,20 @@ class SearchOptions:
     max_combined_phases: int = 12  # only the phases explaining most alone enter combinations of 2+ phases
     snr_full: float = 10.0  # detected peaks with this SNR or more weigh 1
     cost_missing_line: float = 0.5
-    cost_phase: float = 0.6
-    max_pressure_spread: Optional[float] = None  # GPa
+    cost_chance: float = 1.0
+    cost_phase: float = 0.5
+    max_pressure_spread: Optional[float] = 1.5  # GPa, soft (None: phases at any pressure)
     max_pressure_step: Optional[float] = None  # GPa, with `previous`: |P - P_previous| allowed
-    cost_phase_change: float = 1.0
+    cost_phase_change: float = 0.2
+    cost_family_change: float = 1.0
+    exclude: Optional[Sequence[Tuple[float, float]]] = None  # 2θ zones where lines can be neither seen nor missed
     temperature: float = eos.T_REF
     keep: int = 10  # combinations refined and returned
+
+
+def family(name: str) -> str:
+    """'H2O_Ice_VII' -> 'H2O': polymorphs of one substance."""
+    return str(name).split("_", 1)[0]
 
 
 @dataclass
@@ -87,6 +104,7 @@ class _Phase:
     card: PhaseCard
     reflections: np.ndarray  # indices into card.reflections
     weights: np.ndarray  # relative intensities (strongest = 1), 0 for the lines that are not required
+    relative: np.ndarray  # relative intensities (strongest = 1) of every line
     pressures: np.ndarray  # grid
     lines: np.ndarray  # 2θ [n_pressures, n_reflections], NaN outside the window
 
@@ -121,12 +139,14 @@ class LineTables:
         pressures = np.arange(lo, hi + 0.5 * self.options.pressure_step, self.options.pressure_step)
         lines = card.two_theta_table(pressures, self.energy_ev, self.options.temperature)[:, selected]
         lines[(lines < self.window[0]) | (lines > self.window[1])] = np.nan
+        for lo, hi in self.options.exclude or ():
+            lines[(lines >= lo) & (lines <= hi)] = np.nan
         valid = np.isfinite(lines).any(axis=1)
         if not valid.any():
             return None
-        weights = intensity[selected] / intensity[selected].max()
-        weights[weights < self.options.min_line_intensity / 100] = 0.0
-        return _Phase(card, selected, weights, pressures[valid], lines[valid])
+        relative = intensity[selected] / intensity[selected].max()
+        weights = np.where(relative < self.options.min_line_intensity / 100, 0.0, relative)
+        return _Phase(card, selected, weights, relative, pressures[valid], lines[valid])
 
 
 class _Problem:
@@ -135,13 +155,17 @@ class _Problem:
         self.tables = tables
         self.previous = previous or {}
         self.x = np.array([p.position for p in peaks], dtype=float)
+        lo, hi = tables.window
+        excluded = sum(max(0.0, min(hi, b) - max(lo, a)) for a, b in options.exclude or ())
+        self.width = max(hi - lo - excluded, 1e-9)
         self.strength = np.minimum(1.0, np.array([p.snr for p in peaks], dtype=float) / options.snr_full)
         self.phases: Dict[str, _Phase] = {}
         for name, phase in tables.phases.items():
             lo, hi = self._pressure_bounds(name, phase.card)
             rows = (phase.pressures >= lo - 1e-9) & (phase.pressures <= hi + 1e-9)
             if rows.any():
-                self.phases[name] = _Phase(phase.card, phase.reflections, phase.weights, phase.pressures[rows], phase.lines[rows])
+                self.phases[name] = _Phase(phase.card, phase.reflections, phase.weights, phase.relative,
+                                           phase.pressures[rows], phase.lines[rows])
 
     def _pressure_bounds(self, name: str, card: PhaseCard) -> Tuple[float, float]:
         lo, hi = self.tables.bounds(card)
@@ -168,15 +192,21 @@ class _Problem:
         missing = np.isfinite(lines) & ~(gap <= self.options.tolerance)
         return np.sum(np.where(missing, phase.weights, 0.0), axis=-1)
 
+    def penalty(self, phase: _Phase, lines: np.ndarray) -> np.ndarray:
+        """Cost a phase brings by itself: its missing strong lines and its chance matches."""
+        n_lines = np.sum(np.isfinite(lines), axis=-1)
+        chance = np.minimum(1.0, n_lines * 2 * self.options.tolerance / self.width) * np.sum(self.strength)
+        return self.options.cost_missing_line * self.missing_cost(phase, lines) + self.options.cost_chance * chance
+
     def candidates(self, name: str) -> List[Tuple[float, np.ndarray, float]]:
-        """(pressure, distances, missing cost) of the best distinct assignments of one phase."""
+        """(pressure, distances, own penalty) of the best distinct assignments of one phase."""
         phase = self.phases[name]
         tol = self.options.tolerance
         distances = self.distances(phase.lines)
         explained = distances <= tol
         cost = np.sum(self.strength * np.where(explained, (distances / tol) ** 2, 1.0), axis=1)
-        missing = self.missing_cost(phase, phase.lines)
-        cost = cost + self.options.cost_missing_line * missing
+        missing = self.penalty(phase, phase.lines)
+        cost = cost + missing
         picked, signatures = [], set()
         for i in np.argsort(cost, kind="stable"):
             if not explained[i].any():
@@ -192,17 +222,23 @@ class _Problem:
 
     # -------------------------------------------------------------- combinations
 
-    def combination_cost(self, names: Sequence[str], pressures: Sequence[float], distances, missing) -> float:
+    def combination_cost(self, names: Sequence[str], pressures: Sequence[float], distances, penalties) -> float:
         options = self.options
         nearest = np.min(np.vstack(distances), axis=0) if len(distances) else np.full(self.x.size, np.inf)
         ratio = nearest / options.tolerance
         cost = float(np.sum(self.strength * np.where(ratio <= 1, ratio**2, 1.0)))
-        cost += options.cost_missing_line * float(sum(missing)) + options.cost_phase * len(names)
+        cost += float(sum(penalties)) + options.cost_phase * len(names)
         if options.max_pressure_spread and len(pressures) > 1:
             cost += ((max(pressures) - min(pressures)) / options.max_pressure_spread) ** 2
-        if self.previous:
-            cost += options.cost_phase_change * len(set(names) ^ set(self.previous))
+        cost += self.change_cost(names)
         return cost
+
+    def change_cost(self, names) -> float:
+        if not self.previous:
+            return 0.0
+        options = self.options
+        families = {family(n) for n in names} ^ {family(n) for n in self.previous}
+        return options.cost_phase_change * len(set(names) ^ set(self.previous)) + options.cost_family_change * len(families)
 
     def subset_costs(self, names, candidates):
         """combination_cost of every product of the candidates of `names` at once."""
@@ -213,13 +249,12 @@ class _Problem:
         nearest = np.minimum.reduce(distances) if self.x.size else np.zeros((index[0].size, 0))
         ratio = nearest / options.tolerance
         cost = np.sum(self.strength * np.where(ratio <= 1, ratio**2, 1.0), axis=1)
-        cost += options.cost_missing_line * sum(np.array([c[2] for c in cand])[i] for cand, i in zip(candidates, index))
+        cost += sum(np.array([c[2] for c in cand])[i] for cand, i in zip(candidates, index))
         cost += options.cost_phase * len(names)
         pressures = np.stack([np.array([c[0] for c in cand])[i] for cand, i in zip(candidates, index)], axis=1)
         if options.max_pressure_spread and len(names) > 1:
             cost += ((pressures.max(axis=1) - pressures.min(axis=1)) / options.max_pressure_spread) ** 2
-        if self.previous:
-            cost += options.cost_phase_change * len(set(names) ^ set(self.previous))
+        cost += self.change_cost(names)
         return zip(cost.tolist(), pressures.tolist())
 
     def lines_at(self, name: str, pressure: float) -> np.ndarray:
@@ -236,22 +271,26 @@ class _Problem:
         names = list(pressures)
         all_lines = [self.lines_at(n, p) for n, p in pressures.items()]
         distances = [self.distances(lines[None, :])[0] for lines in all_lines]
-        missing = [float(self.missing_cost(self.phases[n], lines[None, :])[0]) for n, lines in zip(names, all_lines)]
-        cost = self.combination_cost(names, list(pressures.values()), distances, missing)
+        penalties = [float(self.penalty(self.phases[n], lines[None, :])[0]) for n, lines in zip(names, all_lines)]
+        cost = self.combination_cost(names, list(pressures.values()), distances, penalties)
         matches, unexplained = [], []
+        tol = self.options.tolerance
         for j, x in enumerate(self.x):
+            # when reflections of several phases overlap, the peak goes to the line expected
+            # strongest (a 100 % line of one phase rather than a 5 % line of another)
             best = None
             for name, lines in zip(names, all_lines):
                 if np.isfinite(lines).any():
                     k = int(np.nanargmin(np.abs(lines - x)))
                     gap = abs(lines[k] - x)
-                    if gap <= self.options.tolerance and (best is None or gap < best[0]):
-                        best = (gap, name, k, lines[k])
+                    if gap <= tol:
+                        score = self.phases[name].relative[k] * (1 - 0.5 * (gap / tol) ** 2)
+                        if best is None or score > best[0]:
+                            best = (score, name, k, lines[k])
             if best is None:
                 unexplained.append(j)
             else:
-                phase = self.phases[best[1]]
-                matches.append(Match(j, best[1], int(phase.reflections[best[2]]), float(best[3])))
+                matches.append(Match(j, best[1], int(self.phases[best[1]].reflections[best[2]]), float(best[3])))
         missing_lines = {}
         for name, lines in zip(names, all_lines):
             observed = {m.reflection for m in matches if m.phase == name}

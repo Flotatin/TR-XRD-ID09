@@ -8,6 +8,7 @@ previous result is the prior of the next spectrum.
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass, field
 from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -29,6 +30,9 @@ class AutoOptions:
     search: SearchOptions = field(default_factory=SearchOptions)
     fit: FitOptions = field(default_factory=FitOptions)
     window: Optional[Tuple[float, float]] = None  # 2θ range analysed (default: whole pattern)
+    # 2θ zones whose peaks belong to no phase (gasket, diamond...): no phase is matched there,
+    # but their peaks are still fitted as free peaks so that their tails do not bias the neighbours
+    exclude: Optional[Sequence[Tuple[float, float]]] = None
     follow: bool = True  # the previous spectrum is the prior of the next one
 
 
@@ -64,12 +68,15 @@ def apply_solution(
     peaks: Sequence[DetectedPeak],
     window: Tuple[float, float],
     options: Optional[FitOptions] = None,
+    others: Sequence[DetectedPeak] = (),
 ) -> Spectrum:
     """Replace the phases of spectrum `index` by `solution`, then fit them.
 
     Peaks start at the detected position, height and width; a detected peak
     shared by several lines (overlap) starts each of them at its expected
-    position instead.
+    position instead. Detected peaks explained by no phase, and `others`
+    (peaks of the excluded zones), are fitted as free peaks so that they do
+    not bias their neighbours.
     """
     options = options or FitOptions()
     shared: Dict[int, int] = {}
@@ -105,9 +112,52 @@ def apply_solution(
                 )
             )
         fits.append(PhaseFit(phase=phase, pressure=pressure, temperature=options.temperature, peaks=new_peaks))
+    free = [
+        Peak(f"unassigned_{k}", options.model, center=p.position, height=p.height,
+             width=profiles.width_from_fwhm(options.model, p.fwhm, shape) if np.isfinite(p.fwhm) else options.width,
+             shape=shape)
+        for k, p in enumerate([peaks[j] for j in solution.unexplained] + list(others))
+    ]
     spectrum = run.spectra[index]
     spectrum.phases = fits
-    return fit_spectrum(run, index, fit_range=window, options=options)
+    return fit_spectrum(run, index, fit_range=window, options=options, extra_peaks=free)
+
+
+@dataclass
+class StaticPeak:
+    position: float  # mean 2θ (deg)
+    spread: float  # standard deviation of the position along the series (deg)
+    fraction: float  # fraction of the spectra where it is detected
+
+    def zone(self, half_width: float = 0.1) -> Tuple[float, float]:
+        return (round(self.position - half_width, 3), round(self.position + half_width, 3))
+
+
+def find_static_peaks(
+    run: Run,
+    indices: Iterable[int],
+    window: Optional[Tuple[float, float]] = None,
+    detection: Optional[DetectionOptions] = None,
+    tolerance: float = 0.1,
+    min_fraction: float = 0.8,
+) -> List[StaticPeak]:
+    """Peaks found at the same 2θ (within `tolerance`) in most spectra of a series.
+
+    In a run where the pressure changes, a peak that does not move belongs to
+    no sample phase (gasket, diamond, window...) and is a candidate for an
+    exclusion zone. Only a suggestion: in a static run every peak is static.
+    """
+    indices = list(indices)
+    if window is None:
+        window = analysis_window(run, AutoOptions())
+    positions = [[p.position for p in detect(run, i, window, detection)] for i in indices]
+    reference = max(positions, key=len) if positions else []
+    static = []
+    for x0 in reference:
+        hits = [min(ps, key=lambda x: abs(x - x0)) for ps in positions if ps and min(abs(x - x0) for x in ps) <= tolerance]
+        if len(hits) >= min_fraction * len(indices):
+            static.append(StaticPeak(float(np.mean(hits)), float(np.std(hits)), len(hits) / len(indices)))
+    return static
 
 
 def auto_analyse(
@@ -123,17 +173,27 @@ def auto_analyse(
         raise ValueError("The run has no calibration (energy needed)")
     names = list(phases) if phases is not None else list(run.phases)
     window = analysis_window(run, options)
-    tables = LineTables({n: run.phases[n] for n in names}, run.calibration.energy_ev, window, options.search)
+    exclude = list(options.exclude or [])
+    search = dataclasses.replace(options.search, exclude=exclude + list(options.search.exclude or []))
+    # positions are already known within the matching tolerance: the fit must not wander further
+    fit = dataclasses.replace(options.fit, center_tolerance=min(options.fit.center_tolerance, options.search.tolerance))
+
+    def excluded(peak: DetectedPeak) -> bool:
+        return any(lo <= peak.position <= hi for lo, hi in exclude)
+
+    tables = LineTables({n: run.phases[n] for n in names}, run.calibration.energy_ev, window, search)
     indices = list(indices)
     results: List[AutoResult] = []
     previous: Optional[Dict[str, float]] = None
     for k, index in enumerate(indices):
-        peaks = detect(run, index, window, options.detection)
+        detected = detect(run, index, window, options.detection)
+        peaks = [p for p in detected if not excluded(p)]
         solutions = search_composition(peaks, tables, previous if options.follow else None)
         result = AutoResult(index, peaks, solutions)
         if solutions:
             result.applied = solutions[0]
-            spectrum = apply_solution(run, index, solutions[0], peaks, window, options.fit)
+            others = [p for p in detected if excluded(p)]
+            spectrum = apply_solution(run, index, solutions[0], peaks, window, fit, others)
             found = {f.phase: f.pressure for f in spectrum.phases if np.isfinite(f.pressure)}
             previous = found or previous
         else:

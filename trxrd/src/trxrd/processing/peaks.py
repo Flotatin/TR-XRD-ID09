@@ -42,6 +42,7 @@ class DetectionOptions:
     shoulders: bool = True
     max_peaks: Optional[int] = None  # keep the strongest ones
     windows: Optional[Sequence[Tuple[float, float]]] = None  # 2θ zones where peaks are kept
+    exclude: Optional[Sequence[Tuple[float, float]]] = None  # 2θ zones ignored (gasket, diamond, detector gaps...)
 
 
 def _odd(n: float, minimum: int = 3) -> int:
@@ -115,6 +116,8 @@ def detect_peaks(x: np.ndarray, y: np.ndarray, options: Optional[DetectionOption
     found = [p for p in found if lo <= p.position <= hi]
     if options.windows:
         found = [p for p in found if any(lo <= p.position <= hi for lo, hi in options.windows)]
+    if options.exclude:
+        found = [p for p in found if not any(lo <= p.position <= hi for lo, hi in options.exclude)]
     if options.max_peaks is not None:
         found = sorted(found, key=lambda p: p.snr, reverse=True)[: options.max_peaks]
     return sorted(found, key=lambda p: p.position)
