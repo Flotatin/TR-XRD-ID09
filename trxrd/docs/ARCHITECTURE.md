@@ -3,7 +3,7 @@
 `trxrd` est la **version 2** du programme de traitement DRX résolu en temps (ID09, DAC dynamique). Elle est
 écrite de zéro et vit pour l'instant dans le dossier `trxrd/` du dépôt historique. La **version 1**
 (`cedapp` : `main.py`, `src/cedapp`, `src/Bibli_python`) n'est pas modifiée ; elle reste disponible pour relire
-les anciennes données, et son dernier état porte le tag git `v1-cedapp`.
+les anciennes données ; son dernier état est le commit `6f579f5` de `main` (à marquer du tag `v1-cedapp`).
 
 Ce document décrit les couches du programme, le format de fichier, l'accès depuis un notebook, la conversion
 des anciens fichiers, l'interface graphique prévue et la feuille de route.
@@ -15,7 +15,7 @@ des anciens fichiers, l'interface graphique prévue et la feuille de route.
 | Sujet | Décision |
 |---|---|
 | Sauvegarde | Un fichier d'analyse HDF5 **séparé** des données brutes, avec un lien externe vers elles (§5). Les fichiers bruts ne sont jamais modifiés. |
-| Versions | **v1 = `cedapp`** (ancienne, figée, tag `v1-cedapp`, fichiers `.CEDX`) ; **v2 = `trxrd`** (nouvelle, `2.0.0a1`, fichiers `.trxrd.h5`). |
+| Versions | **v1 = `cedapp`** (ancienne, figée, commit `6f579f5` de `main`, fichiers `.CEDX`) ; **v2 = `trxrd`** (nouvelle, `2.0.0a1`, fichiers `.trxrd.h5`). |
 | Ancien programme | Conservé tel quel pour les anciennes données. Le nouveau programme ira dans un **dépôt séparé** une fois bien avancé (§10). |
 | Jauges de spectroscopie (rubis, Sm, SrFCl, rhodamine) | **Abandonnées.** Seules les phases DRX existent. Le convertisseur les ignore en le signalant. |
 | Interface graphique | **PySide6** + pyqtgraph : nouveau programme, nouvelle interface (§8). |

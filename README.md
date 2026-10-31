@@ -10,7 +10,7 @@ Ce dépôt contient **deux programmes distincts** :
 | Interface | PyQt5 | PySide6 (en cours) ; ligne de commande `trxrd` ; notebook (`XRDRun`) |
 | État | **figée** : sert à relire les anciennes données | **en développement** ; deviendra un dépôt séparé |
 | Lancer | `python main.py` | `pip install -e "./trxrd[notebook]"` puis `trxrd --help` |
-| Git | tag `v1-cedapp` = dernier état de la v1 | branche `claude/h5-data-architecture-twebkb` |
+| Git | branche `main` (dernier commit de la v1 : `6f579f5`, tag `v1-cedapp` conseillé) | branche `claude/h5-data-architecture-twebkb` |
 
 Les anciens fichiers `.CEDX` se convertissent au nouveau format avec `trxrd convert`, sans avoir besoin de la v1.
 La v2 est documentée dans [trxrd/README.md](trxrd/README.md) et [trxrd/docs/ARCHITECTURE.md](trxrd/docs/ARCHITECTURE.md).
