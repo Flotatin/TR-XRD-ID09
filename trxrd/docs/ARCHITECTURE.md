@@ -127,12 +127,13 @@ trxrd/
 │   ├── services/
 │   │   ├── run_builder.py      ✅ scan brut → Run (intégration, fond, oscilloscope, base de temps)
 │   │   ├── fitting.py          ✅ ajuster un spectre ou une série (en suivant l'évolution)
-│   │   ├── identification.py   ✅ analyse automatique : détection → phases → ajustement → P
+│   │   ├── identification.py   ✅ analyse automatique : détection → phases → ajustement → P, suivi des pics
+│   │   ├── validation.py       ✅ comparaison avec une analyse de référence (`trxrd compare`)
 │   │   └── session.py          ✅ état de l'application pour le GUI (run courant, sélection, événements)
 │   ├── notebook.py             ✅ XRDRun : lecture seule pour notebooks
-│   ├── cli.py                  ✅ trxrd build | auto | convert | info
+│   ├── cli.py                  ✅ trxrd build | auto | compare | convert | info
 │   └── gui/                    🔜 vues PySide6 + presenters (§8)
-└── tests/                      101 tests ; data/ = scan TUTO, calibration, ancien fichier .CEDX d'exemple
+└── tests/                      105 tests ; data/ = scan TUTO, calibration, ancien fichier .CEDX d'exemple
 ```
 
 ## 5. Le format de fichier `trxrd-run` (HDF5)
@@ -302,6 +303,18 @@ pas dans le calcul de la maille.
 composition (avec le spectre précédent comme a priori), puis pics **Pearson IV** placés sur les raies
 appariées (position, hauteur et largeur détectées), puis ajustement, maille et P.
 
+**Suivi des pics** (`track_peaks`, repris de la v1). Après le premier spectre, les pics détectés sont
+appariés un à un avec ceux du spectre précédent, par affectation optimale
+(`scipy.optimize.linear_sum_assignment`) avec un décalage maximal de 0,15°. Si aucun pic significatif
+(SNR ≥ 10) n'est apparu ni n'a disparu, et si aucune phase n'a perdu tous ses pics, on garde les mêmes
+phases et les mêmes raies, on part des pressions précédentes, et on ajuste directement, sans recherche de
+phases. Sinon la recherche complète est relancée. Les pics faibles peuvent aller et venir sans casser le
+suivi : ils sont ajustés comme pics libres. Le suivi se désactive avec `--no-track`.
+
+**Comparaison avec une analyse existante** : `trxrd compare ancien.CEDX --library ...` réanalyse un
+fichier de la v1 à l'aveugle et compare, spectre par spectre, les phases et les pressions avec l'analyse
+manuelle. Le fichier n'est pas modifié. C'est l'outil de validation sur les archives.
+
 ```bash
 trxrd auto analyse/water02_0001_scan0027.trxrd.h5 --phases H2O_Ice_VI H2O_Ice_VII --pmax 10 --frames 0:200
 ```
@@ -332,7 +345,7 @@ fixe (18,48–18,68°) exclue, telle que proposée par `find_static_peaks`.
 | Composition | **identique à l'analyse manuelle dans 15 spectres sur 16** ; dans le spectre 8 (coexistence VII + VI), la VI n'est pas retenue : un seul pic faible (SNR 10) la soutient |
 | Pression des glaces VII, VI, Ih | écart ≤ 0,03 GPa avec l'analyse manuelle |
 | Pression de Sn β | écart ≤ 0,16 GPa, la v2 donnant en moyenne ~0,1 GPa de moins (raie (301) en plus, forme Pearson IV ajustée différemment) : à examiner avec les images brutes |
-| Temps | ~8 s pour les 16 spectres |
+| Temps | ~5 s pour les 16 spectres en relançant la recherche partout, ~3 s avec le suivi des pics (8 spectres sur 16 suivis, résultats identiques) |
 
 Ce run a révélé les points corrigés ci-dessus : un pic fixe non modélisé qui faussait l'ajustement, la glace
 XXI qui expliquait tout par hasard, la continuité trop chère pendant une transition, les pics partagés
@@ -417,7 +430,7 @@ git push <url-du-nouveau-depot> trxrd-only:main
 |---|---|---|
 | 1 | Domaine, physique, format HDF5, lecture ESRF, intégration, fond, timing, notebook, conversion, CLI | ✅ |
 | 2 | Profils de pics, ajustement `curve_fit`, affinement de maille, P et incertitudes, séries de spectres, axes Q/d | ✅ |
-| 3 | Détection de pics, recherche de composition déterministe, analyse automatique (`trxrd auto`), validation sur un run réel | ✅ |
+| 3 | Détection de pics, recherche de composition déterministe, suivi des pics, analyse automatique (`trxrd auto`), validation sur un run réel (`trxrd compare`) | ✅ |
 | 4 | GUI « lecteur » PySide6 sur `Session` | 🔜 |
 | 5 | GUI complet : création de run, ajustement interactif, zones, calibration, vue oscilloscope | 🔜 |
 | 6 | Nouveau dépôt (§10) | 🔜 |

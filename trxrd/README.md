@@ -11,9 +11,13 @@ L'architecture, le format de fichier, les choix d'algorithmes et leur validation
 
 ## Installation
 
+Un environnement virtuel dédié, séparé de celui de la v1 : PyQt5 (v1) et PySide6 (v2) ne cohabitent pas.
+
 ```bash
-pip install -e "./trxrd[notebook,dev]"     # depuis la racine du dépôt (ou ".[notebook,dev]" depuis trxrd/)
-python -m pytest trxrd                      # 101 tests
+python -m venv .venv-v2
+.venv-v2\Scripts\activate                    # Windows ; Linux/macOS : source .venv-v2/bin/activate
+pip install -e "./trxrd[notebook,gui,dev]"  # depuis la racine du dépôt
+python -m pytest trxrd                      # 105 tests
 ```
 
 ## Ligne de commande
@@ -28,6 +32,10 @@ trxrd build RAW_DATA/water02/water02_0001/scan0027/scan_jf1m_0000.h5 \
 # (les pics fixes, joint/diamant, sont signalés avec la zone --exclude à utiliser)
 trxrd auto analyse/water02_0001_scan0027.trxrd.h5 --library trxrd/resources/phases/H2O trxrd/resources/phases/Sn \
       --pmax 10 --exclude 18.48:18.68
+
+# Réanalyser un fichier de la v1 à l'aveugle et comparer avec l'analyse manuelle (rien n'est modifié)
+trxrd compare "F:/ESRF/2026 Janvier HC-6664 id09/Fichier_CED_DRX/Water05_scan0009.CEDX" \
+      --library trxrd/resources/phases/H2O trxrd/resources/phases/Sn --pmax 10 --exclude 18.479:18.679
 
 # Anciens fichiers dill (.CEDX, .CEDXUp) -> .trxrd.h5 (l'ancien programme n'est pas nécessaire)
 trxrd convert "F:/ESRF/2024 Juin HC-5719 id09/Fichier_CED_DRX" -o converti/

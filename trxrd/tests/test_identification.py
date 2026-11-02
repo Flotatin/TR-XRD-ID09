@@ -29,8 +29,11 @@ def test_auto_analysis_follows_a_phase_transition(run):
     results = auto_analyse(run, range(len(run)), options=AutoOptions(search=SearchOptions(pressure_range=(0, 10))),
                            progress=lambda k, n: steps.append(k) or True)
     assert steps == list(range(1, len(TRUTH) + 1))
+    # the search runs on the first spectrum and where peaks appear (transition), tracking elsewhere
+    assert [r.tracked for r in results] == [False, True, False, False, True, True]
     for spectrum, truth, result in zip(run.spectra, TRUTH, results):
-        assert result.applied is not None and not result.applied.unexplained
+        assert result.applied is not None
+        assert all(result.peaks[j].snr < 10 for j in result.applied.unexplained)  # only weak ones
         found = {f.phase: f for f in spectrum.phases}
         assert set(found) == set(truth)
         for name, pressure in truth.items():
@@ -73,3 +76,37 @@ def test_excluded_strong_peak_does_not_drag_the_fit(run):
     auto_analyse(run, [5], options=options)
     found = {f.phase: f.pressure for f in run.spectra[5].phases}
     assert found["H2O_Ice_VII"] == pytest.approx(3.7, abs=0.03)
+
+
+def test_tracking_avoids_the_phase_search(run, monkeypatch):
+    from trxrd.services import identification
+
+    calls = []
+    search = identification.search_composition
+    monkeypatch.setattr(identification, "search_composition", lambda *a, **k: calls.append(1) or search(*a, **k))
+    auto_analyse(run, range(len(run)), options=AutoOptions(search=SearchOptions(pressure_range=(0, 10))))
+    assert len(calls) == 3
+    calls.clear()
+    auto_analyse(run, range(len(run)), options=AutoOptions(search=SearchOptions(pressure_range=(0, 10)), track=False))
+    assert len(calls) == len(TRUTH)
+
+
+def test_track_peaks_rules():
+    from trxrd.processing.peaks import DetectedPeak
+    from trxrd.processing.phase_search import Match, Solution
+    from trxrd.services.identification import track_peaks
+
+    def peaks(*items):
+        return [DetectedPeak(x, 100.0, 100.0, 0.08, snr) for x, snr in items]
+
+    before = peaks((13.0, 50), (14.0, 80), (16.0, 6))
+    previous = Solution({"Sn_Beta": 2.0}, 1.0, [Match(0, "Sn_Beta", 0, 13.0), Match(1, "Sn_Beta", 1, 14.0)], [2])
+    moved = track_peaks(before, previous, {"Sn_Beta": 2.1}, peaks((12.95, 50), (13.93, 80)))
+    assert moved is not None and moved.pressures == {"Sn_Beta": 2.1}
+    assert [(m.peak, m.reflection, m.two_theta) for m in moved.matches] == [(0, 0, 12.95), (1, 1, 13.93)]
+    # a weak peak may vanish (16.0 above) or appear: still tracked, the newcomer is unexplained
+    assert track_peaks(before, previous, {}, peaks((13.0, 50), (14.0, 80), (17.5, 6))).unexplained == [2]
+    # a significant peak appears, vanishes, or jumps too far: full search needed
+    assert track_peaks(before, previous, {}, peaks((13.0, 50), (14.0, 80), (17.5, 40))) is None
+    assert track_peaks(before, previous, {}, peaks((13.0, 50))) is None
+    assert track_peaks(before, previous, {}, peaks((13.0, 50), (14.4, 80))) is None

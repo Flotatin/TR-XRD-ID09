@@ -116,3 +116,14 @@ def test_cli_convert_folder(tmp_path, capsys):
     assert (tmp_path / "converted" / "run1.trxrd.h5").exists()
     assert "FAILED" in capsys.readouterr().err
     assert main(["info", str(tmp_path / "converted" / "run1.trxrd.h5")]) == 0
+
+
+def test_cli_compare_with_the_legacy_analysis(tmp_path, capsys):
+    from trxrd.cli import main
+
+    reference = tmp_path / "run.CEDX"
+    reference.write_bytes(SAMPLE.read_bytes())
+    assert main(["compare", str(reference), "--pmax", "5", "--frames", "0:3"]) == 0
+    out = capsys.readouterr().out
+    assert "reference: Ga_I" in out and "same phases in" in out
+    assert reference.read_bytes() == SAMPLE.read_bytes()  # the reference is never modified

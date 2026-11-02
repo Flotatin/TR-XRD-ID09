@@ -1,4 +1,4 @@
-"""Command line: `trxrd build | auto | convert | info`."""
+"""Command line: `trxrd build | auto | compare | convert | info`."""
 
 from __future__ import annotations
 
@@ -67,18 +67,19 @@ def _frames(text: Optional[str], n: int) -> range:
     return range(n)[slice(int(start) if start else None, int(stop) if stop else None)]
 
 
-def _cmd_auto(args: argparse.Namespace) -> int:
-    from trxrd.io.h5store import load_run, save_run
+def _add_library(run, paths) -> None:
     from trxrd.io.jcpds import read_library
+
+    for name, card in read_library(paths or []).items():
+        run.phases.setdefault(name, card)  # the cards already in the run (those really used) win
+
+
+def _auto_options(args: argparse.Namespace):
     from trxrd.processing.peaks import DetectionOptions
     from trxrd.processing.phase_search import SearchOptions
-    from trxrd.services.identification import AutoOptions, auto_analyse, find_static_peaks
+    from trxrd.services.identification import AutoOptions
 
-    run = load_run(args.run)
-    if args.library:
-        for name, card in read_library(args.library).items():
-            run.phases.setdefault(name, card)  # the cards already in the run (those really used) win
-    options = AutoOptions(
+    return AutoOptions(
         detection=DetectionOptions(min_snr=args.min_snr),
         search=SearchOptions(
             pressure_range=(args.pmin, args.pmax), tolerance=args.tolerance, max_phases=args.max_phases,
@@ -86,19 +87,69 @@ def _cmd_auto(args: argparse.Namespace) -> int:
         ),
         window=(args.tth_min, args.tth_max) if args.tth_min is not None and args.tth_max is not None else None,
         exclude=[tuple(float(v) for v in zone.split(":")) for zone in args.exclude or []] or None,
+        track=not args.no_track,
     )
+
+
+def _report_static_peaks(run, frames, options) -> None:
+    from trxrd.services.identification import find_static_peaks
+
+    if len(frames) < 5:
+        return
+    for peak in find_static_peaks(run, frames, options.window, options.detection):
+        if not any(lo <= peak.position <= hi for lo, hi in options.exclude or ()):
+            print(f"note: peak at {peak.position:.3f}° does not move (seen in {peak.fraction:.0%} of the spectra, "
+                  f"±{peak.spread:.3f}°): gasket/diamond? if so use --exclude {peak.zone()[0]}:{peak.zone()[1]}")
+
+
+def _phases_text(pressures) -> str:
+    return ", ".join(f"{name} {p:.3f}" for name, p in sorted(pressures.items())) or "-"
+
+
+def _cmd_auto(args: argparse.Namespace) -> int:
+    from trxrd.io.h5store import load_run, save_run
+    from trxrd.services.identification import auto_analyse
+
+    run = load_run(args.run)
+    _add_library(run, args.library)
+    options = _auto_options(args)
     frames = _frames(args.frames, len(run))
-    if len(frames) >= 5:
-        for peak in find_static_peaks(run, frames, options.window, options.detection):
-            if not any(lo <= peak.position <= hi for lo, hi in options.exclude or ()):
-                print(f"note: peak at {peak.position:.3f}° does not move (seen in {peak.fraction:.0%} of the spectra, "
-                      f"±{peak.spread:.3f}°): gasket/diamond? if so use --exclude {peak.zone()[0]}:{peak.zone()[1]}")
-    results = auto_analyse(run, frames, args.phases or None, options)
-    for result in results:
+    _report_static_peaks(run, frames, options)
+    for result in auto_analyse(run, frames, args.phases or None, options):
         spectrum = run.spectra[result.index]
         found = ", ".join(f"{f.phase} {f.pressure:.3f}±{f.pressure_err:.3f}" for f in spectrum.phases) or "-"
-        print(f"{result.index:5d}  t={spectrum.time:.6g}  {len(result.peaks):3d} peaks  {found}")
+        mode = "tracked" if result.tracked else "search "
+        print(f"{result.index:5d}  t={spectrum.time:.6g}  {mode} {len(result.peaks):3d} peaks  {found}")
     print(save_run(run, args.out or args.run))
+    return 0
+
+
+def _cmd_compare(args: argparse.Namespace) -> int:
+    import copy
+
+    from trxrd.io.h5store import load_run
+    from trxrd.io.legacy import is_legacy_file, legacy_to_run, load_legacy
+    from trxrd.services.identification import auto_analyse
+    from trxrd.services.validation import compare_runs
+
+    path = Path(args.reference)
+    reference = legacy_to_run(load_legacy(path), path.stem) if is_legacy_file(path) else load_run(path)
+    run = copy.deepcopy(reference)
+    for spectrum in run.spectra:
+        spectrum.phases, spectrum.model = [], None
+    _add_library(run, args.library)
+    options = _auto_options(args)
+    frames = _frames(args.frames, len(run))
+    _report_static_peaks(run, frames, options)
+    results = {r.index: r for r in auto_analyse(run, frames, args.phases or None, options)}
+    summary = compare_runs(reference, run, frames)
+    for item in summary.spectra:
+        mode = "T" if results[item.index].tracked else "S"
+        mark = "==" if item.same_phases else "!="
+        print(f"{item.index:5d} {mode} {mark}  reference: {_phases_text(item.reference):45s} found: {_phases_text(item.found)}")
+    print(f"same phases in {summary.agreement}/{len(summary.spectra)} spectra")
+    for phase, delta in sorted(summary.max_pressure_difference().items()):
+        print(f"  max |ΔP| {phase}: {delta:.3f} GPa")
     return 0
 
 
@@ -143,23 +194,34 @@ def build_parser() -> argparse.ArgumentParser:
     convert.add_argument("-o", "--out", help="output folder (default: next to each file)")
     convert.set_defaults(func=_cmd_convert)
 
+    def automatic_options(command: argparse.ArgumentParser) -> None:
+        command.add_argument("--phases", nargs="*", help="candidate phases (default: every phase of the run)")
+        command.add_argument("--library", nargs="*",
+                             help=".jcpds files or folders: extra candidate phases (cards already in the run are kept)")
+        command.add_argument("--pmin", type=float, default=0.0, help="GPa")
+        command.add_argument("--pmax", type=float, default=30.0, help="GPa")
+        command.add_argument("--frames", help="spectra to analyse, python slice, e.g. 10:200")
+        command.add_argument("--max-phases", type=int, default=3)
+        command.add_argument("--tolerance", type=float, default=0.1, help="2θ matching tolerance (deg)")
+        command.add_argument("--min-snr", type=float, default=5.0, help="detection threshold (local noise sigmas)")
+        command.add_argument("--max-step", type=float, help="max pressure change between spectra (GPa)")
+        command.add_argument("--max-spread", type=float, default=1.5,
+                             help="soft limit on the pressure difference between phases (GPa)")
+        command.add_argument("--exclude", nargs="*", help="2θ zones to ignore, e.g. 18.35:18.85 (gasket, diamond...)")
+        command.add_argument("--no-track", action="store_true", help="run the phase search on every spectrum")
+        command.add_argument("--tth-min", type=float)
+        command.add_argument("--tth-max", type=float)
+
     auto = sub.add_parser("auto", help="detect peaks, identify phases and pressures, fit (Pearson IV)")
     auto.add_argument("run", help=".trxrd.h5 run file (updated in place unless -o)")
-    auto.add_argument("--phases", nargs="*", help="candidate phases (default: every phase of the run)")
-    auto.add_argument("--library", nargs="*", help=".jcpds files or folders: extra candidate phases (cards already in the run are kept)")
-    auto.add_argument("--pmin", type=float, default=0.0, help="GPa")
-    auto.add_argument("--pmax", type=float, default=30.0, help="GPa")
-    auto.add_argument("--frames", help="spectra to analyse, python slice, e.g. 10:200")
-    auto.add_argument("--max-phases", type=int, default=3)
-    auto.add_argument("--tolerance", type=float, default=0.1, help="2θ matching tolerance (deg)")
-    auto.add_argument("--min-snr", type=float, default=5.0, help="detection threshold (local noise sigmas)")
-    auto.add_argument("--max-step", type=float, help="max pressure change between spectra (GPa)")
-    auto.add_argument("--max-spread", type=float, help="soft limit on the pressure difference between phases (GPa)")
-    auto.add_argument("--exclude", nargs="*", help="2θ zones to ignore, e.g. 18.35:18.85 (gasket, diamond...)")
-    auto.add_argument("--tth-min", type=float)
-    auto.add_argument("--tth-max", type=float)
+    automatic_options(auto)
     auto.add_argument("-o", "--out", help="output file")
     auto.set_defaults(func=_cmd_auto)
+
+    compare = sub.add_parser("compare", help="re-analyse a run automatically and compare with its existing analysis")
+    compare.add_argument("reference", help="legacy .CEDX or .trxrd.h5 file holding the reference analysis (not modified)")
+    automatic_options(compare)
+    compare.set_defaults(func=_cmd_compare)
 
     info = sub.add_parser("info", help="print the content of run files")
     info.add_argument("paths", nargs="+")

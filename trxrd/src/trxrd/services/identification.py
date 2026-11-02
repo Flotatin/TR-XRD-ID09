@@ -13,12 +13,13 @@ from dataclasses import dataclass, field
 from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
+from scipy.optimize import linear_sum_assignment
 
 from trxrd.domain import Peak, PhaseFit, Run, Spectrum
 from trxrd.physics import profiles
 from trxrd.processing import background
 from trxrd.processing.peaks import DetectedPeak, DetectionOptions, detect_peaks
-from trxrd.processing.phase_search import LineTables, SearchOptions, Solution, search_composition
+from trxrd.processing.phase_search import LineTables, Match, SearchOptions, Solution, search_composition
 from trxrd.services.fitting import FitOptions, fit_spectrum
 
 Progress = Callable[[int, int], bool]  # (done, total) -> keep going?
@@ -34,6 +35,11 @@ class AutoOptions:
     # but their peaks are still fitted as free peaks so that their tails do not bias the neighbours
     exclude: Optional[Sequence[Tuple[float, float]]] = None
     follow: bool = True  # the previous spectrum is the prior of the next one
+    # peak tracking: while no significant peak appears or vanishes, the previous phases and
+    # reflection assignments are kept and only refitted (no phase search)
+    track: bool = True
+    track_tolerance: float = 0.15  # deg, largest shift of a peak between two consecutive spectra
+    track_min_snr: float = 10.0  # weaker peaks may come and go without breaking the tracking
 
 
 @dataclass
@@ -42,6 +48,7 @@ class AutoResult:
     peaks: List[DetectedPeak]
     solutions: List[Solution]  # ranked, best first
     applied: Optional[Solution] = None
+    tracked: bool = False  # True: assignment carried over from the previous spectrum, no search
 
 
 def analysis_window(run: Run, options: AutoOptions) -> Tuple[float, float]:
@@ -123,6 +130,51 @@ def apply_solution(
     return fit_spectrum(run, index, fit_range=window, options=options, extra_peaks=free)
 
 
+def track_peaks(
+    previous_peaks: Sequence[DetectedPeak],
+    previous: Solution,
+    pressures: Dict[str, float],
+    peaks: Sequence[DetectedPeak],
+    tolerance: float = 0.15,
+    min_snr: float = 10.0,
+) -> Optional[Solution]:
+    """Carry the previous assignment over to `peaks`, or None if the pattern changed.
+
+    The peaks of two consecutive spectra are paired one to one (optimal
+    assignment, shifts up to `tolerance`). If a significant peak (SNR >=
+    `min_snr`) appeared or vanished, or if a phase lost all its peaks, the
+    composition may have changed: None, a full search is needed. Otherwise the
+    same phases keep the same reflections, starting from `pressures`.
+    """
+    if not previous_peaks or not peaks or not previous.matches:
+        return None
+    before = np.array([p.position for p in previous_peaks])
+    now = np.array([p.position for p in peaks])
+    shift = np.abs(before[:, None] - now[None, :])
+    far = shift > tolerance
+    rows, cols = linear_sum_assignment(np.where(far, 1e6, shift))
+    pairs = {int(r): int(c) for r, c in zip(rows, cols) if not far[r, c]}
+    if any(p.snr >= min_snr and i not in pairs for i, p in enumerate(previous_peaks)):
+        return None  # a significant peak vanished
+    paired = set(pairs.values())
+    if any(p.snr >= min_snr and j not in paired for j, p in enumerate(peaks)):
+        return None  # a significant peak appeared
+    matches = [
+        Match(pairs[m.peak], m.phase, m.reflection, float(now[pairs[m.peak]]))
+        for m in previous.matches
+        if m.peak in pairs
+    ]
+    if {m.phase for m in matches} != set(previous.pressures):
+        return None  # a phase lost all its peaks
+    explained = {m.peak for m in matches}
+    return Solution(
+        pressures={name: pressures.get(name, p) for name, p in previous.pressures.items()},
+        cost=np.nan,
+        matches=matches,
+        unexplained=[j for j in range(len(peaks)) if j not in explained],
+    )
+
+
 @dataclass
 class StaticPeak:
     position: float  # mean 2θ (deg)
@@ -167,7 +219,12 @@ def auto_analyse(
     options: Optional[AutoOptions] = None,
     progress: Optional[Progress] = None,
 ) -> List[AutoResult]:
-    """Analyse spectra `indices` in order with the candidate `phases` (default: all of the run)."""
+    """Analyse spectra `indices` in order with the candidate `phases` (default: all of the run).
+
+    The first spectrum, and every spectrum where the peak tracking breaks
+    (see `track_peaks`), goes through the full phase search; the others reuse
+    the previous phases and are only refitted.
+    """
     options = options or AutoOptions()
     if run.calibration is None:
         raise ValueError("The run has no calibration (energy needed)")
@@ -185,17 +242,25 @@ def auto_analyse(
     indices = list(indices)
     results: List[AutoResult] = []
     previous: Optional[Dict[str, float]] = None
+    last: Optional[AutoResult] = None
     for k, index in enumerate(indices):
         detected = detect(run, index, window, options.detection)
         peaks = [p for p in detected if not excluded(p)]
-        solutions = search_composition(peaks, tables, previous if options.follow else None)
-        result = AutoResult(index, peaks, solutions)
-        if solutions:
-            result.applied = solutions[0]
+        tracked = None
+        if options.track and last is not None and last.applied is not None:
+            tracked = track_peaks(last.peaks, last.applied, previous or {}, peaks,
+                                  options.track_tolerance, options.track_min_snr)
+        if tracked is not None:
+            result = AutoResult(index, peaks, [tracked], tracked=True)
+        else:
+            result = AutoResult(index, peaks, search_composition(peaks, tables, previous if options.follow else None))
+        if result.solutions:
+            result.applied = result.solutions[0]
             others = [p for p in detected if excluded(p)]
-            spectrum = apply_solution(run, index, solutions[0], peaks, window, fit, others)
+            spectrum = apply_solution(run, index, result.applied, peaks, window, fit, others)
             found = {f.phase: f.pressure for f in spectrum.phases if np.isfinite(f.pressure)}
             previous = found or previous
+            last = result
         else:
             run.spectra[index].phases = []
             run.spectra[index].model = None
