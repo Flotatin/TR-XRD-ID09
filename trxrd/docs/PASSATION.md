@@ -45,7 +45,9 @@ Ne pas les remettre en cause sans lui en parler.
 | Résolution en 2θ | Inutile de reproduire les 601 points de la v1 ; garder une bonne résolution (le pas = la taille d'un pixel, automatique) |
 | Axes | Affichage en 2θ, **Q (Å⁻¹)** ou d |
 | Recherche de phases | L'algorithme génétique de la v1 est remplacé par la recherche déterministe (l'utilisateur a accepté « si scipy fait mieux ») |
-| Suivi des pics | Repris de la v1 à sa demande : tant qu'aucun pic n'apparaît ni ne disparaît, on garde les phases et on n'ajuste que la pression |
+| Suivi des pics | Repris de la v1 à sa demande : tant qu'aucun pic n'apparaît ni ne disparaît, on garde les phases et on n'ajuste que la pression. Ajout validé par lui en novembre 2026 : le suivi s'arrête aussi si un pic fort (SNR ≥ 10) reste inexpliqué (§5, point 16) |
+| Transition Sn β ↔ γ | Hystérésis entre 8 et 12 GPa, pas au-delà : Sn β jusqu'à 12 GPa, Sn γ à partir de 8 GPa (fiches de la bibliothèque) ; pour les fichiers v1, la recherche prend la plage de la bibliothèque |
+| Interface | Commencer maintenant (novembre 2026), avec les briques existantes ; ajuster à l'usage |
 | Versions | v1 = `cedapp`, v2 = `trxrd` ; à afficher clairement (README racine, `trxrd --version`) |
 
 ## 3. Ce qui est fait
@@ -60,11 +62,13 @@ Ne pas les remettre en cause sans lui en parler.
 | `8cc1c8c` | Validation sur un run réel (Water05) et cinq corrections qui en découlent ; nommage v1 / v2 |
 | `e135918` | Documentation : commit de référence de la v1 |
 | `68a1b7c` | Suivi des pics ; `trxrd compare` ; `CLAUDE.md` ; environnement virtuel séparé |
+| branche `p2-validation-2026` | Validation sur les 143 runs de janvier 2026 (61 % → 81 % de spectres aux mêmes phases) : conversion des runs Jungfrau « continu », `Vmin` de la v1 non repris, coût d'apparition d'une famille nul, suivi interrompu par un pic fort inexpliqué, pics larges ignorés, tri des pics fixes, `--temperature`, familles sans casse, CLI sous Windows |
 
 ### 3.2 Par fonctionnalité
 
-Tout est testé : `python -m pytest trxrd` passe 105 tests, dont des comparaisons numériques avec la v1,
-ignorées automatiquement si la v1 est absente.
+Tout est testé : `python -m pytest trxrd` compte 121 tests. Les 7 comparaisons numériques avec la v1 sont
+ignorées quand la v1 n'est pas importable, par exemple dans `.venv-v2`, qui n'a pas PyQt5 : 114 tests
+passent alors.
 
 | Fonctionnalité | Où | État / preuve |
 |---|---|---|
@@ -73,7 +77,7 @@ ignorées automatiquement si la v1 est absente.
 | Format `.trxrd.h5` (NeXus, tables en colonnes, versionné, sauvegarde atomique) | `io/h5store.py` | ✅ aller-retour sans perte testé ; s'ouvre dans silx view / h5web |
 | Lecture des images LIMA et de l'oscilloscope BLISS | `io/esrf.py` | ✅ sur le scan TUTO |
 | Calibration (.poni texte embarqué + masque), fiches `.jcpds` | `io/calibration.py`, `io/jcpds.py` | ✅ |
-| Conversion des `.CEDX` sans l'ancien code, sans dill ni lmfit | `io/legacy.py` | ✅ testée avec ces modules bloqués ; fonctionne sur un vrai fichier |
+| Conversion des `.CEDX` sans l'ancien code, sans dill ni lmfit | `io/legacy.py` | ✅ testée avec ces modules bloqués ; les 145 `.CEDX` de janvier 2026 se convertissent |
 | Intégration pyFAI, pas automatique (48 points/° pour le TUTO) | `processing/integration.py` | ✅ |
 | Fond SNIP, lissage | `processing/background.py` | ✅ identique à la v1 |
 | Détection des triggers sur l'oscilloscope | `processing/timing.py` | ✅ identique à la v1 |
@@ -105,11 +109,23 @@ Résultat de référence, à ne pas dégrader :
 
 - mêmes phases que l'analyse manuelle dans **15 spectres sur 16** ;
 - |ΔP| ≤ 0,03 GPa pour les glaces VII, VI et Ih ;
-- |ΔP| ≤ 0,16 GPa pour Sn ;
+- |ΔP| ≤ 0,17 GPa pour Sn (0,165) ;
 - ~3 s, dont 8 spectres sur 16 suivis sans recherche.
 
 Sans `--exclude`, Sn dérive jusqu'à 0,9 GPa : le pic fixe à 18,58° (joint ou diamant) est alors pris pour
 la raie Sn (220). `trxrd compare` et `trxrd auto` signalent ce pic eux-mêmes.
+
+**Toute la campagne de janvier 2026** (143 runs, 6 969 spectres analysés à la main ; détail par famille dans
+`docs/ARCHITECTURE.md` §6.8) : **81 %** des spectres ont les mêmes phases que l'analyse manuelle, contre
+61 % avant. On a 100 % pour D2O_03, plus de 90 % pour D2O_01, Sn01, Water06, Water07 et Water08, et 22 %
+pour Water11. Une bonne part des désaccords restants est due à la référence :
+- Sn ajusté sur une seule raie ;
+- valeurs copiées d'un spectre au suivant ;
+- « Bi_BetaSn » de Bi03, qui est en fait le KCl B1 ;
+- Ga liquide.
+
+Les scripts de cette mesure ne sont pas encore dans le dépôt (voir P2). Ils reprennent `trxrd compare`
+run par run, avec une passe sans exclusion puis une passe avec les zones fixes retenues.
 
 ## 5. Leçons apprises : pièges déjà corrigés, à ne pas réintroduire
 
@@ -138,6 +154,25 @@ la raie Sn (220). `trxrd compare` et `trxrd auto` signalent ce pic eux-mêmes.
     bords, où le fond SNIP et les filtres ne sont pas fiables.
 12. **Reproduire `peakutils.baseline`** demande `scipy.linalg.pinv`, et non `numpy.linalg.pinv` : à degré 50,
     le calcul est mal conditionné.
+13. **Ne pas reprendre les paramètres numériques de la v1.** Son `Vmin = 0,8` était un repli après un échec de
+    pynverse ; repris tel quel, il plafonnait la glace VII à 7 GPa. Dans les runs en mode Jungfrau « continu »,
+    son `time_index` est un tableau, et non un nom de canal.
+14. **Un pic fixe n'est pas forcément un joint.** À pression presque constante, les raies de Sn sont fixes
+    aussi. Avant de proposer une zone, vérifier qu'aucune raie de l'échantillon, fixe elle aussi, ne s'y
+    trouve (`screen_static_peaks`).
+15. **Une famille qui apparaît ne doit rien coûter.** Le coût de continuité est fait pour qu'une phase ne
+    disparaisse pas sans raison. Appliqué aussi à l'apparition, il empêchait Sn ou la glace VII de revenir.
+16. **Le suivi doit vérifier ce qui reste inexpliqué.** Une raie forte jamais attribuée est « appariée »
+    d'un spectre au suivant, et une solution incomplète pouvait alors durer des centaines de spectres.
+17. **Une bosse large n'est pas une raie.** Au-delà de 0,5° de largeur (liquide, amorphe), un pic n'explique
+    rien et ne coûte rien dans la recherche.
+18. **Température.** Certains runs ont été analysés à 370-490 K. Comparer à 298 K faussait la glace VII
+    de −0,5 GPa.
+19. **L'analyse manuelle n'est pas la vérité.** Avant de corriger un réglage, vérifier la référence :
+    - Sn sur une seule raie ;
+    - pressions copiées d'un spectre au suivant ;
+    - phases mal nommées ;
+    - cohérence des pressions de Sn et de la glace dans une même cellule.
 
 ## 6. Reste à faire (par priorité)
 
@@ -176,19 +211,39 @@ La v1 avait aussi une console Python intégrée, qui n'est pas prioritaire.
 
 ### P2 — Valider sur les archives de l'utilisateur
 
-- [ ] Lancer `trxrd compare` sur une dizaine de `.CEDX` variés : compressions, décompressions, autres
-  échantillons (Ga, Bi, Sn seul), signal faible. Les dossiers probables sont listés en section 7.
-- [ ] Noter les résultats (même tableau qu'en section 4) dans `docs/ARCHITECTURE.md` §6.7.
-- [ ] Ajuster les réglages par défaut si besoin (`SearchOptions`, `DetectionOptions`, `AutoOptions`) **sans
-  dégrader Water05**. Chaque correction doit venir avec un test synthétique reproduisant le cas
-  (`tests/synthetic.py`).
+- [x] `trxrd compare` sur **tous** les `.CEDX` de janvier 2026 (143 runs) : 61 % → 81 % (§4,
+  `docs/ARCHITECTURE.md` §6.8). Réglages corrigés avec un test synthétique par cas, sans dégrader Water05.
+- [x] Domaines de pression de Sn β et γ : décidés par l'utilisateur (§2) et appliqués.
+- [ ] **Encore à décider avec l'utilisateur** (`docs/ARCHITECTURE.md` §13) :
+  - Sn bcc (fiche P[9,100]) : il se fait passer pour un Sn γ texturé ; le remonter vers 35 GPa ?
+  - phase non cubique vue sur une seule raie : la signaler « présente, P indéterminée » ?
+  - fiches `Bi-BetaSn` et `Ga_liq`.
+- [ ] Intégrer le script de validation d'une campagne (dossier de `.CEDX` → tableau par famille) dans le
+  dépôt, par exemple `trxrd compare` sur un dossier.
+- [ ] Mesurer aussi les campagnes 2023, 2024 et 2025 (fichiers `.CEDXUp`, section 7).
+- [ ] Désaccords restants à examiner :
+  - Water11 (22 %) : la référence place Sn γ entre 5 et 7,8 GPa, sous la limite de 8 GPa, sur une seule
+    raie ; la v2 prend ces raies pour de la glace VI. Sn β seul est pris pour de la glace VII à 14-15 GPa ;
+  - Water12_scan0015 (7 %) et Water12_scan0022 (32 %) : sauts de la glace VII entre deux pics (110)
+    candidats ; glace VI en plus là où la référence n'a que Sn (oubli de la référence ?) ;
+  - coexistence glace VI + VII sur des raies faibles ;
+  - Water01_scan0057 #8-9 : Sn β seul à 5,2 GPa au lieu de la glace VI.
+- [ ] Pistes mesurées mais non retenues :
+  - poids logarithmique des pics forts : il fait gagner D2O_02 mais effondre Water01 + D2O_01 (87 % → 59 %) ;
+  - marge commune sur les domaines de toutes les fiches : elle fait apparaître Sn bcc.
 
 ### P3 — Écart sur Sn à basse pression
 
-La v2 donne ~0,1 GPa de moins que l'analyse manuelle pour Sn β (jusqu'à 0,16 GPa). Pistes : la raie (301)
-utilisée en plus, la forme Pearson IV ajustée différemment, la pondération de la maille. Il faut les images
-brutes de Water05 (scan `scan_jf1m_0000.h5` du scan 9, `.poni` `calib_ddac2_correct.poni`, masque) : on
-reconstruit le run avec `trxrd build`, puis on compare les résidus des ajustements.
+Expliqué (`docs/ARCHITECTURE.md` §6.8). Par rapport aux ajustements manuels crédibles (~1 050 pour Sn β),
+la v2 donne −0,07 GPa pour Sn β et −0,10 GPa pour Sn γ (médianes). L'écart vient des centres de pics (−0,004°, profil
+Pearson IV), et non de la pondération, de l'EoS ou des raies utilisées. Les grands écarts de Sn01 viennent
+d'ajustements manuels jamais refaits (modèle copié, forme par défaut). Pour aller plus loin, il faut les
+images brutes de Water05 :
+- scan `scan_jf1m_0000.h5` du scan 9 ;
+- `.poni` `calib_ddac2_correct.poni` ;
+- masque.
+
+On reconstruit le run avec `trxrd build`, puis on compare les résidus des deux profils.
 
 ### P4 — Fonctions de la v1 pas encore portées
 
@@ -207,12 +262,15 @@ reconstruit le run avec `trxrd build`, puis on compare les résidus des ajusteme
 
 ### P5 — Améliorations d'algorithmes repérées
 
-- [ ] **Suivi** : une nouvelle phase qui n'apparaît qu'avec des pics faibles (SNR < 10) ne déclenche pas de
-      recherche. Option possible : une recherche forcée tous les N spectres.
+- [x] **Suivi** : il s'interrompt maintenant dès qu'un pic de SNR ≥ 10 reste inexpliqué. Une recherche
+      forcée tous les N spectres a été mesurée : elle n'apporte rien.
+- [ ] **Point de départ du suivi** : un premier spectre à un seul pic mal indexé se propage (Ga02 : KCl B2 à
+      5,8 GPa au lieu de B1 à 1 GPa). Piste : partir du spectre le mieux déterminé, ou analyser dans les deux
+      sens.
 - [ ] **Détection** : une seconde passe sur le résidu (données − ajustement) pour trouver les raies faibles
       cachées. Les 2 pics manqués sur Water05 sont des raies faibles de la glace VI.
-- [ ] **Performances** sur de longs runs (des centaines à des milliers de spectres) : à mesurer, paralléliser
-      les spectres suivis si nécessaire.
+- [x] **Performances** mesurées : ~0,1 s par spectre en moyenne ; 102 s pour les 1 600 spectres de
+      Water01_scan0074. Paralléliser n'est pas nécessaire.
 - [ ] **Fiche Ga-II** (K0' = 0) : P(V) plafonne à 0,93 GPa alors que la fiche annonce 1–10 GPa. À signaler à
       l'utilisateur, qui doit vérifier la fiche.
 
@@ -228,6 +286,10 @@ reconstruit le run avec `trxrd build`, puis on compare les résidus des ajusteme
 - Windows. Son Python historique est `f:\CODE\python_3_10_15` (Python 3.10). Pour la v2, conseiller un
   environnement séparé (`.venv-v2`), en Python **3.11 ou plus** de préférence. En 3.10, le test qui compare
   les imports au `pyproject.toml` est ignoré, faute de `tomllib`.
+- Environnement en place depuis novembre 2026 : `.venv-v2` en Python 3.14, créé avec `uv`
+  (`uv venv .venv-v2 --python 3.14` puis `uv pip install --python .venv-v2/Scripts/python.exe -e "./trxrd[notebook,gui,dev]"`).
+- Rediriger ou chaîner la sortie de `trxrd` sous Windows (`> fichier`, `| more`) faisait planter le programme
+  sur les caractères θ et Δ. C'est corrigé ; si un script Python lit cette sortie, mettre `PYTHONUTF8=1`.
 - La v1 et la v2 dans deux environnements distincts : PyQt5 et PySide6 ne cohabitent pas.
 - Archives probables, d'après le notebook `Use_drx.ipynb` :
   `F:\ESRF\2023 Mai HC-5293 id09`, `F:\ESRF\2024 Juin HC-5719 id09`, `F:\ESRF\2025 Juin HC -6205 id09`,

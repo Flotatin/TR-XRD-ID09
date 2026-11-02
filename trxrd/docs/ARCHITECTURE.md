@@ -133,7 +133,7 @@ trxrd/
 │   ├── notebook.py             ✅ XRDRun : lecture seule pour notebooks
 │   ├── cli.py                  ✅ trxrd build | auto | compare | convert | info
 │   └── gui/                    🔜 vues PySide6 + presenters (§8)
-└── tests/                      105 tests ; data/ = scan TUTO, calibration, ancien fichier .CEDX d'exemple
+└── tests/                      121 tests ; data/ = scan TUTO, calibration, ancien fichier .CEDX d'exemple
 ```
 
 ## 5. Le format de fichier `trxrd-run` (HDF5)
@@ -259,6 +259,11 @@ n'est pas détecté, aucune recherche ne peut le retrouver.
 - **Pics fixes** (`find_static_peaks`) : un pic présent au même 2θ (±0,1°) dans au moins 80 % des spectres
   d'une série est signalé par `trxrd auto`, avec la zone `--exclude` à utiliser (joint, diamant...). Ce
   n'est qu'une suggestion, jamais appliquée seule : dans un run statique, tous les pics sont fixes.
+  La suggestion est faite **après** l'analyse et triée par `screen_static_peaks` : un pic n'est pas proposé
+  si, dans au moins la moitié des spectres analysés, une phase trouvée y place une raie (I ≥ 5 %) qui ne
+  bouge pas elle non plus (< 0,2° sur la série). Quand la pression varie peu, les raies de Sn sont fixes et
+  les exclure effaçait Sn (D2O_02_scan0012 : 16/16 → 0/16). Le pic du joint de Water05, traversé par la
+  raie (220) de Sn qui bouge, reste proposé.
 
 **Composition** (`processing/phase_search.py`), à la place de l'algorithme génétique :
 
@@ -276,12 +281,12 @@ Le coût à minimiser s'exprime en « pics forts non expliqués » :
 
 | Terme | Signification |
 |---|---|
-| Σ s_j · min(1, (d_j/tol)²) | distance de chaque pic détecté à la raie la plus proche (1 s'il n'y en a aucune à moins de `tolerance`) ; s_j = min(1, SNR/10) pondère par la significativité |
+| Σ s_j · min(1, (d_j/tol)²) | distance de chaque pic détecté à la raie la plus proche (1 s'il n'y en a aucune à moins de `tolerance`) ; s_j = min(1, SNR/10) pondère par la significativité ; s_j = 0 pour un pic plus large que `max_fwhm` (0,5°) : une bosse de liquide ou d'amorphe n'explique rien et ne coûte rien (sur Water12, une bosse de 0,75° faisait choisir la glace Ic à la place de la glace VII) |
 | 0,5 × Σ intensités des raies fortes absentes | une raie forte attendue mais non vue pénalise, sans exclure (texture, grains) |
 | 1 × Σ_phases p_hasard · Σ s_j | **pics qu'une phase expliquerait par hasard** : p_hasard = nombre de raies dans la fenêtre × 2·tol / largeur. Une phase à « forêt de raies » (glace XXI : 72 raies entre 8 et 25°) explique tout par hasard et n'est créditée que de ce qu'elle explique au-delà |
 | 0,5 × nombre de phases | une phase n'est ajoutée que si elle explique assez de pics |
 | ((P_max − P_min) / 1,5 GPa)² | les phases d'un même échantillon voient des P proches (souple, réglable par `max_pressure_spread`, `None` pour désactiver) |
-| 1 × familles apparues ou disparues, 0,2 × phases changées | continuité avec le spectre précédent ; la famille est le début du nom (`H2O_Ice_VII` → `H2O`) : un changement de polymorphe (VII → VI → Ih) est peu coûteux, la disparition de l'échantillon l'est |
+| 1 × familles disparues, 0 × familles apparues, 0,2 × phases changées | continuité avec le spectre précédent ; la famille est le début du nom, sans tenir compte de la casse (`H2O_Ice_VII` → `h2o`, `KCL_B1` et `KCl_B2` → `kcl`) : un changement de polymorphe (VII → VI → Ih) est peu coûteux, la disparition de l'échantillon l'est. Une famille qui **apparaît** ne coûte rien (`cost_family_appear`) : l'échantillon et le marqueur sont dans la cellule dès le départ, et le coût symétrique empêchait Sn ou la glace VII de revenir après un spectre où ils manquaient |
 
 Les raies faibles d'une fiche peuvent expliquer un pic (texture, anneaux ponctués), mais seules les raies
 au-dessus de `min_line_intensity` (5 %) sont exigées. Quand des raies de deux phases se chevauchent, le pic
@@ -306,14 +311,20 @@ appariées (position, hauteur et largeur détectées), puis ajustement, maille e
 **Suivi des pics** (`track_peaks`, repris de la v1). Après le premier spectre, les pics détectés sont
 appariés un à un avec ceux du spectre précédent, par affectation optimale
 (`scipy.optimize.linear_sum_assignment`) avec un décalage maximal de 0,15°. Si aucun pic significatif
-(SNR ≥ 10) n'est apparu ni n'a disparu, et si aucune phase n'a perdu tous ses pics, on garde les mêmes
-phases et les mêmes raies, on part des pressions précédentes, et on ajuste directement, sans recherche de
-phases. Sinon la recherche complète est relancée. Les pics faibles peuvent aller et venir sans casser le
+(SNR ≥ 10) n'est apparu ni n'a disparu, si aucune phase n'a perdu tous ses pics, et si aucun pic de SNR ≥ 10
+(`track_unexplained_snr`, bosses larges exceptées) ne reste inexpliqué, on garde les mêmes phases et les
+mêmes raies, on part des pressions précédentes, et on ajuste directement, sans recherche de phases. Sinon la
+recherche complète est relancée. Sans la dernière condition, une solution incomplète (Sn manquant) était
+reportée sur des centaines de spectres : une raie de Sn à SNR 160 restait appariée à elle-même, donc
+« ni apparue ni disparue ». Les pics faibles peuvent aller et venir sans casser le
 suivi : ils sont ajustés comme pics libres. Le suivi se désactive avec `--no-track`.
 
 **Comparaison avec une analyse existante** : `trxrd compare ancien.CEDX --library ...` réanalyse un
 fichier de la v1 à l'aveugle et compare, spectre par spectre, les phases et les pressions avec l'analyse
-manuelle. Le fichier n'est pas modifié. C'est l'outil de validation sur les archives.
+manuelle. Le fichier n'est pas modifié. C'est l'outil de validation sur les archives. La recherche et
+l'ajustement se font à la température de l'analyse de référence (médiane de ses phases). `--temperature`
+(K) la fixe, et règle aussi `trxrd auto` (298 K par défaut). Sur les runs chauffés à 490 K, une recherche
+laissée à 298 K décalait la glace VII de Water10_scan0015 de +1,1 GPa.
 
 ```bash
 trxrd auto analyse/water02_0001_scan0027.trxrd.h5 --phases H2O_Ice_VI H2O_Ice_VII --pmax 10 --frames 0:200
@@ -344,12 +355,89 @@ fixe (18,48–18,68°) exclue, telle que proposée par `find_static_peaks`.
 | Détection | 59 des 61 pics ajustés à la main retrouvés (les 2 manqués sont des raies faibles de la glace VI) |
 | Composition | **identique à l'analyse manuelle dans 15 spectres sur 16** ; dans le spectre 8 (coexistence VII + VI), la VI n'est pas retenue : un seul pic faible (SNR 10) la soutient |
 | Pression des glaces VII, VI, Ih | écart ≤ 0,03 GPa avec l'analyse manuelle |
-| Pression de Sn β | écart ≤ 0,16 GPa, la v2 donnant en moyenne ~0,1 GPa de moins (raie (301) en plus, forme Pearson IV ajustée différemment) : à examiner avec les images brutes |
+| Pression de Sn β | écart ≤ 0,17 GPa (0,165), la v2 donnant en moyenne ~0,1 GPa de moins : écart systématique du modèle de profil, expliqué en §6.8 |
 | Temps | ~5 s pour les 16 spectres en relançant la recherche partout, ~3 s avec le suivi des pics (8 spectres sur 16 suivis, résultats identiques) |
 
 Ce run a révélé les points corrigés ci-dessus : un pic fixe non modélisé qui faussait l'ajustement, la glace
 XXI qui expliquait tout par hasard, la continuité trop chère pendant une transition, les pics partagés
 entre deux phases, et un ajustement qui ne convergeait pas quand la forme Pearson IV était mal déterminée.
+
+### 6.8 Validation sur toute la campagne HC-6664 (janvier 2026, 143 runs)
+
+Tous les `.CEDX` de `F:\ESRF\2026 Janvier HC-6664 id09\Fichier_CED_DRX` ont été réanalysés à l'aveugle
+(novembre 2026), soit 143 runs et 6 969 spectres analysés à la main. Deux runs ont été écartés : un sans
+analyse, et un doublon (`D2O_01_scan0008`). Réglages :
+- bibliothèque selon l'échantillon : H2O + Sn pour Water/D2O, Sn pour Sn01, Bi + KCl, Ga + KCl ;
+- 0 ≤ P ≤ max(10, 1,3 × P max de la référence arrondi au multiple de 5 GPa supérieur) ;
+- une passe sans exclusion, puis une passe avec les pics fixes retenus par `screen_static_peaks` ;
+- température de la référence.
+
+Critère : mêmes phases que l'analyse manuelle. Les scripts ne sont pas dans le dépôt : ils lisent les
+données de l'utilisateur.
+
+| Famille | Runs | Spectres | Avant | Après |
+|---|---|---|---|---|
+| D2O_01 | 9 | 632 | 66 % | 91 % |
+| D2O_02 | 21 | 336 | 37 % | 85 % |
+| D2O_03 | 8 | 121 | 100 % | 100 % |
+| D2O_04 | 7 | 112 | 15 % | 83 % |
+| Sn01 | 7 | 112 | 92 % | 97 % |
+| Water01 | 14 | 3 332 | 81 % | 87 % |
+| Water04 | 15 | 240 | 34 % | 68 % |
+| Water05 | 11 | 176 | 72 % | 80 % |
+| Water06 | 5 | 67 | 97 % | 97 % |
+| Water07 | 8 | 89 | 93 % | 92 % |
+| Water08 | 12 | 150 | 75 % | 91 % |
+| Water09 | 3 | 41 | 22 % | 51 % |
+| Water10 | 12 | 180 | 47 % | 77 % |
+| Water11 | 4 | 54 | 15 % | 22 % |
+| Water12 | 4 | 1 280 | 15 % | 63 % |
+| Bi03, Ga02, scan_jf1m_0000 | 3 | 47 | 21 % | 34 % |
+| **Total** | **143** | **6 969** | **61 %** | **81 %** |
+
+« Avant » correspond à l'état de la PR #16, mais avec les 8 fichiers en mode Jungfrau « continu »
+désormais convertis, et avec l'exclusion de toutes les zones proposées. Les causes
+corrigées, dans l'ordre de leur effet :
+
+| Cause | Correction |
+|---|---|
+| Une famille qui apparaît coûtait autant qu'une famille qui disparaît : Sn ou la glace VII ne revenaient plus | `cost_family_appear = 0` |
+| Le suivi reportait une solution qui laissait un pic fort inexpliqué | `track_unexplained_snr = 10` |
+| Les pics fixes proposés étaient des raies de Sn dans les runs à pression presque constante | `screen_static_peaks` |
+| `Vmin = 0,8` de la v1 repris par le convertisseur : glace VII plafonnée à 7,03 GPa, VI à 4,9, KCl B2 à 7,4 | `io/legacy.py` ne le reprend plus (§12) |
+| Bosse large (liquide) expliquée par la glace Ic | `max_fwhm = 0,5°` |
+| Glace VII 0,4 à 0,5 GPa trop basse sur Water10, Water11 et Water12_scan0015 : ces runs ont été analysés à 370-490 K | température de la référence dans `compare` |
+| `KCL_B1` et `KCl_B2` vus comme deux échantillons | familles sans casse |
+
+Bilan, spectre par spectre, par rapport à « Avant » : 1 462 spectres gagnés, 42 perdus. Les spectres perdus
+sont surtout des cas ambigus : une phase faible en plus ou en moins. Sur Water05 scan 9, rien ne change
+(15/16, glaces ≤ 0,03 GPa, Sn ≤ 0,17 GPa). Le temps de calcul passe de ~0,07 à ~0,11 s par spectre en
+moyenne, parce qu'il y a moins de spectres suivis.
+
+Une grande partie des désaccords restants vient de l'**analyse de référence** elle-même :
+- **Sn ajusté sur une seule raie.** Une maille quadratique est alors indéterminée. Cela vaut pour ~330
+  spectres de Water10, Water11 et Water12. Sur Water12, la référence met Sn γ 1,2 GPa sous la glace VII, la
+  v2 0,26 GPa sous.
+- **Valeurs copiées d'un spectre au suivant.** Dans Water01_scan0005, 347 des 461 spectres répètent la
+  pression précédente à 10⁻⁶ près.
+- **Pics isolés et pressions de Sn négatives.** On en trouve dans Water01_scan0074 et D2O_01.
+- **Bi03.** La phase « Bi_BetaSn » de la référence est le KCl B1 du milieu transmetteur.
+- **Ga02.** Ga liquide n'a pas de pic de Bragg : une recherche par pics ne peut pas le trouver.
+
+L'écart systématique de Sn est de −0,07 GPa pour Sn β et −0,10 GPa pour Sn γ (médianes sur les ajustements
+manuels crédibles, ~1 050 pour Sn β). Il vient des centres de pics : environ −0,004° avec le profil
+Pearson IV. Il ne vient ni de la pondération (+0,000 GPa), ni de l'EoS, ni du choix des raies
+(−0,003 GPa). C'est donc une incertitude systématique du modèle de profil, d'environ 0,07 GPa.
+
+**Domaines de Sn**, décision de l'utilisateur : la transition β ↔ γ a une hystérésis entre 8 et 12 GPa, et
+pas au-delà. Les fiches de la bibliothèque passent donc de P[−1, 9] à P[−1, 12] pour Sn β, et de P[9, 100]
+à P[8, 100] pour Sn γ. Les fiches des fichiers v1 gardent leur EoS mais prennent ces plages : le `--library`
+de `compare` et `auto` remplace la plage de pression, qui ne sert qu'à borner la recherche. Ce changement
+est compris dans la colonne « Après ».
+
+Restent à trancher par l'utilisateur (§13) :
+- Sn bcc, dont la fiche commence à 9 GPa : il se fait passer pour un Sn γ texturé ;
+- la fiche `Bi-BetaSn` : sa maille et son EoS sont celles de Sn β.
 
 ## 7. Lire un run dans un notebook : `XRDRun`
 
@@ -452,11 +540,17 @@ git push <url-du-nouveau-depot> trxrd-only:main
 - **Détection des pics** : seuils en σ du bruit local au lieu de fractions du maximum (§6.5).
 - **Recherche de composition** déterministe au lieu de l'algorithme génétique (§6.5, §6.6).
 - **Fond SNIP et détection des triggers** : résultats identiques à l'ancien code.
+- **`Vmin` non repris** : quand son inversion numérique (pynverse) échouait, l'ancien code fixait Vmin = 0,8,
+  ce qui arrête l'EoS à V = 0,8 V0 (glace VII ≈ 7 GPa). Le convertisseur ne garde que le `VMIN` écrit dans
+  la fiche, sinon 0,6.
 
 ## 13. Questions ouvertes
 
-1. **Plus de runs réels.** Water05 a permis de corriger cinq défauts. Deux ou trois autres runs de natures
-   différentes (compression, autre échantillon, signal faible), avec leur `.CEDX`, consolideraient les
-   réglages par défaut.
-2. **Sn β à basse pression** : la v2 donne ~0,1 GPa de moins que l'analyse manuelle. Avec les images brutes
-   (scan + `.poni` + masque) de Water05, on pourrait réintégrer le run et trancher.
+1. **Sn bcc.** Sa fiche commence à 9 GPa, et il se fait passer pour un Sn γ texturé. Faut-il le remonter
+   vers 35 GPa ? Les domaines de Sn β et γ sont décidés (§6.8).
+2. **Phases sur une seule raie** : une phase non cubique (Sn) vue sur une seule raie a une pression
+   indéterminée. Faut-il la signaler « présente, P indéterminée » plutôt que de l'ajuster ou de l'écarter ?
+3. **Fiches à revoir** : `Bi-BetaSn` (maille et EoS de Sn β), Ga-II (K0' = 0, P plafonne à 0,93 GPa) ;
+   et `Ga_liq`, qu'une recherche par pics ne peut pas trouver.
+4. **Écart de Sn** : environ −0,07 GPa, qui vient du modèle de profil (§6.8). Avec les images brutes de
+   Water05 (scan + `.poni` + masque), on pourrait comparer les résidus des deux profils.

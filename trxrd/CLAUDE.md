@@ -53,9 +53,12 @@ trxrd compare "F:/ESRF/.../Fichier_CED_DRX/Water05_scan0009.CEDX" \
       --library trxrd/resources/phases/H2O trxrd/resources/phases/Sn --pmax 10 --exclude 18.479:18.679
 ```
 
-Follow the `note:` lines (static gasket/diamond peaks -> `--exclude`). Reference result on Water05
-scan 9: same phases in 15/16 spectra, ice pressures within 0.03 GPa, Sn within 0.16 GPa.
-Never commit the user's data (raw scans, .CEDX) to the repository.
+Follow the `note:` lines (static gasket/diamond peaks -> `--exclude`; they are printed after the analysis,
+static lines of the sample are screened out). `compare` searches and fits at the temperature of the reference
+(`--temperature` overrides). Reference result on Water05 scan 9: same phases in 15/16 spectra, ice
+pressures within 0.03 GPa, Sn within 0.17 GPa. Whole January 2026 campaign (143 runs): 81% of the spectra
+with the same phases (`docs/ARCHITECTURE.md` §6.8); check the reference too (single-line Sn fits, copied
+values). Never commit the user's data (raw scans, .CEDX) to the repository.
 
 ## Where things are
 
