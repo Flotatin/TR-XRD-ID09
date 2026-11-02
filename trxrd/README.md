@@ -7,7 +7,8 @@ Traitement de la DRX résolue en temps (ID09, DAC dynamique) : intégration des 
 maille, volume et pression, sauvegarde en HDF5 ouvert et lecture en notebook.
 
 L'architecture, le format de fichier, les choix d'algorithmes et leur validation sont décrits dans
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) ; l'état du projet et la liste des tâches restantes dans
+[docs/PASSATION.md](docs/PASSATION.md).
 
 ## Installation
 
