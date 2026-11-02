@@ -5,7 +5,8 @@ Document de reprise pour Claude en local (VS Code), rédigé à la fin du travai
 (conception détaillée, format de fichier, algorithmes, validation). **À mettre à jour à chaque étape
 importante.** La section 6 sert de liste de tâches.
 
-- Branche de travail : `claude/h5-data-architecture-twebkb`. `main` contient la v1, inchangée.
+- La v2 est dans `main` depuis la PR #16 (dossier `trxrd/`) ; la v1 n'y a pas changé, et son dernier état
+  seul est le commit `6f579f5`. Travailler sur une branche et fusionner dans `main` par pull request.
 - Utilisateur : Florian Dembele, physicien des hautes pressions (DAC dynamique, ID09 à l'ESRF). Il écrit en
   français : lui répondre en français. Le code et les docstrings sont en anglais, la documentation en
   français.
@@ -219,8 +220,8 @@ reconstruit le run avec `trxrd build`, puis on compare les résidus des ajusteme
 
 - [ ] **Tag `v1-cedapp`** sur `6f579f5` : la session cloud n'a pas pu le pousser. Commande :
       `git tag -a v1-cedapp 6f579f5 -m "TR-XRD v1 (cedapp)" && git push origin v1-cedapp`.
-- [ ] **Pull request** de la branche vers `main`, ou séparation directe en nouveau dépôt
-      (`docs/ARCHITECTURE.md` §10). C'est à décider avec l'utilisateur.
+- [x] Fusion dans `main` (PR #16).
+- [ ] **Séparation en nouveau dépôt** (`docs/ARCHITECTURE.md` §10), quand l'utilisateur le décidera.
 
 ## 7. Environnement local de l'utilisateur
 
@@ -246,6 +247,6 @@ reconstruit le run avec `trxrd build`, puis on compare les résidus des ajusteme
   ni PyQt5.
 - Tout changement du format `.trxrd.h5` met à jour `FORMAT_VERSION`, `docs/ARCHITECTURE.md` §5 et les tests
   d'aller-retour.
-- Ne jamais committer de données de l'utilisateur. Messages de commit explicites, en anglais. Pousser sur
-  la branche de travail.
+- Ne jamais committer de données de l'utilisateur. Messages de commit explicites, en anglais. Travailler
+  sur une branche, puis fusionner dans `main` par pull request.
 - Mettre à jour ce fichier (sections 3, 4 et 6) à chaque étape importante.
