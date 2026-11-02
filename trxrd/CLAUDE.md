@@ -7,6 +7,9 @@ program (v1, `cedapp`, repo root) is frozen: never modify it.
 Full design, file format, algorithm choices and their validation: `docs/ARCHITECTURE.md` (read it
 before changing an algorithm or the HDF5 format).
 
+Project status, decisions already taken by the user, lessons learned and the prioritised to-do list
+(in French, keep it up to date): @docs/PASSATION.md
+
 ## Setup and checks
 
 ```bash
@@ -67,10 +70,8 @@ Never commit the user's data (raw scans, .CEDX) to the repository.
 | Automatic analysis with peak tracking | `services/identification.py` |
 | GUI state (for the coming PySide6 GUI) | `services/session.py` |
 
-## Next steps (agreed with the user)
+## Next steps
 
-1. PySide6 + pyqtgraph viewer (`trxrd/gui/`, MVP on `services.Session`): open a run or a v1 file,
-   browse spectra, fit and P(t), 2θ/Q/d axis. Then run creation from a scan, interactive fitting.
-2. Validate on more real runs of different kinds; investigate the ~0.1 GPa Sn offset at low pressure
-   with the raw images.
-3. The repository split will be done with `git subtree split --prefix=trxrd`.
+See `docs/PASSATION.md` §6 (P1: PySide6 viewer on `services.Session`; P2: validation on the user's
+archives with `trxrd compare`; P3: Sn offset; P4: v1 features not ported yet; P5: algorithm ideas; P6:
+v1 tag and repository split).
