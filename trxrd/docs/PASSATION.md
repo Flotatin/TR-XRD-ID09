@@ -276,8 +276,7 @@ On reconstruit le run avec `trxrd build`, puis on compare les résidus des deux 
 
 ### P6 — Dépôt et versions
 
-- [ ] **Tag `v1-cedapp`** sur `6f579f5` : la session cloud n'a pas pu le pousser. Commande :
-      `git tag -a v1-cedapp 6f579f5 -m "TR-XRD v1 (cedapp)" && git push origin v1-cedapp`.
+- [x] **Tag `v1-cedapp`** sur `6f579f5`, poussé sur GitHub en novembre 2026.
 - [x] Fusion dans `main` (PR #16).
 - [ ] **Séparation en nouveau dépôt** (`docs/ARCHITECTURE.md` §10), quand l'utilisateur le décidera.
 

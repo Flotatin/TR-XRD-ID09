@@ -3,7 +3,7 @@
 `trxrd` est la **version 2** du programme de traitement DRX résolu en temps (ID09, DAC dynamique). Elle est
 écrite de zéro et vit pour l'instant dans le dossier `trxrd/` du dépôt historique. La **version 1**
 (`cedapp` : `main.py`, `src/cedapp`, `src/Bibli_python`) n'est pas modifiée ; elle reste disponible pour relire
-les anciennes données ; son dernier état est le commit `6f579f5` de `main` (à marquer du tag `v1-cedapp`).
+les anciennes données ; son dernier état est le commit `6f579f5` de `main` (tag `v1-cedapp`).
 
 Ce document décrit les couches du programme, le format de fichier, l'accès depuis un notebook, la conversion
 des anciens fichiers, l'interface graphique prévue et la feuille de route.

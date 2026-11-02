@@ -1,7 +1,7 @@
 # trxrd — TR-XRD v2
 
 **Nouvelle version (v2)** du programme. L'ancienne version (v1, `cedapp`, PyQt5, fichiers `.CEDX`) reste à la
-racine du dépôt, figée, pour relire les anciennes données ; son dernier état est le commit `6f579f5` de `main`.
+racine du dépôt, figée, pour relire les anciennes données ; son dernier état est le commit `6f579f5` de `main` (tag `v1-cedapp`).
 
 Traitement de la DRX résolue en temps (ID09, DAC dynamique) : intégration des images, ajustement des pics,
 maille, volume et pression, sauvegarde en HDF5 ouvert et lecture en notebook.
