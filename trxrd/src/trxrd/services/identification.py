@@ -16,7 +16,7 @@ import numpy as np
 from scipy.optimize import linear_sum_assignment
 
 from trxrd.domain import Peak, PhaseFit, Run, Spectrum
-from trxrd.physics import profiles
+from trxrd.physics import eos, profiles
 from trxrd.processing import background
 from trxrd.processing.peaks import DetectedPeak, DetectionOptions, detect_peaks
 from trxrd.processing.phase_search import LineTables, Match, SearchOptions, Solution, search_composition
@@ -40,6 +40,8 @@ class AutoOptions:
     track: bool = True
     track_tolerance: float = 0.15  # deg, largest shift of a peak between two consecutive spectra
     track_min_snr: float = 10.0  # weaker peaks may come and go without breaking the tracking
+    # nor may the carried solution leave a peak this significant unexplained (a phase may be missing)
+    track_unexplained_snr: Optional[float] = 10.0
 
 
 @dataclass
@@ -137,14 +139,18 @@ def track_peaks(
     peaks: Sequence[DetectedPeak],
     tolerance: float = 0.15,
     min_snr: float = 10.0,
+    unexplained_snr: Optional[float] = None,
+    max_fwhm: Optional[float] = None,
 ) -> Optional[Solution]:
     """Carry the previous assignment over to `peaks`, or None if the pattern changed.
 
     The peaks of two consecutive spectra are paired one to one (optimal
     assignment, shifts up to `tolerance`). If a significant peak (SNR >=
-    `min_snr`) appeared or vanished, or if a phase lost all its peaks, the
-    composition may have changed: None, a full search is needed. Otherwise the
-    same phases keep the same reflections, starting from `pressures`.
+    `min_snr`) appeared or vanished, if a phase lost all its peaks, or if a
+    peak with SNR >= `unexplained_snr` (and not broader than `max_fwhm`) stays
+    unexplained, the composition may have changed or be incomplete: None, a
+    full search is needed. Otherwise the same phases keep the same reflections,
+    starting from `pressures`.
     """
     if not previous_peaks or not peaks or not previous.matches:
         return None
@@ -167,11 +173,16 @@ def track_peaks(
     if {m.phase for m in matches} != set(previous.pressures):
         return None  # a phase lost all its peaks
     explained = {m.peak for m in matches}
+    unexplained = [j for j in range(len(peaks)) if j not in explained]
+    if unexplained_snr is not None and any(
+        peaks[j].snr >= unexplained_snr and not peaks[j].fwhm > (max_fwhm or np.inf) for j in unexplained
+    ):
+        return None  # a strong peak no phase explains: a phase may be missing
     return Solution(
         pressures={name: pressures.get(name, p) for name, p in previous.pressures.items()},
         cost=np.nan,
         matches=matches,
-        unexplained=[j for j in range(len(peaks)) if j not in explained],
+        unexplained=unexplained,
     )
 
 
@@ -212,6 +223,49 @@ def find_static_peaks(
     return static
 
 
+def screen_static_peaks(
+    run: Run,
+    static: Sequence[StaticPeak],
+    indices: Iterable[int],
+    min_intensity: float = 5.0,
+    min_fraction: float = 0.5,
+    max_shift: float = 0.2,
+) -> List[StaticPeak]:
+    """The static peaks that are not lines of the analysed sample.
+
+    To call after an analysis without exclusion zones. When the pressure
+    changes little, the lines of the sample (Sn marker, ice) do not move
+    either. A static peak is dropped when, in at least `min_fraction` of the
+    analysed spectra, a phase found there has a line (I >= `min_intensity` %)
+    inside its zone, and that line moves by less than `max_shift` (deg) over
+    the series. A gasket peak swept by a moving line is kept.
+    """
+    indices = [i for i in indices if run.spectra[i].phases]
+    if not indices or run.calibration is None:
+        return list(static)
+    lines: Dict[Tuple[str, int], List[float]] = {}  # (phase, reflection index) -> 2θ in each spectrum
+    for i in indices:
+        for fit in run.spectra[i].phases:
+            card = run.phases.get(fit.phase)
+            if card is None or not np.isfinite(fit.pressure):
+                continue
+            temperature = fit.temperature if np.isfinite(fit.temperature) else eos.T_REF
+            positions = card.two_theta_table([fit.pressure], run.calibration.energy_ev, temperature)[0]
+            for k, (two_theta, reflection) in enumerate(zip(positions, card.reflections)):
+                if np.isfinite(two_theta) and reflection.intensity >= min_intensity:
+                    lines.setdefault((fit.phase, k), []).append(float(two_theta))
+    kept = []
+    for peak in static:
+        lo, hi = peak.zone()
+        sample_line = any(
+            sum(lo <= x <= hi for x in xs) >= min_fraction * len(indices) and max(xs) - min(xs) < max_shift
+            for xs in lines.values()
+        )
+        if not sample_line:
+            kept.append(peak)
+    return kept
+
+
 def auto_analyse(
     run: Run,
     indices: Iterable[int],
@@ -235,8 +289,8 @@ def auto_analyse(
     # positions are already known within the matching tolerance: the fit must not wander further
     fit = dataclasses.replace(options.fit, center_tolerance=min(options.fit.center_tolerance, options.search.tolerance))
 
-    def excluded(peak: DetectedPeak) -> bool:
-        return any(lo <= peak.position <= hi for lo, hi in exclude)
+    def excluded(peak: DetectedPeak) -> bool:  # zones of both options: no line can explain these peaks
+        return any(lo <= peak.position <= hi for lo, hi in search.exclude)
 
     tables = LineTables({n: run.phases[n] for n in names}, run.calibration.energy_ev, window, search)
     indices = list(indices)
@@ -249,7 +303,8 @@ def auto_analyse(
         tracked = None
         if options.track and last is not None and last.applied is not None:
             tracked = track_peaks(last.peaks, last.applied, previous or {}, peaks,
-                                  options.track_tolerance, options.track_min_snr)
+                                  options.track_tolerance, options.track_min_snr,
+                                  options.track_unexplained_snr, options.search.max_fwhm)
         if tracked is not None:
             result = AutoResult(index, peaks, [tracked], tracked=True)
         else:

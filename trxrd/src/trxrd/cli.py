@@ -71,19 +71,25 @@ def _add_library(run, paths) -> None:
     from trxrd.io.jcpds import read_library
 
     for name, card in read_library(paths or []).items():
-        run.phases.setdefault(name, card)  # the cards already in the run (those really used) win
+        own = run.phases.setdefault(name, card)  # the cards already in the run (those really used) win...
+        if own is not card and card.p_range is not None:
+            own.p_range = card.p_range  # ...but the P range, a prior of the search only, is the library's
 
 
-def _auto_options(args: argparse.Namespace):
+def _auto_options(args: argparse.Namespace, temperature: Optional[float] = None):
+    from trxrd.physics.eos import T_REF
     from trxrd.processing.peaks import DetectionOptions
     from trxrd.processing.phase_search import SearchOptions
+    from trxrd.services.fitting import FitOptions
     from trxrd.services.identification import AutoOptions
 
+    temperature = args.temperature or temperature or T_REF  # search and fit at the same T
     return AutoOptions(
         detection=DetectionOptions(min_snr=args.min_snr),
+        fit=FitOptions(temperature=temperature),
         search=SearchOptions(
             pressure_range=(args.pmin, args.pmax), tolerance=args.tolerance, max_phases=args.max_phases,
-            max_pressure_step=args.max_step, max_pressure_spread=args.max_spread,
+            max_pressure_step=args.max_step, max_pressure_spread=args.max_spread, temperature=temperature,
         ),
         window=(args.tth_min, args.tth_max) if args.tth_min is not None and args.tth_max is not None else None,
         exclude=[tuple(float(v) for v in zone.split(":")) for zone in args.exclude or []] or None,
@@ -92,11 +98,13 @@ def _auto_options(args: argparse.Namespace):
 
 
 def _report_static_peaks(run, frames, options) -> None:
-    from trxrd.services.identification import find_static_peaks
+    """After the analysis: static peaks that are no line of the sample (gasket, diamond...)."""
+    from trxrd.services.identification import find_static_peaks, screen_static_peaks
 
     if len(frames) < 5:
         return
-    for peak in find_static_peaks(run, frames, options.window, options.detection):
+    static = find_static_peaks(run, frames, options.window, options.detection)
+    for peak in screen_static_peaks(run, static, frames):
         if not any(lo <= peak.position <= hi for lo, hi in options.exclude or ()):
             print(f"note: peak at {peak.position:.3f}° does not move (seen in {peak.fraction:.0%} of the spectra, "
                   f"±{peak.spread:.3f}°): gasket/diamond? if so use --exclude {peak.zone()[0]}:{peak.zone()[1]}")
@@ -114,18 +122,20 @@ def _cmd_auto(args: argparse.Namespace) -> int:
     _add_library(run, args.library)
     options = _auto_options(args)
     frames = _frames(args.frames, len(run))
-    _report_static_peaks(run, frames, options)
     for result in auto_analyse(run, frames, args.phases or None, options):
         spectrum = run.spectra[result.index]
         found = ", ".join(f"{f.phase} {f.pressure:.3f}±{f.pressure_err:.3f}" for f in spectrum.phases) or "-"
         mode = "tracked" if result.tracked else "search "
         print(f"{result.index:5d}  t={spectrum.time:.6g}  {mode} {len(result.peaks):3d} peaks  {found}")
+    _report_static_peaks(run, frames, options)
     print(save_run(run, args.out or args.run))
     return 0
 
 
 def _cmd_compare(args: argparse.Namespace) -> int:
     import copy
+
+    import numpy as np
 
     from trxrd.io.h5store import load_run
     from trxrd.io.legacy import is_legacy_file, legacy_to_run, load_legacy
@@ -138,10 +148,11 @@ def _cmd_compare(args: argparse.Namespace) -> int:
     for spectrum in run.spectra:
         spectrum.phases, spectrum.model = [], None
     _add_library(run, args.library)
-    options = _auto_options(args)
+    temperatures = [f.temperature for s in reference.spectra for f in s.phases if np.isfinite(f.temperature)]
+    options = _auto_options(args, float(np.median(temperatures)) if temperatures else None)
     frames = _frames(args.frames, len(run))
-    _report_static_peaks(run, frames, options)
     results = {r.index: r for r in auto_analyse(run, frames, args.phases or None, options)}
+    _report_static_peaks(run, frames, options)
     summary = compare_runs(reference, run, frames)
     for item in summary.spectra:
         mode = "T" if results[item.index].tracked else "S"
@@ -154,9 +165,13 @@ def _cmd_compare(args: argparse.Namespace) -> int:
 
 
 def _cmd_info(args: argparse.Namespace) -> int:
+    from trxrd.io.legacy import is_legacy_file
     from trxrd.notebook import XRDRun
 
     for path in args.paths:
+        if is_legacy_file(path):
+            print(f"{path}: legacy v1 file, convert it first (trxrd convert)", file=sys.stderr)
+            return 1
         run = XRDRun(path)
         print(run)
         if run.note:
@@ -211,6 +226,8 @@ def build_parser() -> argparse.ArgumentParser:
         command.add_argument("--no-track", action="store_true", help="run the phase search on every spectrum")
         command.add_argument("--tth-min", type=float)
         command.add_argument("--tth-max", type=float)
+        command.add_argument("--temperature", type=float,
+                             help="K, for the pressures of the fit (default 298; compare: that of the reference)")
 
     auto = sub.add_parser("auto", help="detect peaks, identify phases and pressures, fit (Pearson IV)")
     auto.add_argument("run", help=".trxrd.h5 run file (updated in place unless -o)")
@@ -230,6 +247,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
+    for stream in (sys.stdout, sys.stderr):  # 2θ, ΔP... must not crash a cp1252 pipe or redirection (Windows)
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="replace")
     args = build_parser().parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.WARNING)
     return args.func(args)

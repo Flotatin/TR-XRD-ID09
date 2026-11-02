@@ -100,6 +100,38 @@ def test_spectroscopy_gauges_are_dropped(caplog):
     assert "Ruby" in caplog.text
 
 
+@pytest.mark.parametrize("time_index", ["Channel2", "None", np.arange(3), None])
+def test_trigger_channel_of_any_kind(time_index):
+    """Jungfrau "continuous" runs stored an array of frame indices (or "None") instead of a channel name."""
+    import pandas as pd
+
+    x = np.linspace(10, 20, 5)
+    old = SimpleNamespace(
+        Spectra=[SimpleNamespace(wnb=x, spec=x)],
+        data_oscillo=pd.DataFrame({"Time": np.arange(4.0), "Channel2": np.ones(4), "Channel3": np.zeros(4)}),
+        time_index=time_index,
+    )
+    oscilloscope = legacy_to_run(old, "continuous").oscilloscope
+    assert set(oscilloscope.channels) == {"Channel2", "Channel3"}
+    assert oscilloscope.trigger_channel == ("Channel2" if isinstance(time_index, str) and time_index == "Channel2" else "")
+
+
+@pytest.mark.parametrize("card_rows, expected", [(None, 0.6), ([["VERSION", "4"], ["Vmin", "0.5"]], 0.5)])
+def test_fallback_vmin_of_the_old_program_is_not_kept(card_rows, expected):
+    """The v1 set Vmin = 0.8 when its inversion failed: ice VII could not go above ~7 GPa."""
+    import pandas as pd
+    from trxrd.io.legacy import _phase_card
+
+    ice7 = SimpleNamespace(
+        Dhkl=pd.DataFrame({"Dhkl": [2.44023], "I": [100.0], "h": [1], "k": [1], "l": [0]}),
+        symmetrie="CUBIC", A=3.451, B=None, C=None, ALPHA=90.0, BETA=90.0, GAMMA=90.0, V0=41.4802,
+        K0=20.15, K0P=4.0, Vmin=0.8, file=None if card_rows is None else pd.DataFrame(card_rows),
+    )
+    card = _phase_card("H2O_Ice_VII", ice7)
+    assert card.v_min_ratio == expected
+    assert np.isfinite(card.two_theta_table(np.array([5.0, 10.0, 14.0]), 19000.0)).all()
+
+
 def test_legacy_extensions():
     assert is_legacy_file("run24.CEDXUp") and is_legacy_file("a.cedx") and not is_legacy_file("a.h5")
     assert load_legacy(SAMPLE).Spectra[0].E > 0
@@ -116,6 +148,41 @@ def test_cli_convert_folder(tmp_path, capsys):
     assert (tmp_path / "converted" / "run1.trxrd.h5").exists()
     assert "FAILED" in capsys.readouterr().err
     assert main(["info", str(tmp_path / "converted" / "run1.trxrd.h5")]) == 0
+
+
+def test_library_gives_the_pressure_range_of_the_run_cards():
+    """v1 cards keep their EoS, but Sn beta/gamma get the ranges of the library (hysteresis 8-12 GPa)."""
+    from conftest import LIBRARY
+    from trxrd.cli import _add_library
+    from trxrd.domain import Run
+
+    import dataclasses
+
+    card = legacy_to_run(load_legacy(SAMPLE), "x").phases["Ga_I"]
+    run = Run("sn", phases={"Sn_Gamma": dataclasses.replace(card, name="Sn_Gamma", p_range=(9.0, 100.0), k0=1.0)})
+    _add_library(run, [LIBRARY / "Sn"])
+    assert run.phases["Sn_Gamma"].p_range == (8.0, 100.0) and run.phases["Sn_Gamma"].k0 == 1.0
+    assert run.phases["Sn_Beta"].p_range == (-1.0, 12.0)
+
+
+def test_cli_info_on_a_legacy_file(capsys):
+    from trxrd.cli import main
+
+    assert main(["info", str(SAMPLE)]) == 1
+    assert "trxrd convert" in capsys.readouterr().err
+
+
+def test_cli_output_on_a_cp1252_stream(monkeypatch):
+    """Windows pipes and redirections are cp1252: the 2θ of the help must not crash the program."""
+    from trxrd.cli import main
+
+    stdout = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
+    monkeypatch.setattr(sys, "stdout", stdout)
+    with pytest.raises(SystemExit) as stop:
+        main(["compare", "--help"])
+    assert stop.value.code == 0
+    stdout.seek(0)
+    assert "tolerance (deg)" in stdout.read()
 
 
 def test_cli_compare_with_the_legacy_analysis(tmp_path, capsys):

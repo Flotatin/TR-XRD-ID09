@@ -110,3 +110,68 @@ def test_track_peaks_rules():
     assert track_peaks(before, previous, {}, peaks((13.0, 50), (14.0, 80), (17.5, 40))) is None
     assert track_peaks(before, previous, {}, peaks((13.0, 50))) is None
     assert track_peaks(before, previous, {}, peaks((13.0, 50), (14.4, 80))) is None
+
+
+def test_tracking_stops_on_a_strong_unexplained_peak():
+    """Water12: a Sn line (SNR 160) the carried solution never explained kept the tracking for hundreds of spectra."""
+    from trxrd.processing.peaks import DetectedPeak
+    from trxrd.processing.phase_search import Match, Solution
+    from trxrd.services.identification import track_peaks
+
+    before = [DetectedPeak(16.7, 900, 900, 0.25, 60.0), DetectedPeak(15.0, 900, 900, 0.25, 160.0)]
+    now = [DetectedPeak(16.72, 900, 900, 0.25, 60.0), DetectedPeak(15.0, 900, 900, 0.25, 160.0)]
+    previous = Solution({"H2O_Ice_VII": 9.0}, 1.0, [Match(0, "H2O_Ice_VII", 0, 16.7)], [1])
+    assert track_peaks(before, previous, {}, now) is not None  # old behaviour: tracked, 15.0 never explained
+    assert track_peaks(before, previous, {}, now, unexplained_snr=10.0) is None
+    # a broad hump (liquid, amorphous) left unexplained does not break the tracking
+    humped = [now[0], DetectedPeak(15.0, 900, 900, 0.8, 160.0)]
+    assert track_peaks(before, previous, {}, humped, unexplained_snr=10.0, max_fwhm=0.5) is not None
+
+
+def test_auto_analysis_searches_again_while_a_strong_peak_is_unexplained(run):
+    from synthetic import X, pearson_peaks
+
+    stray = pearson_peaks(X, [(11.0, 3000, 0.04, 1.5, 0.3)], background=0.0, seed=7)  # no candidate line there
+    for spectrum in run.spectra:
+        spectrum.intensity = spectrum.intensity + stray
+    search = SearchOptions(pressure_range=(0, 10))
+    tracked = [r.tracked for r in auto_analyse(run, range(len(run)), options=AutoOptions(search=search))]
+    assert not any(tracked)
+    old = AutoOptions(search=search, track_unexplained_snr=None)
+    assert any(r.tracked for r in auto_analyse(run, range(len(run)), options=old))
+    # an excluded peak is no unexplained peak, whichever option holds the zone
+    for options in (AutoOptions(search=search, exclude=[(10.9, 11.1)]),
+                    AutoOptions(search=SearchOptions(pressure_range=(0, 10), exclude=[(10.9, 11.1)]))):
+        assert any(r.tracked for r in auto_analyse(run, range(len(run)), options=options))
+
+
+def test_static_lines_of_the_sample_are_not_suggested():
+    """At nearly constant pressure the Sn lines do not move: they are no gasket peaks."""
+    from synthetic import X, pearson_peaks
+    from trxrd.services.identification import find_static_peaks, screen_static_peaks
+
+    library = read_library([LIBRARY / "H2O", LIBRARY / "Sn"])
+    gasket = pearson_peaks(X, [(18.58, 3000, 0.04, 1.5, 0.3)], background=0.0, seed=99)
+    spectra = []
+    for i, p_ice in enumerate([2.0, 2.4, 2.8, 3.2, 3.6, 4.0]):  # ice moves, Sn stays at 2.5 GPa
+        x, y = phase_pattern([library["H2O_Ice_VII"], library["Sn_Beta"]], [p_ice, 2.5], seed=i)
+        spectra.append(Spectrum(x, y + gasket, time=i * 1e-3, frame=i))
+    run = Run("static_sn", spectra, Calibration(energy_ev=ENERGY, poni="Distance: 0.164\n"), library)
+    options = AutoOptions(search=SearchOptions(pressure_range=(0, 10), max_pressure_spread=None))
+    auto_analyse(run, range(len(run)), ["H2O_Ice_VII", "Sn_Beta"], options)
+    sn_lines = [x for x, r in library["Sn_Beta"].two_theta_lines(2.5, ENERGY) if r.intensity >= 20 and X[0] + 0.3 < x < X[-1] - 0.3]
+    static = find_static_peaks(run, range(len(run)))
+    assert sum(any(abs(p.position - x) < 0.1 for p in static) for x in sn_lines) >= 2  # Sn lines look static
+    kept = screen_static_peaks(run, static, range(len(run)))
+    assert [round(p.position, 1) for p in kept] == [18.6]  # only the gasket is suggested
+
+
+def test_cli_temperature_goes_to_the_fit():
+    from trxrd.cli import _auto_options, build_parser
+
+    args = build_parser().parse_args(["compare", "ref.CEDX"])
+    assert _auto_options(args).fit.temperature == 298.0
+    options = _auto_options(args, 400.0)  # compare: temperature of the reference
+    assert options.fit.temperature == options.search.temperature == 400.0
+    args = build_parser().parse_args(["compare", "ref.CEDX", "--temperature", "450"])
+    assert _auto_options(args, 400.0).search.temperature == 450.0

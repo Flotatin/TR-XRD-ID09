@@ -191,6 +191,9 @@ def _phase_card(name: str, ref: Any) -> PhaseCard:
         for d, i, h, k, l in dhkl[["Dhkl", "I", "h", "k", "l"]].itertuples(index=False):
             reflections.append(Reflection(float(d), float(i), int(h), int(k), int(l)))
     text = _jcpds_text(ref)
+    # the old Vmin attribute is NOT kept: the v1 set it to 0.8 when its numerical inversion failed,
+    # which stops the EoS (and the phase search) at V = 0.8 V0, about 7 GPa for ice VII
+    vmin = re.search(r"^\s*VMIN\s*:\s*([-+0-9.eE]+)", text, re.IGNORECASE | re.MULTILINE)
     try:
         return PhaseCard(
             name=name,
@@ -208,7 +211,7 @@ def _phase_card(name: str, ref: Any) -> PhaseCard:
             reflections=reflections,
             t_range=getattr(ref, "T_range", None),
             p_range=getattr(ref, "P_range", None),
-            v_min_ratio=float(getattr(ref, "Vmin", 0.6) or 0.6),
+            v_min_ratio=float(vmin.group(1)) if vmin else PhaseCard.v_min_ratio,
             source_text=text,
         )
     except (AttributeError, TypeError, ValueError):
@@ -294,11 +297,12 @@ def _oscilloscope(obj: Any) -> Optional[Oscilloscope]:
     if frame is None or not hasattr(frame, "columns") or frame.shape[1] < 2:
         return None
     columns = list(frame.columns)
+    # a column name, but runs of the Jungfrau "continuous" mode store an array of frame indices or "None"
     trigger = getattr(obj, "time_index", "")
     return Oscilloscope(
         time=frame[columns[0]].to_numpy(dtype=float),
         channels={str(c): frame[c].to_numpy(dtype=float) for c in columns[1:]},
-        trigger_channel=str(trigger) if trigger in columns else "",
+        trigger_channel=str(trigger) if isinstance(trigger, str) and trigger in columns else "",
     )
 
 

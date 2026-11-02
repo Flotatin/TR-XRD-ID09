@@ -22,13 +22,15 @@ p_chance = n_lines_in_window · 2·tol / window width: a phase with a forest of
 lines (ice XXI: 72 lines between 8 and 25°) explains any pattern by chance
 and must be credited only for what it explains beyond that.
   + ((P_max − P_min) / max_pressure_spread)²     (optional: phases of one sample see similar P)
-  + cost_family_change · (families added or removed w.r.t. the previous spectrum)
+  + cost_family_change · (families removed w.r.t. the previous spectrum)
+  + cost_family_appear · (families added)          (the marker or the sample may show up again)
   + cost_phase_change · (phases added or removed)    (a polymorph change inside a family is cheap)
 
-The family of a phase is the start of its name ("H2O_Ice_VII" -> "H2O",
-"Sn_Beta" -> "Sn"): the sample does not vanish, it transforms.
+The family of a phase is the start of its name, case ignored ("H2O_Ice_VII" ->
+"h2o", "Sn_Beta" -> "sn"): the sample does not vanish, it transforms.
 
-s_j = min(1, snr_j / snr_full) weighs each detected peak by its significance.
+s_j = min(1, snr_j / snr_full) weighs each detected peak by its significance;
+peaks broader than `max_fwhm` (amorphous or liquid humps) weigh 0.
 Weak lines of a card may explain a peak (texture, spotty rings) but only the
 lines above `min_line_intensity` count as missing when they are not seen.
 
@@ -61,21 +63,23 @@ class SearchOptions:
     min_line_intensity: float = 5.0  # % of the strongest line: weaker lines may explain a peak but are never required
     max_combined_phases: int = 12  # only the phases explaining most alone enter combinations of 2+ phases
     snr_full: float = 10.0  # detected peaks with this SNR or more weigh 1
+    max_fwhm: Optional[float] = 0.5  # deg: broader peaks (liquid, amorphous humps) neither explain nor cost
     cost_missing_line: float = 0.5
     cost_chance: float = 1.0
     cost_phase: float = 0.5
     max_pressure_spread: Optional[float] = 1.5  # GPa, soft (None: phases at any pressure)
     max_pressure_step: Optional[float] = None  # GPa, with `previous`: |P - P_previous| allowed
     cost_phase_change: float = 0.2
-    cost_family_change: float = 1.0
+    cost_family_change: float = 1.0  # a family of the previous spectrum vanishes
+    cost_family_appear: float = 0.0  # a family absent from the previous spectrum appears
     exclude: Optional[Sequence[Tuple[float, float]]] = None  # 2θ zones where lines can be neither seen nor missed
     temperature: float = eos.T_REF
     keep: int = 10  # combinations refined and returned
 
 
 def family(name: str) -> str:
-    """'H2O_Ice_VII' -> 'H2O': polymorphs of one substance."""
-    return str(name).split("_", 1)[0]
+    """'H2O_Ice_VII' -> 'h2o': polymorphs of one substance ('KCL_B1' and 'KCl_B2' too)."""
+    return str(name).split("_", 1)[0].lower()
 
 
 @dataclass
@@ -159,6 +163,9 @@ class _Problem:
         excluded = sum(max(0.0, min(hi, b) - max(lo, a)) for a, b in options.exclude or ())
         self.width = max(hi - lo - excluded, 1e-9)
         self.strength = np.minimum(1.0, np.array([p.snr for p in peaks], dtype=float) / options.snr_full)
+        if options.max_fwhm is not None:
+            fwhm = np.array([p.fwhm for p in peaks], dtype=float)  # NaN for shoulders: kept
+            self.strength[fwhm > options.max_fwhm] = 0.0
         self.phases: Dict[str, _Phase] = {}
         for name, phase in tables.phases.items():
             lo, hi = self._pressure_bounds(name, phase.card)
@@ -237,8 +244,9 @@ class _Problem:
         if not self.previous:
             return 0.0
         options = self.options
-        families = {family(n) for n in names} ^ {family(n) for n in self.previous}
-        return options.cost_phase_change * len(set(names) ^ set(self.previous)) + options.cost_family_change * len(families)
+        now, before = {family(n) for n in names}, {family(n) for n in self.previous}
+        return (options.cost_phase_change * len(set(names) ^ set(self.previous))
+                + options.cost_family_change * len(before - now) + options.cost_family_appear * len(now - before))
 
     def subset_costs(self, names, candidates):
         """combination_cost of every product of the candidates of `names` at once."""
