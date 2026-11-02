@@ -28,3 +28,6 @@ dist/
 # IDEs
 .vscode/
 .idea/
+
+# per-version virtual environments (.venv-v2 for trxrd)
+.venv*/

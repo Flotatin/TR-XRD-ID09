@@ -1,0 +1,12 @@
+# Nota: C-Order, 1 refers to the Y axis, 2 to the X axis
+# Calibration done on Sun Jan 25 15:02:01 2026
+poni_version: 2.1
+Detector: Jungfrau1M
+Detector_config: {"pixel1": 7.5e-05, "pixel2": 7.5e-05, "max_shape": [1064, 1030], "orientation": 2}
+Distance: 0.16431223421652136
+Poni1: 0.0355988692087452
+Poni2: 0.09416933974847591
+Rot1: 0.022111943504851714
+Rot2: 0.01185218814990501
+Rot3: -2.416990307455835e-09
+Wavelength: 6.525e-11

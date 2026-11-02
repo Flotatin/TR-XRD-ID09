@@ -1,0 +1,52 @@
+VERSION: 4
+COMMENT: H2O Ice XII /T[150,350]/P[-0.2,3]/Z=18/fu=12 #, I-42d, tetragonal, a=8.304 A, c=4.024 A. CIF fourni par l'utilisateur (VESTA). Intensites = facteurs de structure calcules (O+H, poids ~Z). | AUCUNE equation d'etat publiee trouvee pour la glace XII (phase metastable, peu caracterisee en compression) -- K0/K0' laisses a 0 (pas d'extrapolation en pression possible dans Dioptas avec ce fichier). A completer si une mesure existe.
+K0:       14.05
+K0P:      4
+SYMMETRY: TETRAGONAL
+A: 8.304
+C: 4.024
+DIHKL: 4.15200 12.0 -2 0 0
+DIHKL: 3.62123 10.2 -1 0 1
+DIHKL: 2.93591 100.0 -2 -2 0
+DIHKL: 2.72908 97.0 -2 -1 -1
+DIHKL: 2.62596 31.1 -1 3 0
+DIHKL: 2.28055 66.4 -3 0 1
+DIHKL: 2.07600 50.3 -4 0 0
+DIHKL: 1.99887 9.3 -2 -3 -1
+DIHKL: 1.90336 54.6 -1 -1 -2
+DIHKL: 1.85683 69.9 -4 -2 0
+DIHKL: 1.81061 7.1 -2 0 -2
+DIHKL: 1.80103 7.0 -1 -4 1
+DIHKL: 1.62855 18.0 -5 -1 0
+DIHKL: 1.59710 34.5 -3 -1 -2
+DIHKL: 1.53519 41.5 -4 3 1
+DIHKL: 1.44479 28.8 -4 0 -2
+DIHKL: 1.43991 13.8 -5 -2 1
+DIHKL: 1.42412 2.7 -3 5 0
+DIHKL: 1.40295 40.3 -3 -3 -2
+DIHKL: 1.38400 7.5 -6 0 0
+DIHKL: 1.36454 5.6 -2 4 -2
+DIHKL: 1.32417 18.1 0 -1 3
+DIHKL: 1.31298 16.6 -2 6 0
+DIHKL: 1.29280 21.5 -1 -6 -1
+DIHKL: 1.26585 19.5 -5 1 -2
+DIHKL: 1.26156 4.9 -2 -1 -3
+DIHKL: 1.23435 10.0 -5 -4 -1
+DIHKL: 1.20708 0.8 0 -3 -3
+DIHKL: 1.18317 4.9 -6 -3 1
+DIHKL: 1.17436 0.9 -7 1 0
+DIHKL: 1.16240 13.9 -5 3 2
+DIHKL: 1.15909 16.5 -2 3 -3
+DIHKL: 1.15156 33.3 -4 -6 0
+DIHKL: 1.14028 2.9 -6 0 2
+DIHKL: 1.13787 2.0 0 -7 -1
+DIHKL: 1.11640 10.7 -4 -1 -3
+DIHKL: 1.09956 1.2 -6 -2 -2
+DIHKL: 1.09741 10.9 -7 2 -1
+DIHKL: 1.09037 2.1 -3 -7 0
+DIHKL: 1.04350 3.1 -5 0 3
+DIHKL: 1.03800 21.4 -8 0 0
+DIHKL: 1.02794 4.3 -6 -5 -1
+DIHKL: 1.01424 20.3 -5 -5 2
+DIHKL: 1.01203 11.3 -5 2 -3
+DIHKL: 1.00701 1.9 -8 -2 0

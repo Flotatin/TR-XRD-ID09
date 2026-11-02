@@ -1,0 +1,24 @@
+VERSION:   4 (4-0788 EOS from Dewaele recalibree à partir de Phys. Rev. B 70, 094112)
+COMMENT: Ta bcc 
+K0:       196.06
+K0P:      3.543
+DK0DT:    0.0
+DK0PDT:   0.0
+SYMMETRY: CUBIC
+A:        3.3031
+B:        3.3031
+C:        3.3031
+ALPHA:    90.0
+BETA:     90.0
+GAMMA:    90.0
+VOLUME:   36.03837216879101
+ALPHAT:   0.0
+DALPHADT: 0.0
+DIHKL:    2.33564	100	1	1	0
+DIHKL:    1.65155	21	2	0	0
+DIHKL:    1.34848	38	2	1	1
+DIHKL:    1.16782	13	2	2	0
+DIHKL:    1.04453	19	3	1	0
+DIHKL:    0.953523	7	2	2	2
+DIHKL:    0.882791	29	3	2	1
+DIHKL:    0.825775	4	4	0	0

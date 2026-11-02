@@ -1,3 +1,26 @@
+# TR-XRD-ID09
+
+Ce dépôt contient **deux programmes distincts** :
+
+| | v1 — ancienne version | v2 — nouvelle version |
+|---|---|---|
+| Où | racine du dépôt : `main.py`, `src/cedapp/`, `src/Bibli_python/` | dossier autonome `trxrd/` |
+| Nom du paquet | `cedapp` | `trxrd` |
+| Fichiers d'analyse | `.CEDX` / `.CEDXUp` (pickles dill) | `.trxrd.h5` (HDF5 ouvert, lisible sans le programme) |
+| Interface | PyQt5 | PySide6 (en cours) ; ligne de commande `trxrd` ; notebook (`XRDRun`) |
+| État | **figée** : sert à relire les anciennes données | **en développement** ; deviendra un dépôt séparé |
+| Lancer | `python main.py` | `pip install -e "./trxrd[notebook]"` puis `trxrd --help` |
+| Git | branche `main` (dernier commit de la v1 : `6f579f5`, tag `v1-cedapp` conseillé) | branche `claude/h5-data-architecture-twebkb` |
+
+Les anciens fichiers `.CEDX` se convertissent au nouveau format avec `trxrd convert`, sans avoir besoin de la v1.
+La v2 est documentée dans [trxrd/README.md](trxrd/README.md) et [trxrd/docs/ARCHITECTURE.md](trxrd/docs/ARCHITECTURE.md).
+
+La suite de ce fichier est la documentation d'origine de la **v1**.
+
+---
+
+# v1 (cedapp) — original documentation
+
 Python graphical application dedicated to X-ray diffraction (XRD) data processing and visualization.
 The software centralizes detector control, 1D image integration, and spectral analysis for laboratory experiments or synchrotron beamlines.
 
