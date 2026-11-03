@@ -6,9 +6,12 @@ react to its events; user actions call session/services methods.
 
 from __future__ import annotations
 
+import copy
+import dataclasses
 from collections import defaultdict
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, DefaultDict, List, Optional, Tuple, Union
+from typing import Callable, DefaultDict, Dict, Iterable, List, Optional, Tuple, Union
 
 from trxrd.domain import Calibration, Run, Spectrum
 from trxrd.io import h5store, legacy
@@ -16,6 +19,21 @@ from trxrd.services import run_builder
 
 PathLike = Union[str, Path]
 Listener = Callable[["Session"], None]
+MAX_UNDO = 30  # edits kept
+
+
+@dataclass
+class Snapshot:
+    """State of some spectra before an edit, to undo it."""
+
+    label: str  # what was done, for the menu
+    spectra: Dict[int, Spectrum]
+
+
+def _kept(spectrum: Spectrum) -> Spectrum:
+    """Copy of what an edit changes. The arrays are shared: edits replace them, they never write into them."""
+    return dataclasses.replace(spectrum, processing=dataclasses.replace(spectrum.processing),
+                               phases=copy.deepcopy(spectrum.phases), free_peaks=copy.deepcopy(spectrum.free_peaks))
 
 
 class Event:
@@ -33,6 +51,8 @@ class Session:
         self.index = 0
         self.selection: List[int] = []  # spectra chosen together; the current one may be outside
         self.dirty = False
+        self._undo: List[Snapshot] = []
+        self._redo: List[Snapshot] = []
         self._listeners: DefaultDict[str, List[Listener]] = defaultdict(list)
 
     # ------------------------------------------------------------------ events
@@ -85,6 +105,7 @@ class Session:
     def _set_run(self, run: Optional[Run], path: Optional[Path], dirty: bool) -> None:
         self.run, self.path, self.index, self.dirty = run, path, 0, dirty
         self.selection = []
+        self._undo, self._redo = [], []
         self._emit(Event.RUN_CHANGED)
         self._emit(Event.SPECTRUM_CHANGED)
 
@@ -116,3 +137,50 @@ class Session:
         """To be called by services after they changed the current run."""
         self.dirty = True
         self._emit(Event.DATA_CHANGED)
+
+    # ------------------------------------------------------------------ undo
+
+    def remember(self, indices: Iterable[int], label: str, merge: bool = False) -> None:
+        """Keep the spectra `indices` as they are, before an edit called `label`.
+
+        `merge`: successive edits with this label on the same spectra (a value
+        changed step by step) are undone together.
+        """
+        indices = list(indices)
+        self._redo = []
+        if merge and self._undo and self._undo[-1].label == label and set(self._undo[-1].spectra) == set(indices):
+            return
+        self._undo.append(Snapshot(label, {i: _kept(self.run.spectra[i]) for i in indices}))
+        del self._undo[:-MAX_UNDO]
+
+    @property
+    def undo_label(self) -> Optional[str]:
+        return self._undo[-1].label if self._undo else None
+
+    @property
+    def redo_label(self) -> Optional[str]:
+        return self._redo[-1].label if self._redo else None
+
+    def _swap(self, snapshot: Snapshot) -> Snapshot:
+        """Put `snapshot` into the run; returns what it replaced."""
+        replaced = Snapshot(snapshot.label, {i: self.run.spectra[i] for i in snapshot.spectra})
+        for index, spectrum in snapshot.spectra.items():
+            self.run.spectra[index] = spectrum
+        return replaced
+
+    def undo(self) -> Optional[str]:
+        """Undo the last edit; returns its label (None: nothing to undo)."""
+        if not self._undo:
+            return None
+        snapshot = self._undo.pop()
+        self._redo.append(self._swap(snapshot))
+        self.modified()
+        return snapshot.label
+
+    def redo(self) -> Optional[str]:
+        if not self._redo:
+            return None
+        snapshot = self._redo.pop()
+        self._undo.append(self._swap(snapshot))
+        self.modified()
+        return snapshot.label

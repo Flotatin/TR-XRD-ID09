@@ -142,6 +142,7 @@ class AnalysisPresenter:
         self.window.end_progress()
         if self.session.run is not result.run:
             return  # that run was closed meanwhile
+        self.session.remember(result.indices, "analyse automatique")
         result.apply_to(self.session.run)
         self.last = result
         self.session.modified()

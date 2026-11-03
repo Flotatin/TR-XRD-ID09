@@ -108,6 +108,7 @@ def sample_run():
             )
         if i == 2:
             spectrum.phases.append(PhaseFit(phase=ice6.name, state="in_noise", pressure=1.5, peaks=[Peak("free", "Gaussian", 12.0)]))
+            spectrum.free_peaks.append(Peak("unassigned_0", "PearsonIV", 18.58, 0.01, 50.0, 1.0, 0.1, 0.01, (1.5, 0.0)))
         spectra.append(spectrum)
     return Run(
         name="water02_0001_scan0027",

@@ -129,7 +129,7 @@ def fit_spectrum(
     *,
     fit_range: Optional[Tuple[float, float]] = None,
     options: Optional[FitOptions] = None,
-    extra_peaks: Sequence[Peak] = (),
+    extra_peaks: Optional[Sequence[Peak]] = None,
 ) -> Spectrum:
     """Fit spectrum `index` and refine every fitted phase (in place).
 
@@ -140,8 +140,9 @@ def fit_spectrum(
     Only the points within `local_window` of a peak are fitted, outside the
     `exclude` zones: a strong peak that belongs to no phase (gasket,
     diamond) cannot drag the fit. `extra_peaks` (peaks seen but assigned to no
-    phase) are fitted alongside so that they do not bias their neighbours,
-    then dropped.
+    phase; default: the free peaks of the spectrum) are fitted alongside so
+    that they do not bias their neighbours, and kept as its free peaks. Those
+    far from every phase peak do not matter to the fit and stay as they are.
     """
     options = options or FitOptions()
     spectrum = run.spectra[index]
@@ -160,8 +161,9 @@ def fit_spectrum(
     peaks = [p for f in active for p in f.peaks if p.enabled and window[0] <= p.center <= window[1]]
     centers = [p.center for p in peaks]
     reach = 2 * (options.local_window or np.inf)  # free peaks far from every phase peak are irrelevant
+    free = list(spectrum.free_peaks if extra_peaks is None else extra_peaks)
     extra = [
-        p for p in extra_peaks
+        p for p in free
         if window[0] <= p.center <= window[1] and centers and min(abs(p.center - c) for c in centers) <= reach
     ]
     fwhms = [profiles.fwhm(p.model, p.width, p.shape) for p in peaks + extra]
@@ -169,12 +171,21 @@ def fit_spectrum(
     result = fit_peaks(x[mask], y[mask], peaks + extra, center_tolerance=options.center_tolerance)
     if not result.success:
         logger.warning("Spectrum %d: %s", index, result.message)
-    fitted = {id(old): new for old, new in zip(peaks, result.peaks[: len(peaks)])}
+    fitted = {id(old): new for old, new in zip(peaks + extra, result.peaks)}
     for phase_fit in active:
         phase_fit.peaks = [fitted.get(id(p), p) for p in phase_fit.peaks]
         _update_phase(run, phase_fit, options)
-    spectrum.model = total_curve(x, [p for f in active for p in f.peaks if window[0] <= p.center <= window[1]])
+    spectrum.free_peaks = [fitted.get(id(p), p) for p in free]
+    refresh_model(spectrum)
     return spectrum
+
+
+def refresh_model(spectrum: Spectrum) -> None:
+    """Total curve of the fitted phases and of the free peaks, inside the fit range."""
+    x = np.asarray(spectrum.two_theta, dtype=float)
+    low, high = _window(spectrum, None)
+    peaks = [p for f in spectrum.phases if f.state == FitState.FITTED for p in f.peaks] + spectrum.free_peaks
+    spectrum.model = total_curve(x, [p for p in peaks if low <= p.center <= high])
 
 
 def fit_spectra(
@@ -201,6 +212,7 @@ def fit_spectra(
         else:
             if follow and previous is not None and previous.phases:
                 spectrum.phases = copy.deepcopy(previous.phases)
+                spectrum.free_peaks = copy.deepcopy(previous.free_peaks)
                 spectrum.fit_range = previous.fit_range
             fit_spectrum(run, index, fit_range=fit_range, options=options)
         previous = spectrum

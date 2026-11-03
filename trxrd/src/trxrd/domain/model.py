@@ -235,9 +235,11 @@ class Spectrum:
     label: str = ""
     processing: Processing = field(default_factory=Processing)
     baseline: Optional[np.ndarray] = None
-    model: Optional[np.ndarray] = None  # total fitted curve (baseline excluded)
+    model: Optional[np.ndarray] = None  # total fitted curve: phases and free peaks (baseline excluded)
     fit_range: Optional[Tuple[float, float]] = None
     phases: List[PhaseFit] = field(default_factory=list)
+    # peaks of no phase (gasket, diamond, unexplained), fitted so that they do not bias their neighbours
+    free_peaks: List[Peak] = field(default_factory=list)
 
     @property
     def corrected(self) -> np.ndarray:

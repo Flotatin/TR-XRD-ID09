@@ -606,3 +606,102 @@ def test_detection_presenter_shows_the_peaks_and_keeps_its_settings(compression_
     assert np.all(raw_tops > spectrum.last("show_detection")[0].y)  # + background
     presenter.set_visible(False)
     assert spectrum.last("show_detection") == (None,) and view.count("show_detection") >= 3
+
+
+def test_manual_work_on_the_phases(compression_run):
+    from trxrd.gui.presenters.editing import EditingPresenter
+
+    ice = "H2O_Ice_VII"
+    session, view, window = Session(), Recorder(), Recorder()
+    presenter = EditingPresenter(session, view, window)
+    session.attach(compression_run, None)
+    run = session.run
+    session.select(4)
+    choices = view.last("show_model")[0]
+    assert choices.on_spectrum == {} and choices.count == 6 and choices.copied_from is None
+    assert (ice, "H2O_Ice_VII  (-1–70 GPa)") in choices.cards
+
+    presenter.fit()
+    assert "Aucune phase" in view.last("show_message")[0] and session.undo_label is None
+    presenter.add(ice, 3.05)
+    assert view.last("show_model")[0].on_spectrum == {ice: 3.05} and session.dirty
+    assert session.undo_label == f"ajout de {ice}"
+    presenter.move(ice, 3.08)
+    presenter.move(ice, 3.1)
+    assert session.spectrum.phases[0].pressure == 3.1 and session.undo_label == f"pression de {ice}"
+    presenter.fit()
+    assert session.spectrum.phases[0].pressure == pytest.approx(3.1, abs=0.03)
+    assert session.undo() == "ajustement du spectre" and session.spectrum.phases[0].pressure == 3.1
+    assert session.undo() == f"pression de {ice}" and session.spectrum.phases[0].pressure == 3.05  # both moves at once
+    session.redo()
+    session.redo()
+
+    presenter.fit_series("selection", True)
+    assert "Aucun spectre" in view.last("show_message")[0]
+    session.set_selection([3, 4, 5])
+    presenter.fit_series("selection", True)
+    assert [round(run.spectra[i].phases[0].pressure, 1) for i in (3, 4, 5)] == [2.6, 3.1, 3.7]
+    assert window.last("show_message")[0].startswith("3 spectre(s) ajusté(s)") and not presenter.running
+    assert window.count("end_progress") == 1 and session.undo_label == "ajustement de 3 spectre(s)"
+    session.undo()
+    assert not run.spectra[3].phases and run.spectra[4].phases
+    session.redo()
+    assert run.spectra[3].phases
+
+    presenter.runner.cancelled = True  # "Arrêter" at once
+    presenter.fit_series("all", True)
+    presenter.runner.cancelled = False
+    assert "arrêt" in window.last("show_message")[0]
+    with pytest.raises(ValueError):
+        presenter.fit_series("some")
+
+    presenter.copy()
+    assert view.last("show_model")[0].copied_from == 4
+    session.set_selection([1, 2])
+    presenter.paste()
+    assert run.spectra[1].phases[0].phase == ice and session.undo_label == "modèle collé sur 2 spectre(s)"
+    presenter.clear()
+    assert not run.spectra[1].phases and not run.spectra[2].phases
+    session.undo()
+    assert run.spectra[2].phases
+    presenter.remove(ice)
+    assert session.spectrum.phases == []
+    presenter.copy()
+    assert "Aucune phase à copier" in view.last("show_message")[0]
+
+    session.attach(compression_run, None)  # a new run: nothing to paste
+    assert presenter.clipboard is None and view.last("show_model")[0].copied_from is None
+    run.calibration = None
+    presenter.add(ice, 3.0)
+    assert "calibration" in view.last("show_message")[0]
+
+
+def test_every_kind_of_edit_can_be_undone(compression_run):
+    from trxrd.domain import Processing
+    from trxrd.gui.presenters.analysis import AnalysisPresenter, AnalysisRequest
+    from trxrd.gui.presenters.treatment import ProcessingPresenter
+    from trxrd.services.analysis import AnalysisSettings
+
+    session, window, view = Session(), Recorder(ask_yes_no=False), Recorder()
+    session.attach(compression_run, None)
+    run = session.run
+    main = MainPresenter(session, DisplaySettings(), window)
+    processing = ProcessingPresenter(session, view)
+    processing.change(Processing(2, "svg", (11, 2)))
+    processing.change(Processing(3, "svg", (13, 2)))
+    assert window.last("set_undo") == ("traitement du spectre", None)
+    main.undo()
+    assert run.spectra[0].processing == Processing() and window.last("show_message") == ("Annulé : traitement du spectre",)
+    assert window.last("set_undo") == (None, "traitement du spectre")
+    main.redo()
+    assert run.spectra[0].processing == Processing(3, "svg", (13, 2))
+    processing.propagate("all")
+    assert session.undo_label == "traitement propagé"
+    main.undo()
+    assert run.spectra[1].processing == Processing()
+
+    window.answers["ask_analysis"] = AnalysisRequest(AnalysisSettings(pressure_range=(0.0, 10.0)), list(range(6)))
+    AnalysisPresenter(session, window).start()
+    assert all(s.phases for s in run.spectra) and session.undo_label == "analyse automatique"
+    main.undo()
+    assert not any(s.phases for s in run.spectra)

@@ -103,6 +103,15 @@ def test_files_of_version_1_0_have_an_automatic_background_window(tmp_path, samp
     assert [s.processing.baseline_window for s in load_run(path).spectra] == [None] * len(sample_run)
 
 
+def test_files_before_1_2_have_no_free_peaks(tmp_path, sample_run):
+    path = save_run(sample_run, tmp_path / "run.trxrd.h5")
+    assert [p.center for p in load_run(path).spectra[2].free_peaks] == [18.58]
+    with h5py.File(path, "a") as f:
+        f.attrs["format_version"] = "1.1"
+        del f["entry/fits/free_peaks"]
+    assert all(s.free_peaks == [] for s in load_run(path).spectra)
+
+
 def test_numpy_string_names_are_written_as_plain_strings(tmp_path, sample_run):
     """Old files hold some names as numpy.str_, which HDF5 attributes refuse."""
     card = sample_run.phases.pop("H2O_Ice_VI")

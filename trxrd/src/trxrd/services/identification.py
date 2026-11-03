@@ -326,6 +326,7 @@ def auto_analyse(
             last = result
         else:
             run.spectra[index].phases = []
+            run.spectra[index].free_peaks = []
             run.spectra[index].model = None
         results.append(result)
         if progress is not None and not progress(k + 1, len(indices)):

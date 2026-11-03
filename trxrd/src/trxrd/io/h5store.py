@@ -13,6 +13,7 @@ Layout (format "trxrd-run", see docs/ARCHITECTURE.md for the full spec)::
         processing/         table    one row per spectrum
       fits/phases/          table    one row per (spectrum, phase)
       fits/peaks/           table    one row per peak, `fit` = row in fits/phases
+      fits/free_peaks/      table    one row per peak of no phase
       results/              NXdata   P(t) per phase (derived, for quick plotting)
 
 Plain arrays and tables only: the file opens in silx view / h5web / MATLAB /
@@ -58,7 +59,7 @@ from trxrd.io.h5utils import (
 PathLike = Union[str, Path]
 
 FORMAT_NAME = "trxrd-run"
-FORMAT_VERSION = "1.1"  # 1.1: processing/baseline_window
+FORMAT_VERSION = "1.2"  # 1.1: processing/baseline_window; 1.2: fits/free_peaks
 ENTRY = "entry"
 
 PHASE_FIT_FIELDS = (
@@ -233,9 +234,8 @@ def _window(processing: Dict[str, np.ndarray], i: int) -> Optional[float]:
 def _write_fits(entry: h5py.Group, spectra: List[Spectrum]) -> None:
     fits = nx_group(entry, "fits", "NXcollection")
     phase_rows: Dict[str, list] = {k: [] for k in ("spectrum", "phase", "state", *PHASE_FIT_FIELDS)}
-    peak_rows: Dict[str, list] = {
-        k: [] for k in ("fit", "spectrum", "phase", "name", "model", *PEAK_FIELDS, "shape", "hkl", "enabled")
-    }
+    peak_rows = _new_peak_rows()
+    free_rows = _new_peak_rows()
     fit_index = 0
     for i, spectrum in enumerate(spectra):
         for fit in spectrum.phases:
@@ -245,23 +245,37 @@ def _write_fits(entry: h5py.Group, spectra: List[Spectrum]) -> None:
             for field in PHASE_FIT_FIELDS:
                 phase_rows[field].append(nan_if_none(getattr(fit, field)))
             for peak in fit.peaks:
-                peak_rows["fit"].append(fit_index)
-                peak_rows["spectrum"].append(i)
-                peak_rows["phase"].append(fit.phase)
-                peak_rows["name"].append(peak.name)
-                peak_rows["model"].append(peak.model)
-                for field in PEAK_FIELDS:
-                    peak_rows[field].append(nan_if_none(getattr(peak, field)))
-                peak_rows["shape"].append(tuple(float(v) for v in peak.shape))
-                peak_rows["hkl"].append(peak.hkl)
-                peak_rows["enabled"].append(bool(peak.enabled))
+                _add_peak_row(peak_rows, peak, i, fit_index, fit.phase)
             fit_index += 1
+        for peak in spectrum.free_peaks:
+            _add_peak_row(free_rows, peak, i, -1, "")
 
     table = {k: phase_rows[k] for k in ("spectrum", "phase", "state")}
     table["spectrum"] = np.asarray(table["spectrum"], dtype=int)
     table.update({k: np.asarray(phase_rows[k], dtype=float) for k in PHASE_FIT_FIELDS})
     write_table(fits, "phases", table)
+    write_table(fits, "peaks", _peak_table(peak_rows))
+    write_table(fits, "free_peaks", _peak_table(free_rows))
 
+
+def _new_peak_rows() -> Dict[str, list]:
+    return {k: [] for k in ("fit", "spectrum", "phase", "name", "model", *PEAK_FIELDS, "shape", "hkl", "enabled")}
+
+
+def _add_peak_row(rows: Dict[str, list], peak: Peak, spectrum: int, fit: int, phase: str) -> None:
+    rows["fit"].append(fit)
+    rows["spectrum"].append(spectrum)
+    rows["phase"].append(phase)
+    rows["name"].append(peak.name)
+    rows["model"].append(peak.model)
+    for field in PEAK_FIELDS:
+        rows[field].append(nan_if_none(getattr(peak, field)))
+    rows["shape"].append(tuple(float(v) for v in peak.shape))
+    rows["hkl"].append(peak.hkl)
+    rows["enabled"].append(bool(peak.enabled))
+
+
+def _peak_table(peak_rows: Dict[str, list]) -> Dict[str, object]:
     n_shape = max((len(s) for s in peak_rows["shape"]), default=0)
     shapes = np.full((len(peak_rows["shape"]), n_shape), np.nan)
     for row, values in enumerate(peak_rows["shape"]):
@@ -285,7 +299,7 @@ def _write_fits(entry: h5py.Group, spectra: List[Spectrum]) -> None:
             "enabled": np.asarray(peak_rows["enabled"], dtype=bool),
         }
     )
-    write_table(fits, "peaks", table)
+    return table
 
 
 def _write_results(entry: h5py.Group, run: Run) -> None:
@@ -468,17 +482,25 @@ def _read_fits(group: h5py.Group, spectra: List[Spectrum]) -> None:
         spectra[int(phases["spectrum"][row])].phases.append(fit)
 
     peaks = read_table(group["peaks"])
+    for row, peak in _peaks_of(peaks):
+        fits[int(peaks["fit"][row])].peaks.append(peak)
+    if "free_peaks" in group:  # format 1.2
+        free = read_table(group["free_peaks"])
+        for row, peak in _peaks_of(free):
+            spectra[int(free["spectrum"][row])].free_peaks.append(peak)
+
+
+def _peaks_of(peaks: Dict[str, np.ndarray]):
+    """(row, Peak) of a table of peaks."""
     shape_cols = sorted((c for c in peaks if c.startswith("shape_")), key=lambda c: int(c.split("_")[1]))
     for row in range(len(peaks["fit"])):
         shape = tuple(float(peaks[c][row]) for c in shape_cols if not np.isnan(peaks[c][row]))
         hkl = (int(peaks["h"][row]), int(peaks["k"][row]), int(peaks["l"][row])) if peaks["has_hkl"][row] else None
-        fits[int(peaks["fit"][row])].peaks.append(
-            Peak(
-                name=str(peaks["name"][row]),
-                model=str(peaks["model"][row]),
-                **{field: float(peaks[field][row]) for field in PEAK_FIELDS},
-                shape=shape,
-                hkl=hkl,
-                enabled=bool(peaks["enabled"][row]),
-            )
+        yield row, Peak(
+            name=str(peaks["name"][row]),
+            model=str(peaks["model"][row]),
+            **{field: float(peaks[field][row]) for field in PEAK_FIELDS},
+            shape=shape,
+            hkl=hkl,
+            enabled=bool(peaks["enabled"][row]),
         )

@@ -13,6 +13,7 @@ from typing import List, Optional, Sequence
 
 from trxrd import __version__
 from trxrd.gui.presenters.analysis import AnalysisPresenter
+from trxrd.gui.presenters.editing import EditingPresenter
 from trxrd.gui.presenters.treatment import DetectionPresenter, ProcessingPresenter
 from trxrd.gui.presenters.viewer import (
     CakePresenter, DisplaySettings, EvolutionPresenter, MainPresenter, MapPresenter, NavigatorPresenter,
@@ -22,7 +23,8 @@ from trxrd.gui.tasks import ThreadRunner
 from trxrd.gui.views.main_window import MainWindow, application
 from trxrd.services.session import Session
 
-FILE, NAVIGATION, VIEW, ANALYSIS, TOOLS, HELP = "&Fichier", "&Navigation", "&Affichage", "A&nalyse", "&Outils", "&Aide"
+FILE, EDIT, NAVIGATION, VIEW, ANALYSIS, TOOLS, HELP = ("&Fichier", "&Édition", "&Navigation", "&Affichage", "A&nalyse",
+                                                       "&Outils", "&Aide")
 
 
 @dataclass
@@ -32,6 +34,7 @@ class Viewer:
     window: MainWindow
     main: MainPresenter
     analysis: AnalysisPresenter
+    editing: EditingPresenter
     presenters: List[object]
 
 
@@ -56,6 +59,7 @@ def create_viewer(session: Optional[Session] = None, runner=None) -> Viewer:
     ]
     main = MainPresenter(session, settings, window, runner, version=__version__)
     analysis = AnalysisPresenter(session, window, runner)
+    editing = EditingPresenter(session, window.phases, window, runner)
     window.on_close_request = main.may_discard
     window.on_unit = main.set_unit
 
@@ -67,6 +71,11 @@ def create_viewer(session: Optional[Session] = None, runner=None) -> Viewer:
     add("save_as", FILE, "Enregistrer &sous…", main.save_as, ["Ctrl+Shift+S"])
     add("close", FILE, "&Fermer le run", main.close, ["Ctrl+W"])
     add("quit", FILE, "&Quitter", window.close, ["Ctrl+Q"])
+    add("undo", EDIT, "&Annuler", main.undo, ["Ctrl+Z"])
+    add("redo", EDIT, "&Rétablir", main.redo, ["Ctrl+Y", "Ctrl+Shift+Z"])
+    add("copy_model", EDIT, "&Copier le modèle du spectre", editing.copy, ["Ctrl+Shift+C"],
+        "Phases et pics libres du spectre courant, à coller sur d'autres spectres")
+    add("paste_model", EDIT, "C&oller le modèle sur la sélection", editing.paste, ["Ctrl+Shift+V"])
     add("previous", NAVIGATION, "Spectre &précédent", lambda: main.step(-1), ["Ctrl+Left", "PgUp"])
     add("next", NAVIGATION, "Spectre &suivant", lambda: main.step(+1), ["Ctrl+Right", "PgDown"])
     add("first", NAVIGATION, "P&remier spectre", main.first, ["Ctrl+Home"])
@@ -89,12 +98,16 @@ def create_viewer(session: Optional[Session] = None, runner=None) -> Viewer:
     window.actions.get("cake").setChecked(True)
     add("auto", ANALYSIS, "Analyse &automatique…", analysis.start, ["Ctrl+R"],
         "Détecter les pics, trouver les phases et leurs pressions, ajuster (Pearson IV), avec suivi des pics")
+    add("fit", ANALYSIS, "A&juster le spectre", editing.fit, ["Ctrl+F"],
+        "Ajuster les pics du spectre courant, puis sa maille et sa pression")
+    add("fit_selection", ANALYSIS, "Ajuster la &sélection", lambda: editing.fit_series("selection", window.phases.follow.isChecked()),
+        ["Ctrl+Shift+F"], "Ajuster la sélection de la liste, à partir du spectre courant")
     add("calibration", TOOLS, "&Calibration du détecteur…", window.show_calibration, ["Ctrl+L"],
         "Calibrer la géométrie sur une image de LaB6 / CeO2 et enregistrer le .poni")
     add("shortcuts", HELP, "&Raccourcis clavier", window.show_shortcuts, ["F1"])
     window.build_menus(toolbar=("new_run", "open", "save", "|", "previous", "next", "|", "raw", "auto"))
     main.update()  # the unit actions exist now
-    return Viewer(session, settings, window, main, analysis, presenters)
+    return Viewer(session, settings, window, main, analysis, editing, presenters)
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:

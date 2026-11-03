@@ -137,20 +137,21 @@ trxrd/
 │   │   ├── calibration.py      ✅ calibration pas à pas (image, clics, affinement, .poni)
 │   │   ├── rates.py            ✅ dP/dt par échantillon ou par phase, dP/dt moyen sur un intervalle
 │   │   ├── treatment.py        ✅ traitement des spectres (fond, filtre), détection telle que l'analyse la voit
+│   │   ├── editing.py          ✅ travail manuel : phases d'un spectre, ajustement d'une série, modèle copié
 │   │   └── session.py          ✅ état de l'application pour le GUI (run courant, sélection, événements)
 │   ├── notebook.py             ✅ XRDRun : lecture seule pour notebooks
 │   ├── cli.py                  ✅ trxrd build | auto | compare | convert | info
 │   └── gui/                    ✅ lecteur PySide6 + pyqtgraph (§9) : `trxrd-gui`
 │       ├── presenters/         display.py (données affichées), viewer.py, preview.py, analysis.py, treatment.py,
-│       │                       calibration.py
+│       │                       editing.py, calibration.py
 │       │                       (presenters), sans Qt
 │       ├── views/              plots.py (spectre, cake, grandeurs(t), carte), images.py (échelle, niveaux, couleurs),
-│       │                       panels.py, new_run.py, preview.py, analysis.py, treatment.py, calibration.py,
-│       │                       main_window.py
+│       │                       panels.py, new_run.py, preview.py, analysis.py, treatment.py, editing.py,
+│       │                       calibration.py, main_window.py
 │       ├── actions.py          registre unique des QAction (menus, barre d'outils, raccourcis)
 │       ├── tasks.py            calculs longs dans un thread, résultat rendu au thread de l'interface
 │       └── app.py              assemblage : fenêtre + presenters + actions
-└── tests/                      227 tests ; data/ = scan TUTO, calibration, ancien fichier .CEDX d'exemple
+└── tests/                      240 tests ; data/ = scan TUTO, calibration, ancien fichier .CEDX d'exemple
 ```
 
 ## 5. Le format de fichier `trxrd-run` (HDF5)
@@ -167,7 +168,7 @@ Nom conseillé : `<dataset>_<scan>.trxrd.h5`, par exemple `water02_0001_scan0027
 ### 5.2 Arborescence
 
 ```
-/                                   NXroot   file_format="trxrd-run", format_version="1.1", creator
+/                                   NXroot   file_format="trxrd-run", format_version="1.2", creator
 └── entry                           NXentry  default → results (ou spectra)
     ├── title, note, created        texte
     ├── ui_state                    JSON libre (zones, préférences d'affichage du GUI)
@@ -184,13 +185,15 @@ Nom conseillé : `<dataset>_<scan>.trxrd.h5`, par exemple `water02_0001_scan0027
     │   ├── two_theta [npt]         (ou [n, npt] si les axes diffèrent, complété par NaN)
     │   ├── intensity [n, npt]
     │   ├── baseline  [n, npt]      fond SNIP (ligne NaN = non calculé)
-    │   ├── model     [n, npt]      courbe ajustée totale, sans le fond (NaN = pas d'ajustement)
+    │   ├── model     [n, npt]      courbe ajustée totale, phases et pics libres, sans le fond (NaN = pas d'ajustement)
     │   ├── n_points, time [s], frame, label, fit_range [n, 2]
     │   └── processing/             table : baseline_degree, filter_type, filter_p1, filter_p2,
     │                               baseline_window (°, NaN = automatique ; depuis 1.1)
     ├── fits/
     │   ├── phases/                 une ligne par (spectre, phase) : spectrum, phase, state, a, a_err, b, b_err,
     │   │                           c, c_err, volume, volume_err, pressure, pressure_err, temperature, temperature_err
+    │   ├── free_peaks/             pics d'aucune phase (joint, diamant, inexpliqués) : mêmes colonnes que peaks
+    │   │                           (fit = -1, phase vide) ; depuis 1.2
     │   └── peaks/                  une ligne par pic : fit (ligne de fits/phases), spectrum, phase, name, model,
     │                               center, center_err, height, height_err, width, width_err,
     │                               shape_0, shape_1..., has_hkl, h, k, l, inter, enabled
@@ -206,6 +209,8 @@ on écrit un fichier `.tmp`, puis on le renomme.
 changement incompatible change le majeur, et `load_run` refuse alors le fichier avec un message clair.
 - 1.1 (novembre 2026) : colonne `baseline_window` du traitement, la fenêtre du fond SNIP, pour les pics
   larges. Un fichier 1.0 se relit avec une fenêtre automatique, comme avant.
+- 1.2 (novembre 2026) : table `fits/free_peaks`. Un fichier plus ancien se relit sans pic libre. Sa courbe
+  `model`, enregistrée telle quelle, ne contient que les pics des phases.
 
 ## 6. Traitements
 
@@ -728,9 +733,8 @@ Sur Water05 scan 9, l'analyse lancée depuis l'interface (dossiers H2O et Sn, P 
 16, |ΔP| ≤ 0,03 GPa pour les glaces et 0,165 GPa pour Sn, en 1,6 s. Sur Water01_scan0074 (1 600 spectres),
 l'analyse avance à environ 18 spectres par seconde, et l'arrêt garde les spectres déjà faits.
 
-Remarque : la courbe « ajustement » enregistrée (`Spectrum.model`) ne contient que les pics des phases. Les
-pics libres (zones exclues, pics inexpliqués) sont ajustés, mais ni tracés ni gardés. À revoir avec
-l'ajustement interactif (étape 3).
+Les pics libres (zones exclues, pics inexpliqués) sont gardés avec le spectre (`Spectrum.free_peaks`), et la
+courbe « ajustement » les contient : elle monte sur le pic du joint.
 
 **Traitement des spectres et contrôle de la détection** (demandés par l'utilisateur après un essai raté
 sur D2O_03_0001_scan0006 ; `services/treatment.py`, `gui/presenters/treatment.py`, `gui/views/treatment.py`) :
@@ -781,8 +785,35 @@ Ce qu'on a appris sur D2O_03_0001_scan0006 :
   avec une fenêtre de fond de 1°, les largeurs ajustées tombent à 0,05° près et P à 0,01 GPa près. Avant,
   la seconde raie sortait à 1,66°.
 
+**Étape 3, travail manuel sur les phases** (onglet Phases ; `services/editing.py`, `gui/presenters/editing.py`,
+`gui/views/editing.py`) :
+- **Phases d'un spectre** : on choisit une fiche du run et une pression, puis « Ajouter ». Les pics de la phase
+  se posent sur les pics détectés à moins de la tolérance de ses raies (position, hauteur, largeur), avec les
+  réglages de l'analyse. Un pic détecté va à la raie la plus forte, et les pics déjà expliqués par une autre
+  phase ou par un pic libre ne sont pas repris (§5 de PASSATION, point 7). Les raies fortes (≥ 10 %) sans pic
+  détecté restent à leur position attendue. Pour une phase du spectre, changer P déplace ses raies tout de
+  suite ; la courbe suit les pics replacés.
+- **Ajustement** (Ctrl+F) : « Ajuster ce spectre » part des pics posés, phases et pics libres ensemble.
+- **Série** (Ctrl+Maj+F) : « Ajuster la sélection » ou « Ajuster tous », dans un thread, sur des copies, avec
+  progression et arrêt. Avec « suivre », le modèle part du spectre courant vers les spectres suivants, puis
+  vers les précédents, chacun partant de son voisin : on règle un spectre au milieu de la série et on propage.
+  Sans « suivre », chaque spectre part de son propre modèle.
+- **Modèle** : copier les phases et les pics libres d'un spectre (Ctrl+Maj+C), les coller sur la sélection
+  (Ctrl+Maj+V, sans ajuster), ou vider la sélection.
+- **Annuler** (Ctrl+Z, Ctrl+Y ; `Session.remember`, `undo`, `redo`) : toutes les modifications, l'analyse
+  automatique et le traitement compris, 30 niveaux. On garde une copie de ce qui change (phases, pics libres,
+  traitement), les grands tableaux étant partagés : une analyse de 1 600 spectres ne coûte pas de mémoire.
+  Les changements successifs d'une même valeur (P d'une phase, traitement d'un spectre) s'annulent d'un coup.
+  Les fiches ajoutées au run et les réglages de l'analyse ne sont pas annulés.
+
+Essai sur D2O_03_0001_scan0006, réintégré avec le `.poni` de Dioptas : glace VII à 5,7 GPa sur le spectre 1,
+ajustement, propagation aux spectres 0 à 8, puis glace VI à 0,6 GPa sur le spectre 9 et propagation jusqu'au
+spectre 13. Les pressions restent à moins de 0,05 GPa de l'analyse manuelle de la v1, sauf le spectre 4
+(3,75 contre 3,66 GPa). Le spectre 0, que l'analyse automatique mettait à −0,18 GPa, sort à 5,75 GPa (5,79).
+Il faut 0,3 s pour les 9 premiers spectres et 1,9 s pour les 5 suivants.
+
 **Ensuite** :
-- étape 3 : ajustement interactif (pics, phases, zones), gestion des phases, puis le reste
+- étape 3 (suite) : pics à la souris, zones d'ajustement et zones exclues dessinées à la souris, note du run
   (`docs/PASSATION.md` §6, P1).
 
 ## 10. Séparation en deux dépôts

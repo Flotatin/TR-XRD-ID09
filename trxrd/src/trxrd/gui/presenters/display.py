@@ -721,13 +721,14 @@ def peak_rows(run: Run, spectrum: Optional[Spectrum]) -> List[Tuple[str, ...]]:
         return []
     lam = wavelength(run)
     rows = []
-    for fit in spectrum.phases:
-        for peak in fit.peaks:
+    groups = [(fit.phase, fit.peaks) for fit in spectrum.phases] + [("pic libre", spectrum.free_peaks)]
+    for phase, peaks in groups:
+        for peak in peaks:
             d = ""
             if lam is not None and np.isfinite(peak.center) and peak.center > 0:
                 d = _number(lam * 1e10 / (2 * math.sin(math.radians(peak.center) / 2)), 4)
             hkl = "".join(str(i) for i in peak.hkl) if peak.hkl is not None else ""
-            rows.append((fit.phase, hkl, _number(peak.center, 4), _number(peak.center_err, 4), d,
+            rows.append((phase, hkl, _number(peak.center, 4), _number(peak.center_err, 4), d,
                          _number(peak.height, 1), _number(peak.width, 4), peak.model, "oui" if peak.enabled else "non"))
     return rows
 

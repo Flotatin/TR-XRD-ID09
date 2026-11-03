@@ -66,13 +66,13 @@ Ne pas les remettre en cause sans lui en parler.
 | `8cc1c8c` | Validation sur un run réel (Water05) et cinq corrections qui en découlent ; nommage v1 / v2 |
 | `e135918` | Documentation : commit de référence de la v1 |
 | `68a1b7c` | Suivi des pics ; `trxrd compare` ; `CLAUDE.md` ; environnement virtuel séparé |
-| branche `gui-viewer` | Interface :<br>- étape 1, le lecteur : `trxrd-gui`, presenters sans Qt, registre d'actions, ouverture en arrière-plan (`Session.read` / `attach`) ;<br>- étape 2 : nouveaux runs depuis RAW_DATA, cake sous le spectre, calibration à la Dioptas validée sur le LaB6 réel ; aperçu du scan brut pour choisir la plage 2θ ; analyse automatique depuis l'interface (Ctrl+R) ; spectre affiché filtré, fond soustrait, onglets Traitement et Détection, sélection de spectres ;<br>- étape 2 (suite) : panneau dDAC de la v1 (grandeur au choix P, V, a, b, c, c/a, b/a, T, ou X/X₀, avec le piézo ; dP/dt par échantillon, moyen sur un intervalle ; carte des diffractogrammes en fonction du temps), images à échelle, niveaux et couleurs réglables |
+| branche `gui-viewer` | Interface :<br>- étape 1, le lecteur : `trxrd-gui`, presenters sans Qt, registre d'actions, ouverture en arrière-plan (`Session.read` / `attach`) ;<br>- étape 2 : nouveaux runs depuis RAW_DATA, cake sous le spectre, calibration à la Dioptas validée sur le LaB6 réel ; aperçu du scan brut pour choisir la plage 2θ ; analyse automatique depuis l'interface (Ctrl+R) ; spectre affiché filtré, fond soustrait, onglets Traitement et Détection, sélection de spectres ;<br>- étape 3 : travail manuel sur les phases (ajout, P, ajustement, série avec suivi, modèle copié), pics libres gardés, annuler / rétablir ;<br>- étape 2 (suite) : panneau dDAC de la v1 (grandeur au choix P, V, a, b, c, c/a, b/a, T, ou X/X₀, avec le piézo ; dP/dt par échantillon, moyen sur un intervalle ; carte des diffractogrammes en fonction du temps), images à échelle, niveaux et couleurs réglables |
 | branche `p2-validation-2026` | Validation sur les 143 runs de janvier 2026 (61 % → 81 % de spectres aux mêmes phases) : conversion des runs Jungfrau « continu », `Vmin` de la v1 non repris, coût d'apparition d'une famille nul, suivi interrompu par un pic fort inexpliqué, pics larges ignorés, tri des pics fixes, `--temperature`, familles sans casse, CLI sous Windows |
 
 ### 3.2 Par fonctionnalité
 
-Tout est testé : `python -m pytest trxrd` compte 227 tests. Les 7 comparaisons numériques avec la v1 sont
-ignorées quand la v1 n'est pas importable, par exemple dans `.venv-v2`, qui n'a pas PyQt5 : 220 tests
+Tout est testé : `python -m pytest trxrd` compte 240 tests. Les 7 comparaisons numériques avec la v1 sont
+ignorées quand la v1 n'est pas importable, par exemple dans `.venv-v2`, qui n'a pas PyQt5 : 233 tests
 passent alors.
 
 | Fonctionnalité | Où | État / preuve |
@@ -99,6 +99,7 @@ passent alors.
 | Parcours de RAW_DATA, nouveaux runs depuis l'interface | `services/raw_data.py`, `run_builder.build_and_save`, `gui/views/new_run.py` | ✅ 43 jeux de données de janvier 2026 lus en 0,7 s ; scan 9 de Water05 intégré en 2 s, temps identiques au `.CEDX` |
 | Aperçu d'un scan brut avant l'intégration : image ou cake (maximum du scan ou une image), diagramme et couverture en azimut sur tout le détecteur, plage 2θ à tirer | `services/images.ScanPreview`, `gui/presenters/preview.py`, `gui/views/preview.py` | ✅ Water05 scan 9 : pixels utilisables de 5,21 à 29,30° ; maximum de 32 images sur 1 600 en 2,4 s |
 | Traitement des spectres (fond SNIP, filtre) au cas par cas ou propagé à tous / à la sélection ; spectre affiché filtré, fond soustrait (brut sur demande) ; contrôle de la détection (pics, seuil, raisons des rejets) avec les réglages de l'analyse | `services/treatment.py`, `gui/presenters/treatment.py`, `gui/views/treatment.py` | ✅ détection sur le signal filtré du spectre : 805/1 053 spectres contre 797 sur 29 runs ; Water05 inchangé ; 35 ms par spectre sur Water01_scan0074 |
+| Travail manuel sur les phases : ajouter, retirer, changer P, ajuster le spectre, ajuster une série en suivant à partir du spectre courant, copier le modèle ; pics libres gardés et tracés ; annuler / rétablir | `services/editing.py`, `Session.remember`, `gui/presenters/editing.py`, `gui/views/editing.py` | ✅ D2O_03 scan 6 : 14 spectres à moins de 0,05 GPa de la v1, sauf le spectre 4 (0,09 GPa), en 2 s |
 | Cake / image brute sous le spectre | `services/images.py`, `CakePresenter` | ✅ image brute d'un `.CEDX` retrouvée par le nom du run ; 0,03 s par spectre |
 | Panneau dDAC : grandeur de chaque phase en fonction du temps (P, V, a, b, c, c/a, b/a, T, ou ÷ fiche), piézo, carte des diffractogrammes sur le même axe du temps | `gui/presenters/display.py`, `EvolutionPresenter`, `MapPresenter`, `gui/views/plots.py` | ✅ Water05 scan 9 ; carte de Water01_scan0074 (1 600 spectres) en 0,03 s |
 | dP/dt par échantillon ou par phase (droite glissante), dP/dt moyen sur un intervalle (pente et ΔP/Δt) | `processing/rates.py`, `services/rates.py`, `RatePresenter` | ✅ Water05 scan 9 : eau et Sn culminent vers −45 à −50 GPa/ms ; 6 ms pour 1 600 spectres |
@@ -271,16 +272,15 @@ Seul `trxrd/gui/` a le droit d'importer PySide6/pyqtgraph (règle vérifiée par
   si la carte ne suffit pas.
 
 Étape 3, l'ajustement interactif et la gestion des phases (demandés ensuite par l'utilisateur) (fonctions de la v1 à reprendre, d'après ses raccourcis) :
-- [ ] ajouter / retirer une phase sur un spectre, à une P de départ ; déplacer les raies attendues avec P ;
-- [ ] ajouter, remplacer, confirmer ou supprimer un pic à la souris ; annuler (undo), y compris une analyse
-  automatique ;
-- [ ] garder et tracer les pics libres (zones exclues, pics inexpliqués) : ils sont ajustés, mais
-  `Spectrum.model` ne contient que les pics des phases, si bien que la courbe « ajustement » ne monte pas sur
-  le pic du joint ;
-- [ ] « fit total » d'un spectre, puis « fit all » d'une plage de spectres (`fit_spectra`, avec suivi) ;
+- [x] ajouter / retirer une phase sur un spectre, à une P de départ ; déplacer les raies attendues avec P ;
+- [x] annuler / rétablir (Ctrl+Z, Ctrl+Y), y compris une analyse automatique et le traitement ;
+- [x] garder et tracer les pics libres (zones exclues, pics inexpliqués) : `Spectrum.free_peaks`, format 1.2 ;
+- [x] « fit total » d'un spectre (Ctrl+F), puis « fit all » de la sélection ou de tous, en suivant à partir du
+  spectre courant ;
+- [ ] ajouter, remplacer, confirmer ou supprimer un pic à la souris ;
 - [ ] zones d'ajustement / zones exclues dessinées à la souris (à stocker dans `Run.ui_state` ou dans le modèle) ;
-- [ ] copier / coller le modèle de phases d'un spectre sur une sélection de spectres ; supprimer les phases d'une zone de spectres ;
-- [ ] détection automatique des pics affichée (marqueurs), avec SNR ;
+- [x] copier / coller le modèle de phases d'un spectre sur une sélection de spectres ; supprimer les phases d'une zone de spectres ;
+- [x] détection automatique des pics affichée (marqueurs), avec SNR (onglet Détection) ;
 - [ ] note du run.
 
 Plus tard : dialogue de calibration (charger le .poni et le masque, vérifier sur l'image intégrée, plage

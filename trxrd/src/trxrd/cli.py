@@ -139,7 +139,7 @@ def _cmd_compare(args: argparse.Namespace) -> int:
     reference = legacy_to_run(load_legacy(path), path.stem) if is_legacy_file(path) else load_run(path)
     run = copy.deepcopy(reference)
     for spectrum in run.spectra:
-        spectrum.phases, spectrum.model = [], None
+        spectrum.phases, spectrum.free_peaks, spectrum.model = [], [], None
     _add_library(run, args.library)
     temperatures = [f.temperature for s in reference.spectra for f in s.phases if np.isfinite(f.temperature)]
     options = _auto_options(args, float(np.median(temperatures)) if temperatures else None)

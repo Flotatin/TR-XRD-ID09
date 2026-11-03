@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
 )
 
 from trxrd.gui.actions import ActionRegistry
+from trxrd.gui.views.editing import PhasesPanel
 from trxrd.gui.views.panels import Navigator, RowsTable
 from trxrd.gui.views.plots import CakeView, EvolutionView, RateView, SpectrumView, TimeMapView
 from trxrd.gui.views.treatment import DetectionPanel, ProcessingPanel
@@ -37,7 +38,7 @@ class MainWindow(QMainWindow):
         self.evolution = EvolutionView()
         self.dpdt = RateView(link_to=self.evolution.plot)  # same time axis, as in the dDAC view of the v1
         self.map = TimeMapView(link_to=self.evolution.plot)
-        self.phases = RowsTable()
+        self.phases = PhasesPanel()
         self.peaks = RowsTable()
         self.processing = ProcessingPanel()
         self.detection = DetectionPanel()
@@ -53,7 +54,7 @@ class MainWindow(QMainWindow):
         left = QSplitter(Qt.Orientation.Vertical)
         left.addWidget(self.navigator)
         left.addWidget(tables)
-        left.setSizes([560, 340])
+        left.setSizes([400, 500])
         center = QSplitter(Qt.Orientation.Vertical)
         center.addWidget(self.spectrum)
         center.addWidget(self.cake)
@@ -122,6 +123,14 @@ class MainWindow(QMainWindow):
                 action = self.actions.get(key)
                 action.setEnabled(unit in available)
                 action.setChecked(unit == current)
+
+    def set_undo(self, undo: Optional[str], redo: Optional[str]) -> None:
+        """What the next undo and redo would do (None: nothing)."""
+        for key, text, label in (("undo", "&Annuler", undo), ("redo", "&Rétablir", redo)):
+            if key in self.actions.actions:
+                action = self.actions.get(key)
+                action.setEnabled(label is not None)
+                action.setText(f"{text} : {label}" if label else text)
 
     def set_busy(self, text: Optional[str]) -> None:
         if text:

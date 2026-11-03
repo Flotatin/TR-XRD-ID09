@@ -39,14 +39,14 @@ def test_window_opens_a_run_and_navigates(viewer):
     assert [label.text for sample, label in window.spectrum.legend.items][0] == "brut"
     window.actions.get("raw").trigger()
     assert len(window.spectrum._ticks) == 2  # ice VII: ticks + their tooltips
-    assert window.navigator.table.rowCount() == 5 and window.phases.rowCount() == 1
+    assert window.navigator.table.rowCount() == 5 and window.phases.table.rowCount() == 1
     assert window.peaks.rowCount() == 2 and window.map.image.image.shape == (400, 5)  # [2θ, time]
     assert window.evolution.channel.currentText() == "Channel3"  # the non-trigger channel first
 
     window.actions.get("next").trigger()
     window.actions.get("next").trigger()
     assert viewer.session.index == 2 and window.navigator.slider.value() == 2
-    assert window.phases.rowCount() == 2 and window.evolution.marker.value() == pytest.approx(2.0)
+    assert window.phases.table.rowCount() == 2 and window.evolution.marker.value() == pytest.approx(2.0)
     window.navigator.slider.setValue(4)
     assert viewer.session.index == 4 and window.map.marker.value() == pytest.approx(4.0)  # ms
     window.actions.get("first").trigger()
@@ -315,7 +315,7 @@ def test_automatic_analysis_action(viewer, compression_run):
     window.actions.get("auto").trigger()
     assert asked[0].count == 6 and all(s.phases for s in viewer.session.run.spectra)
     assert window.windowTitle().endswith("*") and window.statusBar().currentMessage().startswith("Analyse automatique")
-    assert window.phases.rowCount() >= 1  # the views show the new fits
+    assert window.phases.table.rowCount() >= 1  # the views show the new fits
 
 
 def test_treatment_tab_and_selection_of_spectra(viewer, compression_run):
@@ -377,3 +377,48 @@ def test_detection_tab_draws_the_peaks(viewer, compression_run):
     assert analysis.saved_settings(viewer.session.run).broad_fwhm is None and tab.broad_fwhm.text() == "jamais"
     tab.broad_fwhm.setValue(0.8)
     assert analysis.saved_settings(viewer.session.run).broad_fwhm == 0.8
+
+
+def test_phases_tab_and_undo(viewer, compression_run):
+    window, session = viewer.window, viewer.session
+    ice = "H2O_Ice_VII"
+    session.attach(compression_run, None)
+    session.select(4)
+    panel, undo, redo = window.phases, window.actions.get("undo"), window.actions.get("redo")
+    assert panel.card.count() == len(compression_run.phases) and not undo.isEnabled() and not redo.isEnabled()
+    panel.card.setCurrentIndex(panel.card.findData(ice))
+    assert panel.add.isEnabled() and not panel.remove.isEnabled()
+    panel.pressure.setValue(3.05)
+    assert session.spectrum.phases == []  # not on the spectrum: it only chooses the starting pressure
+    panel.add.click()
+    assert not panel.add.isEnabled() and panel.remove.isEnabled() and panel.table.rowCount() == 1
+    assert len(window.spectrum._ticks) == 2 and undo.text() == f"&Annuler : ajout de {ice}"
+    panel.pressure.setValue(3.1)  # on the spectrum: its lines follow
+    assert session.spectrum.phases[0].pressure == 3.1
+    window.actions.get("fit").trigger()
+    assert session.spectrum.phases[0].pressure == pytest.approx(3.1, abs=0.03)
+    assert panel.pressure.value() == pytest.approx(session.spectrum.phases[0].pressure, abs=0.005)
+
+    undo.trigger()
+    assert redo.isEnabled() and session.spectrum.phases[0].pressure == 3.1 and panel.pressure.value() == 3.1
+    assert window.statusBar().currentMessage() == "Annulé : ajustement du spectre"
+    redo.trigger()
+
+    panel.follow.setChecked(False)
+    panel.fit_all.click()  # each spectrum from its own model: only spectrum 4 has one
+    assert [bool(s.phases) for s in session.run.spectra] == [False] * 4 + [True, False]
+    panel.follow.setChecked(True)
+    window.actions.get("copy_model").trigger()
+    assert panel.paste.isEnabled()
+    session.select(3)
+    session.set_selection([3, 5])  # the current spectrum is always in the selection of the list
+    window.actions.get("paste_model").trigger()
+    assert session.run.spectra[5].phases and panel.fit_selection.text() == "Ajuster la sélection (2)"
+    panel.fit_selection.click()
+    assert session.run.spectra[5].phases[0].pressure == pytest.approx(3.7, abs=0.03)
+    panel.clear_model.click()
+    assert not session.run.spectra[5].phases
+    panel.table.selectRow(0)
+    assert panel.card.currentData() == ice
+    panel.remove.click()
+    assert session.spectrum.phases == [] and panel.table.rowCount() == 0

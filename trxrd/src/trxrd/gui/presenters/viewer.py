@@ -17,6 +17,7 @@ Views expected (duck typing):
 - navigator: show_spectra(columns, rows), set_current(index, count, selection), on_select(index),
   on_selection(indices)
 - window: set_title, set_status, set_units(available, current), set_busy(text or None),
+  set_undo(undo label or None, redo label or None), show_message(text),
   ask_open_path() / ask_save_path(suggested) -> path or None, confirm_discard() -> bool,
   show_error(title, text), show_info(title, text), ask_new_run(browse) -> NewRunRequest or None,
   start_progress(text, on_cancel), set_progress(done, total), end_progress()
@@ -437,6 +438,7 @@ class MainPresenter:
         path = str(self.session.path) if self.session.path is not None else None
         self.window.set_status(display.summary_text(run, self.session.index, path, self.session.dirty))
         self.window.set_units(display.available_units(run), self.settings.unit_for(run))
+        self.window.set_undo(self.session.undo_label, self.session.redo_label)
 
     # ------------------------------------------------------------------ files
 
@@ -528,6 +530,16 @@ class MainPresenter:
             self.window.set_status("Création arrêtée : les runs déjà terminés sont enregistrés.")
         else:
             self.window.show_error("Création du run impossible", message)
+
+    def undo(self) -> None:
+        label = self.session.undo()
+        if label:
+            self.window.show_message(f"Annulé : {label}")
+
+    def redo(self) -> None:
+        label = self.session.redo()
+        if label:
+            self.window.show_message(f"Rétabli : {label}")
 
     def may_discard(self) -> bool:
         """True when the current run may be replaced or closed (saved, or the user agrees to lose it)."""

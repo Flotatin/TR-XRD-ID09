@@ -48,10 +48,12 @@ class ProcessingPresenter:
         if self.session.spectrum is None:
             return
         try:
-            treatment.set_processing(self.session.run, [self.session.index], processing)
+            treatment.check(processing, self.session.spectrum)
         except ValueError as exc:
             self.view.show_message(str(exc))
             return
+        self.session.remember([self.session.index], "traitement du spectre", merge=True)
+        treatment.set_processing(self.session.run, [self.session.index], processing)
         self.view.show_message("")
         self.session.modified()
 
@@ -66,6 +68,7 @@ class ProcessingPresenter:
         if not indices:
             self.view.show_message("Aucun spectre sélectionné : les choisir dans la liste (Maj + clic, Ctrl + clic).")
             return
+        self.session.remember(indices, "traitement propagé")
         done = treatment.set_processing(run, indices, spectrum.processing)
         self.session.modified()
         self.view.show_message(f"Traitement du spectre {self.session.index} appliqué à {len(done)} spectre(s).")
