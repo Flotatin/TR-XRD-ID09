@@ -62,12 +62,13 @@ Ne pas les remettre en cause sans lui en parler.
 | `8cc1c8c` | Validation sur un run réel (Water05) et cinq corrections qui en découlent ; nommage v1 / v2 |
 | `e135918` | Documentation : commit de référence de la v1 |
 | `68a1b7c` | Suivi des pics ; `trxrd compare` ; `CLAUDE.md` ; environnement virtuel séparé |
+| branche `gui-viewer` | Interface, étape 1 (le lecteur) : `trxrd-gui`, presenters sans Qt, registre d'actions, ouverture en arrière-plan (`Session.read` / `attach`) |
 | branche `p2-validation-2026` | Validation sur les 143 runs de janvier 2026 (61 % → 81 % de spectres aux mêmes phases) : conversion des runs Jungfrau « continu », `Vmin` de la v1 non repris, coût d'apparition d'une famille nul, suivi interrompu par un pic fort inexpliqué, pics larges ignorés, tri des pics fixes, `--temperature`, familles sans casse, CLI sous Windows |
 
 ### 3.2 Par fonctionnalité
 
-Tout est testé : `python -m pytest trxrd` compte 121 tests. Les 7 comparaisons numériques avec la v1 sont
-ignorées quand la v1 n'est pas importable, par exemple dans `.venv-v2`, qui n'a pas PyQt5 : 114 tests
+Tout est testé : `python -m pytest trxrd` compte 144 tests. Les 7 comparaisons numériques avec la v1 sont
+ignorées quand la v1 n'est pas importable, par exemple dans `.venv-v2`, qui n'a pas PyQt5 : 137 tests
 passent alors.
 
 | Fonctionnalité | Où | État / preuve |
@@ -88,7 +89,8 @@ passent alors.
 | Ajustement d'un spectre ou d'une série | `services/fitting.py` | ✅ |
 | Analyse automatique + suivi des pics + pics fixes | `services/identification.py` | ✅ |
 | Construction d'un run depuis un scan brut | `services/run_builder.py` | ✅ (fichiers HDF5 uniquement) |
-| État de l'application pour la future interface | `services/session.py` | ✅ (sans Qt) |
+| État de l'application pour l'interface | `services/session.py` | ✅ (sans Qt) |
+| Interface, étape 1 : le lecteur (`trxrd-gui`) | `gui/` | ✅ presenters testés avec de fausses vues, fenêtre testée hors écran ; essayée sur Water05 scan 9 et Water01_scan0074 (1 600 spectres) |
 | Comparaison avec une analyse de référence | `services/validation.py` | ✅ |
 | Lecture en notebook (`XRDRun` : summary, peaks, pressure, tracés en 2θ/Q/d, `find`) | `notebook.py` | ✅ |
 | CLI `trxrd build / auto / compare / convert / info / --version` | `cli.py` | ✅ |
@@ -176,21 +178,27 @@ run par run, avec une passe sans exclusion puis une passe avec les zones fixes r
 
 ## 6. Reste à faire (par priorité)
 
-### P1 — Interface PySide6 (prochaine étape convenue)
+### P1 — Interface PySide6 (en cours)
 
-Architecture prévue (`docs/ARCHITECTURE.md` §9) : **MVP** au-dessus de `services.Session`, déjà écrite.
-Vues passives dans `trxrd/gui/views/`, presenters testables sans fenêtre dans `trxrd/gui/presenters/`,
-un registre unique de `QAction` pour les raccourcis, et les calculs longs dans un `QThread` avec le
-paramètre `progress(done, total)`, qui existe déjà. Seul `trxrd/gui/` a le droit d'importer
-PySide6/pyqtgraph (règle vérifiée par test).
+Architecture (`docs/ARCHITECTURE.md` §9) : **MVP** au-dessus de `services.Session`. Données affichées et
+presenters sans Qt dans `trxrd/gui/presenters/`, vues passives dans `trxrd/gui/views/`, registre unique de
+`QAction` (`gui/actions.py`), calculs longs dans un thread (`gui/tasks.py`, avec `progress(done, total)`).
+Seul `trxrd/gui/` a le droit d'importer PySide6/pyqtgraph (règle vérifiée par test). Lancer : `trxrd-gui`.
 
-Étape 1, le lecteur :
-- [ ] ouvrir un `.trxrd.h5` ou un `.CEDX` (`Session.open` le convertit en mémoire ; la sauvegarde écrit un `.trxrd.h5` à côté) ;
-- [ ] liste et curseur des spectres ;
-- [ ] spectre courant : données, fond, ajustement, raies attendues de chaque phase ; axe 2θ / Q / d ;
-- [ ] P(t) par phase avec barres d'erreur, et oscilloscope en superposition (axe piézo, comme la vue DDAC de la v1) ;
-- [ ] carte intensité (2θ × temps) ;
-- [ ] tables des phases et des pics du spectre courant.
+Étape 1, le lecteur (fait, branche `gui-viewer`) :
+- [x] ouvrir un `.trxrd.h5` ou un `.CEDX`, en arrière-plan ; un `.CEDX` s'enregistre en `.trxrd.h5` à côté ;
+- [x] liste et curseur des spectres ;
+- [x] spectre courant : données, fond, ajustement, raies attendues de chaque phase ; axe 2θ / Q / d ;
+- [x] P(t) par phase avec barres d'erreur, et une voie de l'oscilloscope sur l'axe de droite ;
+- [x] carte intensité (échelle log par défaut) ;
+- [x] tables des phases et des pics du spectre courant ;
+- [x] fenêtre des raccourcis (F1), confirmation avant de perdre des modifications.
+
+À reprendre selon l'usage de l'utilisateur :
+- la voie « piézo » de la v1 : il faut confirmer quelle voie de l'oscilloscope l'est ; la première voie qui
+  n'est pas le trigger est montrée par défaut ;
+- des icônes pour la barre d'outils ;
+- le zoom de la carte, qui revient à la vue complète à chaque modification du run.
 
 Étape 2 : lancer depuis l'interface `trxrd build` (scan + calibration), `trxrd auto` (phases candidates,
 plage de P, zones exclues, pics fixes signalés) et le suivi, avec une barre de progression et la

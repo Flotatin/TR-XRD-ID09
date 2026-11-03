@@ -71,10 +71,11 @@ values). Never commit the user's data (raw scans, .CEDX) to the repository.
 | Peak detection / phase search | `processing/peaks.py`, `processing/phase_search.py` |
 | Peak fit, cell, pressure | `processing/peakfit.py`, `processing/cell.py`, `services/fitting.py` |
 | Automatic analysis with peak tracking | `services/identification.py` |
-| GUI state (for the coming PySide6 GUI) | `services/session.py` |
+| GUI state (Qt-free) | `services/session.py` |
+| GUI (`trxrd-gui`): display data and presenters without Qt, passive views, actions, threads | `gui/presenters/`, `gui/views/`, `gui/actions.py`, `gui/tasks.py`, `gui/app.py` |
 
 ## Next steps
 
-See `docs/PASSATION.md` §6 (P1: PySide6 viewer on `services.Session`; P2: validation on the user's
-archives with `trxrd compare`; P3: Sn offset; P4: v1 features not ported yet; P5: algorithm ideas; P6:
-v1 tag and repository split).
+See `docs/PASSATION.md` §6 (P1: GUI, the viewer is done, next: run creation and automatic analysis
+with progress, then interactive fitting; P2: remaining validation items; P4: v1 features not ported yet;
+P5: algorithm ideas; P6: repository split).

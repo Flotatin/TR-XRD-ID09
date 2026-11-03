@@ -18,8 +18,23 @@ Un environnement virtuel dédié, séparé de celui de la v1 : PyQt5 (v1) et PyS
 python -m venv .venv-v2
 .venv-v2\Scripts\activate                    # Windows ; Linux/macOS : source .venv-v2/bin/activate
 pip install -e "./trxrd[notebook,gui,dev]"  # depuis la racine du dépôt
-python -m pytest trxrd                      # 121 tests
+python -m pytest trxrd                      # 144 tests
 ```
+
+## Interface graphique
+
+```bash
+trxrd-gui                                   # ou : python -m trxrd.gui
+trxrd-gui "F:/ESRF/2026 Janvier HC-6664 id09/Fichier_CED_DRX/Water05_scan0009.CEDX"
+```
+
+Le lecteur (étape 1) ouvre un `.trxrd.h5` ou un ancien `.CEDX`, et affiche :
+- le spectre courant, avec son fond, son ajustement et les raies attendues de chaque phase ;
+- P(t) avec l'oscilloscope ;
+- la carte d'intensité ;
+- les tableaux des phases et des pics.
+
+L'axe peut être en 2θ, Q ou d. Les raccourcis sont listés avec F1.
 
 ## Ligne de commande
 

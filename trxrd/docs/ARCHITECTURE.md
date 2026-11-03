@@ -132,8 +132,13 @@ trxrd/
 │   │   └── session.py          ✅ état de l'application pour le GUI (run courant, sélection, événements)
 │   ├── notebook.py             ✅ XRDRun : lecture seule pour notebooks
 │   ├── cli.py                  ✅ trxrd build | auto | compare | convert | info
-│   └── gui/                    🔜 vues PySide6 + presenters (§8)
-└── tests/                      121 tests ; data/ = scan TUTO, calibration, ancien fichier .CEDX d'exemple
+│   └── gui/                    ✅ lecteur PySide6 + pyqtgraph (§9) : `trxrd-gui`
+│       ├── presenters/         display.py (données affichées) et viewer.py (presenters), sans Qt
+│       ├── views/              plots.py (spectre, P(t), carte), panels.py (tableaux, navigateur), main_window.py
+│       ├── actions.py          registre unique des QAction (menus, barre d'outils, raccourcis)
+│       ├── tasks.py            calculs longs dans un thread, résultat rendu au thread de l'interface
+│       └── app.py              assemblage : fenêtre + presenters + actions
+└── tests/                      144 tests ; data/ = scan TUTO, calibration, ancien fichier .CEDX d'exemple
 ```
 
 ## 5. Le format de fichier `trxrd-run` (HDF5)
@@ -482,24 +487,53 @@ Limites :
   `center_err` prend `sigma_ctr_total` s'il existe, sinon la demi-largeur de cet intervalle.
 - Ne convertir que des fichiers de confiance : le risque est réduit mais un pickle reste un pickle.
 
-## 9. Interface graphique PySide6 (étape suivante)
+## 9. Interface graphique PySide6
+
+```bash
+trxrd-gui                          # ou : python -m trxrd.gui
+trxrd-gui "F:/ESRF/.../Water05_scan0009.CEDX"
+```
 
 Architecture **MVP** au-dessus de `services.Session` :
 
-- **Session** (✅ écrite, sans Qt) : run courant, spectre sélectionné, indicateur « modifié ». Elle émet les
+- **Session** (sans Qt) : run courant, spectre sélectionné, indicateur « modifié ». Elle émet les
   événements `run_changed`, `spectrum_changed`, `data_changed` et `saved`. C'est la seule source de vérité.
-- **Views** (`gui/views/`) : widgets PySide6/pyqtgraph passifs, un par panneau (spectre courant avec choix
-  d'axe 2θ/Q/d, carte, P(t), table des phases et des pics, oscilloscope, calibration). Ils ne font aucun
-  calcul.
-- **Presenters** (`gui/presenters/`) : un par vue. Ils écoutent la Session, mettent la vue à jour et
-  appellent les services. Ils sont testables sans afficher de fenêtre.
-- **Actions et raccourcis** : un registre unique de `QAction`.
-- **Calculs longs** : exécutés dans un `QThread`, avec le paramètre `progress(done, total) -> continuer?`
-  qui existe déjà dans `build_run` et `fit_spectra`.
+  `Session.read` charge un fichier sans toucher à la session, ce qui permet de le faire dans un thread ;
+  `Session.attach` installe ensuite le run, depuis le thread de l'interface.
+- **Données affichées** (`gui/presenters/display.py`, sans Qt) : courbes du spectre, raies attendues de
+  chaque phase à sa pression, P(t), traces de l'oscilloscope, carte, lignes des tableaux. Tout est en 2θ,
+  Q ou d.
+- **Presenters** (`gui/presenters/viewer.py`, sans Qt) : un par vue. Ils écoutent la Session et les
+  réglages d'affichage (`DisplaySettings` : l'unité de l'axe), remplissent la vue, et reçoivent les gestes
+  de l'utilisateur par des fonctions de rappel (`view.on_pick`, `view.on_select`). Ils sont testés avec de
+  fausses vues (`tests/test_gui_presenters.py`).
+- **Vues** (`gui/views/`) : widgets PySide6/pyqtgraph passifs. Ils ne font aucun calcul.
+- **Actions et raccourcis** (`gui/actions.py`) : un registre unique de `QAction`, d'où viennent les menus,
+  la barre d'outils et la fenêtre des raccourcis (F1). Les lettres seules restent libres pour l'ajustement
+  interactif, qui reprendra les raccourcis de la v1 ; F3 enregistre, comme dans la v1.
+- **Calculs longs** (`gui/tasks.py`) : exécutés dans un thread (`QThreadPool`). Le résultat ou l'erreur
+  revient dans le thread de l'interface. La tâche reçoit `progress(done, total) -> continuer ?`, le
+  paramètre de `build_run`, `fit_spectra` et `auto_analyse`, ce qui servira à la barre de progression et au
+  bouton d'arrêt.
 
-L'ordre proposé : d'abord un **lecteur** (ouvrir un run ou un ancien fichier, naviguer, spectre + fit + P(t),
-choix de l'axe). Ensuite la création d'un run depuis un scan, puis l'ajustement interactif (ajout et
-retrait de pics, fenêtre, phases), puis la recherche automatique.
+**Le lecteur (étape 1)** :
+- ouvrir un `.trxrd.h5` ou un ancien `.CEDX`, en arrière-plan (~2 s pour les 1 600 spectres de
+  Water01_scan0074) ; un `.CEDX` est converti en mémoire et s'enregistre en `.trxrd.h5` à côté ;
+- liste des spectres (temps, phases et pressions) et curseur ;
+- spectre courant : données, fond, ajustement, et sous le diagramme une rangée de traits par phase, aux
+  positions attendues à sa pression, de hauteur proportionnelle à l'intensité de la fiche (hkl au survol).
+  Le zoom est gardé d'un spectre à l'autre ;
+- P(t) par phase avec barres d'erreur, et une voie de l'oscilloscope sur l'axe de droite (choix de la voie) ;
+- carte intensité (fond retiré) en fonction de l'axe et du spectre, en échelle log par défaut : un pic de
+  joint 100 fois plus fort cache sinon l'échantillon ;
+- tableaux des phases (P, σP, V, maille, T, état) et des pics (hkl, 2θ, d, hauteur, largeur, profil) ;
+- axe 2θ / Q / d (Ctrl+1/2/3), réservé à 2θ si le run n'a pas d'énergie ;
+- un clic sur P(t) ou sur la carte sélectionne le spectre ;
+- avant de fermer un run modifié ou de quitter, l'interface demande confirmation.
+
+**Ensuite** :
+- étape 2 : création d'un run depuis un scan, et analyse automatique avec barre de progression ;
+- étape 3 : ajustement interactif (pics, phases, zones), puis le reste (`docs/PASSATION.md` §6, P1).
 
 ## 10. Séparation en deux dépôts
 
@@ -519,7 +553,7 @@ git push <url-du-nouveau-depot> trxrd-only:main
 | 1 | Domaine, physique, format HDF5, lecture ESRF, intégration, fond, timing, notebook, conversion, CLI | ✅ |
 | 2 | Profils de pics, ajustement `curve_fit`, affinement de maille, P et incertitudes, séries de spectres, axes Q/d | ✅ |
 | 3 | Détection de pics, recherche de composition déterministe, suivi des pics, analyse automatique (`trxrd auto`), validation sur un run réel (`trxrd compare`) | ✅ |
-| 4 | GUI « lecteur » PySide6 sur `Session` | 🔜 |
+| 4 | GUI « lecteur » PySide6 sur `Session` | ✅ |
 | 5 | GUI complet : création de run, ajustement interactif, zones, calibration, vue oscilloscope | 🔜 |
 | 6 | Nouveau dépôt (§10) | 🔜 |
 
