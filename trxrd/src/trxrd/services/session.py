@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from pathlib import Path
-from typing import Callable, DefaultDict, List, Optional, Union
+from typing import Callable, DefaultDict, List, Optional, Tuple, Union
 
 from trxrd.domain import Calibration, Run, Spectrum
 from trxrd.io import h5store, legacy
@@ -47,13 +47,22 @@ class Session:
     def open(self, path: PathLike) -> Run:
         """Open a run file; a legacy dill file is converted in memory and will be
         saved next to it as `<name>.trxrd.h5` (the old file is never overwritten)."""
+        self.attach(*self.read(path))
+        return self.run
+
+    @staticmethod
+    def read(path: PathLike) -> Tuple[Run, Path, bool]:
+        """Load a run file without touching the session (safe in a worker thread):
+        the run, the path it will be saved to, and whether it differs from that file."""
         path = Path(path)
         if legacy.is_legacy_file(path):
             run = legacy.legacy_to_run(legacy.load_legacy(path), name=path.stem)
-            self._set_run(run, path.with_name(f"{path.stem}.trxrd.h5"), dirty=True)
-        else:
-            self._set_run(h5store.load_run(path), path, dirty=False)
-        return self.run
+            return run, path.with_name(f"{path.stem}.trxrd.h5"), True
+        return h5store.load_run(path), path, False
+
+    def attach(self, run: Run, path: Optional[Path], dirty: bool = False) -> None:
+        """Make `run` the current run (from the GUI thread: the listeners update the views)."""
+        self._set_run(run, path, dirty)
 
     def new_from_scan(self, scan_file: PathLike, calibration: Calibration, folder: PathLike, **options) -> Run:
         run = run_builder.build_run(scan_file, calibration, **options)
