@@ -6,7 +6,7 @@ from typing import Callable, Dict, List, Optional
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import QRectF, Qt
+from PySide6.QtCore import QRectF, Qt, QTimer
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QHBoxLayout, QLabel, QPushButton, QSpinBox, QVBoxLayout, QWidget,
@@ -77,6 +77,21 @@ class MovableRegion:
             self._setting = False
 
 
+class _PeakHandle(pg.TargetItem):
+    """Marker of a peak of the model: dragged to move it, clicked to choose it."""
+
+    def __init__(self, ref, on_click: Callable[[object], None], **options) -> None:
+        super().__init__(**options)
+        self.ref, self.on_click = ref, on_click
+
+    def mouseClickEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            event.accept()
+            self.on_click(self.ref)
+        else:
+            super().mouseClickEvent(event)
+
+
 class SpectrumView(QWidget):
     """Data, background and fit; under them a band with one row of ticks per phase (height ~ intensity).
 
@@ -91,7 +106,12 @@ class SpectrumView(QWidget):
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
+        self.on_add_peak: Optional[Callable[[float, float], None]] = None
+        self.on_move_peak: Optional[Callable[[object, float, float], None]] = None
+        self.on_pick_peak: Optional[Callable[[object], None]] = None
+        self.handles: Optional[List[_PeakHandle]] = None  # None: not editing the peaks
         self.plot = pg.PlotWidget()
+        self.plot.scene().sigMouseClicked.connect(self._clicked)
         self.plot.getAxis("left").setWidth(AXIS_WIDTH)  # aligned with the cake below
         self.plot.getAxis("bottom").setStyle(showValues=False)  # the x axis is under the band
         self.plot.getAxis("bottom").setHeight(2)
@@ -142,6 +162,47 @@ class SpectrumView(QWidget):
         self.show_detection(None)
         self.plot.setTitle("")
         limit_view(self.plot)
+
+    def _clicked(self, event) -> None:
+        """Ctrl + click while editing the peaks: a new peak there."""
+        control = event.modifiers() & Qt.KeyboardModifier.ControlModifier
+        if self.handles is None or self.on_add_peak is None or event.button() != Qt.MouseButton.LeftButton or not control:
+            return
+        box = self.plot.getPlotItem().vb
+        if box.sceneBoundingRect().contains(event.scenePos()):
+            point = box.mapSceneToView(event.scenePos())
+            self.on_add_peak(point.x(), point.y())
+
+    def _handle_clicked(self, ref) -> None:
+        # later: the handles are redrawn, and this one must not disappear inside its own mouse event
+        if self.on_pick_peak is not None:
+            QTimer.singleShot(0, lambda: self.on_pick_peak(ref))
+
+    def _handle_moved(self, handle: _PeakHandle) -> None:
+        position = handle.pos()
+        if self.on_move_peak is not None:
+            QTimer.singleShot(0, lambda: self.on_move_peak(handle.ref, position.x(), position.y()))
+
+    def show_handles(self, handles, selected) -> None:
+        """Handles of the peaks of the model (display.PeakHandle), or None when the peaks are not edited."""
+        for item in self.handles or ():
+            self.plot.removeItem(item)
+        if handles is None:
+            self.handles = None
+            return
+        self.handles = []
+        for handle in handles:
+            color = phase_color(handle.color) if handle.color is not None else "#7f7f7f"
+            chosen = handle.ref == selected
+            item = _PeakHandle(handle.ref, self._handle_clicked, pos=(handle.x, handle.y), size=15 if chosen else 10, symbol="d",
+                               pen=pg.mkPen("k" if chosen else color, width=2 if chosen else 1),
+                               brush=pg.mkBrush(color) if handle.enabled else pg.mkBrush(None),
+                               hoverBrush=pg.mkBrush("#ffd000"))
+            item.setZValue(20)
+            item.setToolTip(handle.tip)
+            item.sigPositionChangeFinished.connect(self._handle_moved)
+            self.plot.addItem(item, ignoreBounds=True)
+            self.handles.append(item)
 
     def set_guides(self, shown: bool) -> None:
         """Vertical lines of the expected reflections across the pattern."""

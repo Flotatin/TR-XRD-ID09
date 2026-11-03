@@ -104,6 +104,68 @@ def test_free_peaks_are_kept_and_in_the_fitted_curve(run):
     assert spectrum.phases[0].pressure == pytest.approx(pressure, abs=0.01)
 
 
+def test_single_peaks(run):
+    editing.add_phase(run, 5, ICE_VII, 3.7)
+    spectrum = run.spectra[5]
+    fit = spectrum.phases[0]
+    assert [p.hkl for p in fit.peaks] == [(1, 1, 0), (2, 0, 0)]
+    line = fit.peaks[1].center
+    editing.remove_peak(run, 5, (ICE_VII, 1))
+    assert [p.hkl for p in fit.peaks] == [(1, 1, 0)]
+
+    back = editing.add_peak(run, 5, line + 0.05, ICE_VII)  # a click near a line without a peak: it takes that line
+    assert back == (ICE_VII, 1) and editing.get_peak(spectrum, back).hkl == (2, 0, 0)
+    assert editing.get_peak(spectrum, back).center == pytest.approx(line, abs=0.01)  # on the detected peak
+    free = editing.add_peak(run, 5, GASKET + 0.03, ICE_VII)  # no line there: a free peak
+    peak = editing.get_peak(spectrum, free)
+    assert free == (None, 0) and peak.hkl is None and peak.center == pytest.approx(GASKET, abs=0.02) and peak.height > 1000
+    assert spectrum.model[np.argmin(abs(spectrum.two_theta - GASKET))] > 1000  # in the curve at once
+    assert editing.peak_refs(spectrum) == [(ICE_VII, 0), (ICE_VII, 1), (None, 0)]
+
+    empty = editing.add_peak(run, 5, 12.0)  # nothing detected: where the user clicked
+    assert editing.get_peak(spectrum, empty).center == 12.0 and editing.get_peak(spectrum, empty).height >= 1.0
+    editing.remove_peak(run, 5, empty)
+
+    editing.move_peak(run, 5, back, line + 0.02, 500.0)
+    moved = editing.get_peak(spectrum, back)
+    assert moved.center == line + 0.02 and moved.height == 500.0 and np.isnan(moved.center_err)
+
+    at_gasket = np.argmin(abs(spectrum.two_theta - GASKET))
+    assert editing.toggle_peak(run, 5, free) is False
+    assert spectrum.model[at_gasket] < 200  # out of the curve
+    before = editing.get_peak(spectrum, free).height
+    editing.fit_current(run, 5)
+    assert editing.get_peak(spectrum, free).height == before and not editing.get_peak(spectrum, free).enabled  # and of the fit
+    assert spectrum.phases[0].pressure == pytest.approx(3.7, abs=0.03)
+    assert editing.toggle_peak(run, 5, free) is True
+
+    with pytest.raises(ValueError, match="n'existe plus"):
+        editing.remove_peak(run, 5, (None, 9))
+    with pytest.raises(ValueError, match="pas sur ce spectre"):
+        editing.move_peak(run, 5, (ICE_VI, 0), 10.0)
+
+
+def test_a_peak_added_by_hand_is_covered_and_fitted_wherever_it_is(run):
+    """An old analysis may have a narrow fit range, and the gasket line is far from every line of the phase."""
+    editing.add_phase(run, 5, ICE_VII, 3.7)
+    spectrum = run.spectra[5]
+    spectrum.fit_range = (15.0, 17.0)  # the (200) line and the gasket are outside
+    free = editing.add_peak(run, 5, GASKET)
+    assert spectrum.fit_range[0] == 15.0 and spectrum.fit_range[1] > GASKET + 0.4
+    at = np.argmin(abs(spectrum.two_theta - GASKET))
+    assert spectrum.model[at] > 1000  # in the curve
+    started = editing.get_peak(spectrum, free).height
+    editing.fit_current(run, 5)
+    fitted = editing.get_peak(spectrum, free)
+    assert fitted.height != started and np.isfinite(fitted.height_err)  # fitted, far from the ice lines
+    assert fitted.center == pytest.approx(GASKET, abs=0.03)
+
+    only_free = run.spectra[3]  # without any phase, free peaks alone can be fitted
+    editing.add_peak(run, 3, GASKET)
+    editing.fit_current(run, 3)
+    assert np.isfinite(only_free.free_peaks[0].height_err)
+
+
 def test_undo_and_redo(run):
     session = Session()
     session.attach(run, None)

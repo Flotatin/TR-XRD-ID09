@@ -74,7 +74,7 @@ values). Never commit the user's data (raw scans, .CEDX) to the repository.
 | Automatic analysis with peak tracking | `services/identification.py` |
 | Analysis as the user asks for it (settings kept in the run, work on a copy, static peaks), GUI and CLI | `services/analysis.py`, `gui/presenters/analysis.py` |
 | Treatment of the spectra (background, filter; one, all, selection), detection as the analysis sees it | `services/treatment.py`, `gui/presenters/treatment.py` |
-| Manual work on the phases (add, move, fit, series from the current spectrum, copy the model), undo | `services/editing.py`, `gui/presenters/editing.py`, `Session.remember` |
+| Manual work on the phases and the peaks (add, move, fit, series from the current spectrum, copy the model), undo | `services/editing.py`, `gui/presenters/editing.py`, `Session.remember` |
 | GUI state (Qt-free) | `services/session.py` |
 | GUI (`trxrd-gui`): display data and presenters without Qt, passive views, actions, threads | `gui/presenters/`, `gui/views/`, `gui/actions.py`, `gui/tasks.py`, `gui/app.py` |
 | Raw data browsing, raw image and cake of a spectrum | `services/raw_data.py`, `services/images.py` |
@@ -87,5 +87,5 @@ values). Never commit the user's data (raw scans, .CEDX) to the repository.
 ## Next steps
 
 See `docs/PASSATION.md` §6 (P1: GUI, viewer + run creation + cake + calibration + dDAC panel + raw-scan preview +
-automatic analysis + manual work on the phases done, next: peaks with the mouse, mask editing; P2: remaining validation items; P4: v1 features not ported yet;
+automatic analysis + manual work on the phases and peaks done, next: zones with the mouse, mask editing; P2: remaining validation items; P4: v1 features not ported yet;
 P5: algorithm ideas; P6: repository split).

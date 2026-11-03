@@ -19,7 +19,7 @@ import numpy as np
 from trxrd.domain import PhaseCard, PhaseFit, Run, Spectrum, energy_to_wavelength
 from trxrd.physics import eos, lattice
 from trxrd.physics.lattice import AXIS_LABELS, convert_two_theta
-from trxrd.services import rates, treatment
+from trxrd.services import editing, rates, treatment
 
 UNITS = ("2th_deg", "q_A^-1", "d_A")
 
@@ -38,6 +38,16 @@ def to_unit(two_theta, unit: str, run: Optional[Run]) -> np.ndarray:
     if unit == "2th_deg" or wavelength(run) is None:
         return np.asarray(two_theta, dtype=float)
     return convert_two_theta(two_theta, unit, wavelength(run))
+
+
+def from_unit(value: float, unit: str, run: Optional[Run]) -> float:
+    """A position in the display unit, back to 2θ (deg)."""
+    lam = wavelength(run)
+    if unit == "2th_deg" or lam is None:
+        return float(value)
+    if unit == "q_A^-1":
+        return float(lattice.two_theta_from_q(value, lam))
+    return float(lattice.two_theta_from_d(value, lam))
 
 
 def phase_order(run: Optional[Run]) -> List[str]:
@@ -126,6 +136,49 @@ def spectrum_curves(run: Run, index: int, unit: str, raw: bool = False) -> Spect
         curves.intensity = treatment.corrected(spectrum)[0]
         curves.fit = model
     return curves
+
+
+# ---------------------------------------------------------------------------- peaks of the model, with the mouse
+
+
+@dataclass
+class PeakHandle:
+    """Marker of one peak of the model, on the top of the peak."""
+
+    ref: Tuple[Optional[str], int]  # services.editing.PeakRef
+    x: float  # display unit
+    y: float  # on the signal shown
+    color: Optional[int]  # index in phase_order, None for a free peak
+    enabled: bool
+    tip: str
+
+
+def signal_offset(spectrum: Spectrum, two_theta: float, raw: bool) -> float:
+    """What a peak of the model sits on in the signal shown: the background with the raw signal, else nothing."""
+    if not raw or spectrum.baseline is None:
+        return 0.0
+    return float(np.interp(two_theta, np.asarray(spectrum.two_theta, dtype=float), np.asarray(spectrum.baseline, dtype=float)))
+
+
+def peak_handles(run: Run, spectrum: Spectrum, unit: str, raw: bool = False) -> List[PeakHandle]:
+    order = phase_order(run)
+    corrected = treatment.corrected(spectrum)[0]
+    x = np.asarray(spectrum.two_theta, dtype=float)
+    handles = []
+    for ref in editing.peak_refs(spectrum):
+        peak = editing.get_peak(spectrum, ref)
+        height = peak.height if np.isfinite(peak.height) else float(np.interp(peak.center, x, corrected))
+        name = ref[0] if ref[0] is not None else "pic libre"
+        hkl = " (" + "".join(str(i) for i in peak.hkl) + ")" if peak.hkl is not None else ""
+        handles.append(PeakHandle(
+            ref=ref,
+            x=float(to_unit(np.array([peak.center]), unit, run)[0]),
+            y=height + signal_offset(spectrum, peak.center, raw),
+            color=order.index(ref[0]) if ref[0] in order else None,
+            enabled=peak.enabled,
+            tip=f"{name}{hkl}  2θ = {peak.center:.3f}°" + ("" if peak.enabled else "  (désactivé)"),
+        ))
+    return handles
 
 
 # ---------------------------------------------------------------------------- peak detection (to check it)

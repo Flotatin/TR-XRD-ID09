@@ -1,10 +1,11 @@
 """Use cases: manual work on the phases of the spectra, after or instead of the automatic analysis.
 
-Add a phase at a starting pressure, move it, remove it; fit the spectrum;
-fit a series from the current spectrum outwards, each spectrum starting from
-its neighbour; copy the model of a spectrum onto others. A phase is placed on
-the peaks the detection finds (position, height, width): the fit starts from
-what is really there, with the settings of the automatic analysis.
+Add a phase at a starting pressure, move it, remove it; add, move, disable
+or remove single peaks; fit the spectrum; fit a series from the current
+spectrum outwards, each spectrum starting from its neighbour; copy the model
+of a spectrum onto others. A phase or a peak is placed on the peaks the
+detection finds (position, height, width): the fit starts from what is really
+there, with the settings of the automatic analysis.
 """
 
 from __future__ import annotations
@@ -19,12 +20,31 @@ import numpy as np
 
 from trxrd.domain import Peak, PhaseCard, PhaseFit, Run, Spectrum
 from trxrd.physics import profiles
+from trxrd.processing import background
 from trxrd.processing.peaks import DetectedPeak
 from trxrd.services.analysis import AnalysisSettings
-from trxrd.services.fitting import fit_spectrum, refresh_model
+from trxrd.services.fitting import FitOptions, fit_spectrum, refresh_model
 from trxrd.services.identification import Progress, analysis_window, detect
 
 STRONG_LINE = 10.0  # % of the card: a line this strong is kept even when no peak is detected there
+LINE_REACH = 0.3  # deg: a peak added this close to a line of the phase, not yet used, takes that line
+RANGE_MARGIN = 0.5  # deg kept around a peak at the end of the fit range
+PeakRef = Tuple[Optional[str], int]  # (phase, or None for a free peak; position in its list of peaks)
+
+
+def _fit_options(settings: Optional[AnalysisSettings]) -> FitOptions:
+    """Those of the automatic analysis; peaks added by hand are fitted wherever they are."""
+    return dataclasses.replace((settings or AnalysisSettings()).options().fit, fit_far_free_peaks=True)
+
+
+def _cover(spectrum: Spectrum, centers: Sequence[float], window: Optional[Tuple[float, float]] = None) -> None:
+    """The fit range holds `centers`: an old analysis may have a narrow one, and what is outside would be ignored."""
+    x = np.asarray(spectrum.two_theta, dtype=float)
+    low, high = spectrum.fit_range or window or (float(x.min()), float(x.max()))
+    if len(centers):
+        low = max(min(low, min(centers) - RANGE_MARGIN), float(x.min()))
+        high = min(max(high, max(centers) + RANGE_MARGIN), float(x.max()))
+    spectrum.fit_range = (low, high)
 
 
 def _lines(card: PhaseCard, pressure: float, energy_ev: float, temperature: float,
@@ -81,7 +101,7 @@ def add_phase(run: Run, index: int, phase: str, pressure: float, settings: Optio
         spectrum.phases[names.index(phase)] = fit
     else:
         spectrum.phases.append(fit)
-    spectrum.fit_range = spectrum.fit_range or window
+    _cover(spectrum, [p.center for p in peaks], window)
     refresh_model(spectrum)
     return fit
 
@@ -92,12 +112,116 @@ def remove_phase(run: Run, index: int, phase: str) -> None:
     refresh_model(spectrum)
 
 
+def peak_refs(spectrum: Spectrum) -> List[PeakRef]:
+    """Every peak of the spectrum: the phases in their order, then the free peaks (the order of the table)."""
+    refs: List[PeakRef] = [(fit.phase, k) for fit in spectrum.phases for k in range(len(fit.peaks))]
+    return refs + [(None, k) for k in range(len(spectrum.free_peaks))]
+
+
+def _peaks_of(spectrum: Spectrum, phase: Optional[str]) -> List[Peak]:
+    if phase is None:
+        return spectrum.free_peaks
+    fit = spectrum.phase_fit(phase)
+    if fit is None:
+        raise ValueError(f"{phase} n'est pas sur ce spectre")
+    return fit.peaks
+
+
+def get_peak(spectrum: Spectrum, ref: PeakRef) -> Peak:
+    peaks = _peaks_of(spectrum, ref[0])
+    if not 0 <= ref[1] < len(peaks):
+        raise ValueError("Ce pic n'existe plus")
+    return peaks[ref[1]]
+
+
+def _peak_width(spectrum: Spectrum, default: float) -> float:
+    widths = [p.width for f in spectrum.phases for p in f.peaks] + [p.width for p in spectrum.free_peaks]
+    widths = [w for w in widths if np.isfinite(w) and w > 0]
+    return float(np.median(widths)) if widths else default
+
+
+def _unused_line(run: Run, fit: Optional[PhaseFit], center: float, temperature: float):
+    """The reflection of the phase of `fit` closest to `center`, within LINE_REACH, that has no peak yet."""
+    if fit is None or run.calibration is None:
+        return None
+    card = run.phases[fit.phase]
+    used = {p.hkl for p in fit.peaks}
+    lines = card.two_theta_lines(fit.pressure, run.calibration.energy_ev, temperature, max_lines=len(card.reflections))
+    close = [(abs(t - center), r.label, r) for t, r in lines if r.hkl not in used and abs(t - center) <= LINE_REACH]
+    return min(close, key=lambda item: item[:2])[2] if close else None
+
+
+def add_peak(run: Run, index: int, position: float, phase: Optional[str] = None,
+             settings: Optional[AnalysisSettings] = None) -> PeakRef:
+    """A peak at 2θ = `position`, on the peak detected there if there is one. Not fitted yet.
+
+    Near a line of `phase` that has no peak yet it takes that line (hkl);
+    otherwise it is a free peak. Returns its reference.
+    """
+    options = (settings or AnalysisSettings()).options()
+    spectrum = run.spectra[index]
+    window = analysis_window(run, options)
+    near = min(detect(run, index, window, options.detection), key=lambda p: abs(p.position - position), default=None)
+    if near is not None and abs(near.position - position) > options.search.tolerance:
+        near = None
+    model = options.fit.model
+    shape = profiles.model(model).shape_default
+    center = float(position) if near is None else near.position
+    height = near.height if near is not None else float(
+        np.interp(center, np.asarray(spectrum.two_theta, dtype=float), background.corrected(spectrum)[0]))
+    width = _peak_width(spectrum, options.fit.width)
+    if near is not None and np.isfinite(near.fwhm):
+        width = profiles.width_from_fwhm(model, near.fwhm, shape)
+    peak = Peak(f"free_{len(spectrum.free_peaks)}", model, center=center, height=max(height, 1.0), width=width, shape=shape)
+
+    fit = spectrum.phase_fit(phase) if phase is not None else None
+    line = _unused_line(run, fit, center, options.fit.temperature)
+    if line is not None:
+        peak.name, peak.hkl = f"{run.phases[phase].name}_{line.label}", line.hkl
+        fit.peaks.append(peak)
+        fit.peaks.sort(key=lambda p: p.center)
+        ref: PeakRef = (phase, next(k for k, p in enumerate(fit.peaks) if p is peak))
+    else:
+        spectrum.free_peaks.append(peak)
+        ref = (None, len(spectrum.free_peaks) - 1)
+    _cover(spectrum, [center], window)
+    refresh_model(spectrum)
+    return ref
+
+
+def move_peak(run: Run, index: int, ref: PeakRef, center: float, height: Optional[float] = None) -> None:
+    """New position, and height if given, of a peak: the start of the next fit."""
+    spectrum = run.spectra[index]
+    peak = get_peak(spectrum, ref)
+    peak.center, peak.center_err = float(center), np.nan
+    if height is not None:
+        peak.height, peak.height_err = max(float(height), 1.0), np.nan
+    _cover(spectrum, [peak.center])
+    refresh_model(spectrum)
+
+
+def remove_peak(run: Run, index: int, ref: PeakRef) -> None:
+    spectrum = run.spectra[index]
+    get_peak(spectrum, ref)
+    del _peaks_of(spectrum, ref[0])[ref[1]]
+    refresh_model(spectrum)
+
+
+def toggle_peak(run: Run, index: int, ref: PeakRef) -> bool:
+    """A disabled peak stays in the list but leaves the curve, the fit and the cell. Returns its new state."""
+    spectrum = run.spectra[index]
+    peak = get_peak(spectrum, ref)
+    peak.enabled = not peak.enabled
+    refresh_model(spectrum)
+    return peak.enabled
+
+
 def fit_current(run: Run, index: int, settings: Optional[AnalysisSettings] = None) -> Spectrum:
     """Fit spectrum `index` from the peaks it holds."""
     spectrum = run.spectra[index]
-    if not spectrum.phases:
+    if not spectrum.phases and not spectrum.free_peaks:
         raise ValueError("Aucune phase sur ce spectre : en ajouter une avant d'ajuster")
-    return fit_spectrum(run, index, options=(settings or AnalysisSettings()).options().fit)
+    return fit_spectrum(run, index, options=_fit_options(settings))
 
 
 @dataclass
@@ -129,7 +253,7 @@ def fit_series(run: Run, start: int, indices: Iterable[int], settings: Optional[
     phase are left out. When `progress` stops it, what is done is returned.
     """
     began = time.perf_counter()
-    options = (settings or AnalysisSettings()).options().fit
+    options = _fit_options(settings)
     chosen = sorted({int(i) for i in indices} | {int(start)})
     if not run.spectra[start].phases and follow:
         raise ValueError("Aucune phase sur le spectre courant : rien à propager")

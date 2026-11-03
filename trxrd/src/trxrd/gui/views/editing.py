@@ -1,4 +1,4 @@
-"""Tab "Phases": the phases of the current spectrum and the commands of the manual work."""
+"""Tabs "Phases" and "Pics": the phases and the peaks of the current spectrum and the commands of the manual work."""
 
 from __future__ import annotations
 
@@ -148,9 +148,67 @@ class PhasesPanel(QWidget):
     def show_message(self, text: str) -> None:
         self.message.setText(text)
 
+    def chosen_phase(self) -> Optional[str]:
+        return self.card.currentData()
+
     def clear(self) -> None:
         self.table.show_rows([], [])
         self.card.clear()
         self._on_spectrum = {}
         self.message.setText("")
         self.setEnabled(False)
+
+
+class PeaksPanel(QWidget):
+    """Peaks of the current spectrum; editing them with the mouse on the spectrum."""
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.on_edit: Optional[Callable[[bool], None]] = None
+        self.on_row: Optional[Callable[[int], None]] = None
+        self.on_remove: Optional[Callable[[], None]] = None
+        self.on_toggle: Optional[Callable[[], None]] = None
+        self.table = RowsTable()
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.table.itemSelectionChanged.connect(self._row_chosen)
+        self.edit = QCheckBox("Modifier les pics à la souris (Ctrl+E)")
+        self.edit.toggled.connect(lambda on: self.on_edit and self.on_edit(on))
+        self.remove = QPushButton("Supprimer (Suppr)")
+        self.toggle = QPushButton("Activer / désactiver")
+        self.toggle.setToolTip("Un pic désactivé reste dans la liste, mais sort de la courbe, de l'ajustement et de la maille")
+        self.remove.clicked.connect(lambda: self.on_remove and self.on_remove())
+        self.toggle.clicked.connect(lambda: self.on_toggle and self.on_toggle())
+        hint = QLabel("Tirer une poignée : 2θ et hauteur. Ctrl + clic : ajouter un pic, sur la raie libre de la phase "
+                      "choisie (onglet Phases) s'il y en a une près, sinon pic libre. Puis Ctrl+F pour ajuster.")
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: #606060")
+        self.message = QLabel("")
+        self.message.setWordWrap(True)
+        self.message.setStyleSheet("color: #8a5a00")
+        layout = QVBoxLayout(self)
+        layout.addWidget(self.table, 1)
+        layout.addWidget(self.edit)
+        layout.addLayout(_row(self.remove, self.toggle))
+        layout.addWidget(hint)
+        layout.addWidget(self.message)
+
+    def _row_chosen(self) -> None:
+        rows = self.table.selectionModel().selectedRows()
+        if rows and self.on_row is not None:
+            self.on_row(rows[0].row())
+
+    def show_rows(self, columns, rows) -> None:
+        self.table.blockSignals(True)
+        self.table.show_rows(columns, rows)
+        self.table.blockSignals(False)
+
+    def select_row(self, row: Optional[int]) -> None:
+        self.table.blockSignals(True)
+        if row is None:
+            self.table.clearSelection()
+        else:
+            self.table.selectRow(row)
+        self.table.blockSignals(False)
+
+    def show_message(self, text: str) -> None:
+        self.message.setText(text)

@@ -151,7 +151,7 @@ trxrd/
 │       ├── actions.py          registre unique des QAction (menus, barre d'outils, raccourcis)
 │       ├── tasks.py            calculs longs dans un thread, résultat rendu au thread de l'interface
 │       └── app.py              assemblage : fenêtre + presenters + actions
-└── tests/                      243 tests ; data/ = scan TUTO, calibration, ancien fichier .CEDX d'exemple
+└── tests/                      247 tests ; data/ = scan TUTO, calibration, ancien fichier .CEDX d'exemple
 ```
 
 ## 5. Le format de fichier `trxrd-run` (HDF5)
@@ -805,6 +805,20 @@ Ce qu'on a appris sur D2O_03_0001_scan0006 :
   Sans « suivre », chaque spectre part de son propre modèle.
 - **Modèle** : copier les phases et les pics libres d'un spectre (Ctrl+Maj+C), les coller sur la sélection
   (Ctrl+Maj+V, sans ajuster), ou vider la sélection.
+- **Pics à la souris** (onglet Pics, ou Ctrl+E ; `PeaksPresenter`, `SpectrumView.show_handles`) : une poignée
+  sur chaque pic du modèle, à sa couleur, grise pour un pic libre, vide pour un pic désactivé.
+  - Tirer une poignée change la position et la hauteur de départ du pic.
+  - Ctrl + clic ajoute un pic, posé sur le pic détecté à cet endroit s'il y en a un. À moins de 0,3° d'une raie
+    sans pic de la phase choisie dans l'onglet Phases, il prend cette raie (hkl) ; sinon c'est un pic libre.
+  - Un clic choisit un pic, comme une ligne du tableau. Suppr le supprime ; « Activer / désactiver » le laisse
+    dans la liste, hors de la courbe, de l'ajustement et de la maille.
+  - Ctrl+F ajuste ensuite à partir de ces pics. Un clic sans Ctrl ne fait rien : la navigation ne change pas.
+
+  Deux points viennent de l'essai sur Water05. La zone d'ajustement d'un fichier v1 peut être étroite (13 à 16°) :
+  elle s'étend pour couvrir ce qu'on ajoute (`_cover`), sinon le pic serait ignoré. Et l'ajustement manuel prend
+  tous les pics libres actifs, même loin des raies des phases (`FitOptions.fit_far_free_peaks`) ; l'analyse
+  automatique les laisse de côté pour aller vite. Les poignées sont en unité d'affichage (2θ, Q ou d) et sur le
+  signal montré : `display.from_unit` et `signal_offset` reviennent à 2θ et à la hauteur au-dessus du fond.
 - **Annuler** (Ctrl+Z, Ctrl+Y ; `Session.remember`, `undo`, `redo`) : toutes les modifications, l'analyse
   automatique et le traitement compris, 30 niveaux. On garde une copie de ce qui change (phases, pics libres,
   traitement), les grands tableaux étant partagés : une analyse de 1 600 spectres ne coûte pas de mémoire.
@@ -826,7 +840,7 @@ on ne peut pas dézoomer au-delà des données de chaque graphe, avec 3 % de mar
   redimensionnement.
 
 **Ensuite** :
-- étape 3 (suite) : pics à la souris, zones d'ajustement et zones exclues dessinées à la souris, note du run
+- étape 3 (suite) : zones d'ajustement et zones exclues dessinées à la souris, note du run
   (`docs/PASSATION.md` §6, P1).
 
 ## 10. Séparation en deux dépôts

@@ -40,7 +40,7 @@ def test_window_opens_a_run_and_navigates(viewer):
     window.actions.get("raw").trigger()
     assert len(window.spectrum._ticks) == 2  # ice VII: ticks + their tooltips
     assert window.navigator.table.rowCount() == 5 and window.phases.table.rowCount() == 1
-    assert window.peaks.rowCount() == 2 and window.map.image.image.shape == (400, 5)  # [2θ, time]
+    assert window.peaks.table.rowCount() == 2 and window.map.image.image.shape == (400, 5)  # [2θ, time]
     assert window.evolution.channel.currentText() == "Channel3"  # the non-trigger channel first
 
     window.actions.get("next").trigger()
@@ -499,3 +499,74 @@ def test_image_limits_with_locked_proportions(viewer):
     panel.clear()
     assert box.state["limits"]["xLimits"] == [None, None]
     panel.close()
+
+
+def test_peaks_with_the_mouse_on_the_spectrum(viewer, compression_run):
+    from PySide6.QtCore import QPointF, Qt
+    from synthetic import GASKET
+    from trxrd.gui.views.main_window import application
+    from trxrd.services import editing
+
+    class Click:
+        def __init__(self, scene_position, modifiers):
+            self.position, self.keys = scene_position, modifiers
+
+        def button(self):
+            return Qt.MouseButton.LeftButton
+
+        def modifiers(self):
+            return self.keys
+
+        def scenePos(self):
+            return self.position
+
+    app = application(["test"])
+    window, session = viewer.window, viewer.session
+    window.show()
+    session.attach(compression_run, None)
+    session.select(5)
+    window.phases.card.setCurrentIndex(window.phases.card.findData("H2O_Ice_VII"))
+    window.phases.pressure.setValue(3.7)
+    window.phases.add.click()
+    app.processEvents()
+    view, panel, delete = window.spectrum, window.peaks, window.actions.get("delete_peak")
+    assert view.handles is None and not delete.isEnabled()
+
+    window.actions.get("edit_peaks").trigger()  # Ctrl+E
+    assert panel.edit.isChecked() and delete.isEnabled() and len(view.handles) == 2
+    assert panel.table.rowCount() == 2
+    view.plot.setYRange(0, 5000)
+    app.processEvents()
+    box = view.plot.getPlotItem().vb
+    where = box.mapViewToScene(QPointF(GASKET, 1000.0))
+    view._clicked(Click(where, Qt.KeyboardModifier.NoModifier))  # a plain click does nothing
+    assert len(view.handles) == 2
+    view._clicked(Click(where, Qt.KeyboardModifier.ControlModifier))
+    assert len(view.handles) == 3 and panel.table.rowCount() == 3 and panel.table.currentRow() == 2
+    assert window.actions.get("undo").text() == "&Annuler : pic ajouté"
+
+    handle = view.handles[0]
+    handle.setPos(handle.pos().x() + 0.02, 1500.0)  # dragged
+    handle.sigPositionChangeFinished.emit(handle)
+    app.processEvents()
+    first = session.spectrum.phases[0].peaks[0]
+    assert first.height == 1500.0 and viewer.peaks.selected == ("H2O_Ice_VII", 0) and len(view.handles) == 3
+
+    view._handle_clicked((None, 0))
+    app.processEvents()
+    assert viewer.peaks.selected == (None, 0) and panel.table.selectionModel().selectedRows()[0].row() == 2
+    delete.trigger()  # Suppr
+    assert session.spectrum.free_peaks == [] and len(view.handles) == 2
+    window.actions.get("undo").trigger()
+    assert len(session.spectrum.free_peaks) == 1
+
+    panel.table.selectRow(1)  # chosen in the table
+    assert viewer.peaks.selected == ("H2O_Ice_VII", 1)
+    panel.toggle.click()
+    assert not session.spectrum.phases[0].peaks[1].enabled
+    window.actions.get("fit").trigger()
+    assert session.spectrum.phases[0].pressure == pytest.approx(3.7, abs=0.05)  # the (110) line alone
+
+    panel.edit.setChecked(False)
+    assert view.handles is None and not delete.isEnabled() and not window.actions.get("edit_peaks").isChecked()
+    assert editing.peak_refs(session.spectrum)  # the peaks stay

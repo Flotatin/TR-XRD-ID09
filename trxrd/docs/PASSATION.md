@@ -71,8 +71,8 @@ Ne pas les remettre en cause sans lui en parler.
 
 ### 3.2 Par fonctionnalité
 
-Tout est testé : `python -m pytest trxrd` compte 243 tests. Les 7 comparaisons numériques avec la v1 sont
-ignorées quand la v1 n'est pas importable, par exemple dans `.venv-v2`, qui n'a pas PyQt5 : 236 tests
+Tout est testé : `python -m pytest trxrd` compte 247 tests. Les 7 comparaisons numériques avec la v1 sont
+ignorées quand la v1 n'est pas importable, par exemple dans `.venv-v2`, qui n'a pas PyQt5 : 240 tests
 passent alors.
 
 | Fonctionnalité | Où | État / preuve |
@@ -100,6 +100,8 @@ passent alors.
 | Aperçu d'un scan brut avant l'intégration : image ou cake (maximum du scan ou une image), diagramme et couverture en azimut sur tout le détecteur, plage 2θ à tirer | `services/images.ScanPreview`, `gui/presenters/preview.py`, `gui/views/preview.py` | ✅ Water05 scan 9 : pixels utilisables de 5,21 à 29,30° ; maximum de 32 images sur 1 600 en 2,4 s |
 | Traitement des spectres (fond SNIP, filtre) au cas par cas ou propagé à tous / à la sélection ; spectre affiché filtré, fond soustrait (brut sur demande) ; contrôle de la détection (pics, seuil, raisons des rejets) avec les réglages de l'analyse | `services/treatment.py`, `gui/presenters/treatment.py`, `gui/views/treatment.py` | ✅ détection sur le signal filtré du spectre : 805/1 053 spectres contre 797 sur 29 runs ; Water05 inchangé ; 35 ms par spectre sur Water01_scan0074 |
 | Travail manuel sur les phases : ajouter, retirer, changer P, ajuster le spectre, ajuster une série en suivant à partir du spectre courant, copier le modèle ; pics libres gardés et tracés ; annuler / rétablir | `services/editing.py`, `Session.remember`, `gui/presenters/editing.py`, `gui/views/editing.py` | ✅ D2O_03 scan 6 : 14 spectres à moins de 0,05 GPa de la v1, sauf le spectre 4 (0,09 GPa), en 2 s |
+| Pics à la souris : poignées, ajout (raie ou pic libre), suppression, désactivation | `editing.add_peak`, `PeaksPresenter`, `SpectrumView.show_handles` | ✅ Water05 scan 9 #8 : pic du joint ajouté, ajusté à 18,64° ; Sn passe de 2,07 à 2,01 GPa |
+| Limites de zoom de tous les graphes | `limit_view`, `keep_in_limits`, `ImagePanel.update_limits` | ✅ |
 | Cake / image brute sous le spectre | `services/images.py`, `CakePresenter` | ✅ image brute d'un `.CEDX` retrouvée par le nom du run ; 0,03 s par spectre |
 | Panneau dDAC : grandeur de chaque phase en fonction du temps (P, V, a, b, c, c/a, b/a, T, ou ÷ fiche), piézo, carte des diffractogrammes sur le même axe du temps | `gui/presenters/display.py`, `EvolutionPresenter`, `MapPresenter`, `gui/views/plots.py` | ✅ Water05 scan 9 ; carte de Water01_scan0074 (1 600 spectres) en 0,03 s |
 | dP/dt par échantillon ou par phase (droite glissante), dP/dt moyen sur un intervalle (pente et ΔP/Δt) | `processing/rates.py`, `services/rates.py`, `RatePresenter` | ✅ Water05 scan 9 : eau et Sn culminent vers −45 à −50 GPa/ms ; 6 ms pour 1 600 spectres |
@@ -278,7 +280,8 @@ Seul `trxrd/gui/` a le droit d'importer PySide6/pyqtgraph (règle vérifiée par
 - [x] garder et tracer les pics libres (zones exclues, pics inexpliqués) : `Spectrum.free_peaks`, format 1.2 ;
 - [x] « fit total » d'un spectre (Ctrl+F), puis « fit all » de la sélection ou de tous, en suivant à partir du
   spectre courant ;
-- [ ] ajouter, remplacer, confirmer ou supprimer un pic à la souris ;
+- [x] pics à la souris (Ctrl+E) : poignées à tirer, Ctrl + clic pour ajouter (raie de la phase choisie, ou pic
+  libre), Suppr, activer / désactiver ; la zone d'ajustement s'étend pour couvrir ce qu'on ajoute ;
 - [ ] zones d'ajustement / zones exclues dessinées à la souris (à stocker dans `Run.ui_state` ou dans le modèle) ;
 - [x] copier / coller le modèle de phases d'un spectre sur une sélection de spectres ; supprimer les phases d'une zone de spectres ;
 - [x] détection automatique des pics affichée (marqueurs), avec SNR (onglet Détection) ;

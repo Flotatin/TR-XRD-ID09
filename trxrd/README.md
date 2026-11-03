@@ -18,7 +18,7 @@ Un environnement virtuel dédié, séparé de celui de la v1 : PyQt5 (v1) et PyS
 python -m venv .venv-v2
 .venv-v2\Scripts\activate                    # Windows ; Linux/macOS : source .venv-v2/bin/activate
 pip install -e "./trxrd[notebook,gui,dev]"  # depuis la racine du dépôt
-python -m pytest trxrd                      # 243 tests
+python -m pytest trxrd                      # 247 tests
 ```
 
 ## Interface graphique
@@ -53,6 +53,7 @@ L'interface sait aussi :
 - travailler à la main sur les phases (onglet Phases) : ajouter une phase à une pression, déplacer ses raies,
   ajuster le spectre (Ctrl+F), propager à la sélection ou à tous à partir du spectre courant, copier le
   modèle ; tout s'annule (Ctrl+Z) ;
+- modifier les pics à la souris (Ctrl+E) : tirer une poignée, Ctrl + clic pour ajouter un pic, Suppr ;
 - afficher sous le spectre le cake ou l'image brute du spectre courant (Ctrl+K) ;
 - calibrer le détecteur sur une image de LaB6 ou de CeO2, à la Dioptas (Ctrl+L).
 

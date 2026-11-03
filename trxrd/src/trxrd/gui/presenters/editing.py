@@ -1,4 +1,5 @@
-"""Manual work on the phases from the GUI (no Qt): add, move, remove, fit, propagate, copy; every edit can be undone.
+"""Manual work on the phases and the peaks from the GUI (no Qt): add, move, remove, fit, propagate, copy; every edit
+can be undone.
 
 Short edits run at once; fitting a series runs in a worker thread on copies
 of the spectra, with a progress bar and a stop button. The settings
@@ -10,6 +11,9 @@ on_remove(phase), on_pressure(phase, pressure), on_fit(), on_fit_series(scope: "
 on_paste(), on_clear().
 Window: start_progress(text, on_cancel), set_progress(done, total), end_progress(), show_message(text),
 show_error(title, text).
+Peaks: view show_message(text), select_row(row or None); callbacks on_edit(on), on_row(row), on_remove(), on_toggle().
+Spectrum view: show_handles(handles or None, selected ref); callbacks on_add_peak(x, y), on_move_peak(ref, x, y),
+on_pick_peak(ref). Phases view: chosen_phase().
 """
 
 from __future__ import annotations
@@ -19,8 +23,9 @@ from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
 import numpy as np
 
+from trxrd.gui.presenters import display
 from trxrd.gui.presenters.analysis import phase_label
-from trxrd.gui.presenters.viewer import ImmediateRunner
+from trxrd.gui.presenters.viewer import DisplaySettings, ImmediateRunner
 from trxrd.services import analysis, editing
 from trxrd.services.editing import FitSeries
 from trxrd.services.session import Event, Session
@@ -35,6 +40,19 @@ class ModelChoices:
     selected: int  # spectra chosen together
     count: int
     copied_from: Optional[int]  # spectrum of the copied model
+
+
+def apply_edit(session: Session, view, indices: Iterable[int], label: str, action: Callable[[], object],
+               merge: bool = False) -> None:
+    """Do `action` on the spectra `indices`, which can then be undone; its errors are shown, not raised."""
+    session.remember(list(indices), label, merge)
+    try:
+        action()
+    except (ValueError, KeyError) as exc:
+        view.show_message(str(exc))
+        return
+    view.show_message("")
+    session.modified()
 
 
 class EditingPresenter:
@@ -74,16 +92,7 @@ class EditingPresenter:
         return analysis.saved_settings(self.session.run)
 
     def _edit(self, indices: Iterable[int], label: str, action: Callable[[], object], merge: bool = False) -> None:
-        """Do `action` on the spectra `indices`, which can then be undone; its errors are shown, not raised."""
-        indices = list(indices)
-        self.session.remember(indices, label, merge)
-        try:
-            action()
-        except (ValueError, KeyError) as exc:
-            self.view.show_message(str(exc))
-            return
-        self.view.show_message("")
-        self.session.modified()
+        apply_edit(self.session, self.view, indices, label, action, merge)
 
     # ------------------------------------------------------------------ phases of the current spectrum
 
@@ -116,7 +125,7 @@ class EditingPresenter:
         if not self._ready():
             return
         run, index = self.session.run, self.session.index
-        if not self.session.spectrum.phases:
+        if not self.session.spectrum.phases and not self.session.spectrum.free_peaks:
             self.view.show_message("Aucune phase sur ce spectre : en ajouter une avant d'ajuster.")
             return
         settings = self._settings()
@@ -187,3 +196,97 @@ class EditingPresenter:
             return
         run, indices = self.session.run, self._selection()
         self._edit(indices, f"phases retirées de {len(indices)} spectre(s)", lambda: editing.clear_model(run, indices))
+
+
+class PeaksPresenter:
+    """Single peaks of the current spectrum with the mouse: handles on the spectrum, drawn while editing is on.
+
+    A peak added near a line of the phase chosen in the Phases tab takes that
+    line; otherwise it is a free peak. The next fit starts from these peaks.
+    """
+
+    def __init__(self, session: Session, settings: DisplaySettings, view, spectrum_view, phases_view) -> None:
+        self.session, self.settings, self.view = session, settings, view
+        self.spectrum_view, self.phases_view = spectrum_view, phases_view
+        self.editing = False
+        self.selected: Optional[editing.PeakRef] = None
+        view.on_edit = self.set_editing
+        view.on_row = self.pick_row
+        view.on_remove = self.remove
+        view.on_toggle = self.toggle
+        spectrum_view.on_add_peak = self.add
+        spectrum_view.on_move_peak = self.move
+        spectrum_view.on_pick_peak = self.pick
+        for event in (Event.RUN_CHANGED, Event.SPECTRUM_CHANGED, Event.DATA_CHANGED):
+            session.subscribe(event, self.refresh)
+        settings.subscribe(self.refresh)
+
+    def set_editing(self, on: bool) -> None:
+        self.editing = bool(on)
+        self.selected = None
+        self.refresh()
+
+    def refresh(self, *_) -> None:
+        run, spectrum = self.session.run, self.session.spectrum
+        if spectrum is None or not self.editing:
+            self.spectrum_view.show_handles(None, None)
+            self.view.select_row(None)
+            return
+        refs = editing.peak_refs(spectrum)
+        if self.selected not in refs:
+            self.selected = None
+        self.spectrum_view.show_handles(display.peak_handles(run, spectrum, self.settings.unit_for(run), self.settings.raw),
+                                        self.selected)
+        self.view.select_row(refs.index(self.selected) if self.selected is not None else None)
+
+    def pick(self, ref: editing.PeakRef) -> None:
+        self.selected = ref
+        self.refresh()
+
+    def pick_row(self, row: int) -> None:
+        refs = editing.peak_refs(self.session.spectrum) if self.session.spectrum is not None else []
+        if 0 <= row < len(refs):
+            self.pick(refs[row])
+
+    def _edit(self, label: str, action: Callable[[], object]) -> None:
+        apply_edit(self.session, self.view, [self.session.index], label, action)
+
+    def add(self, x: float, y: float = 0.0) -> None:
+        """Ctrl + click at (x, y) on the spectrum."""
+        run, spectrum, index = self.session.run, self.session.spectrum, self.session.index
+        if spectrum is None or not self.editing:
+            return
+        position = display.from_unit(x, self.settings.unit_for(run), run)
+        chosen = self.phases_view.chosen_phase()
+        phase = chosen if chosen is not None and spectrum.phase_fit(chosen) is not None else None
+        settings = analysis.saved_settings(run)
+
+        def action() -> None:
+            self.selected = editing.add_peak(run, index, position, phase, settings)
+
+        self._edit("pic ajouté", action)
+
+    def move(self, ref: editing.PeakRef, x: float, y: float) -> None:
+        """A handle dragged to (x, y): new position and height."""
+        run, spectrum, index = self.session.run, self.session.spectrum, self.session.index
+        if spectrum is None:
+            return
+        center = display.from_unit(x, self.settings.unit_for(run), run)
+        height = y - display.signal_offset(spectrum, center, self.settings.raw)
+        self.selected = ref
+        self._edit("pic déplacé", lambda: editing.move_peak(run, index, ref, center, height))
+
+    def remove(self) -> None:
+        run, index, ref = self.session.run, self.session.index, self.selected
+        if ref is None or not self.editing:
+            self.view.show_message("Choisir d'abord un pic : le cliquer sur le spectre ou dans le tableau.")
+            return
+        self.selected = None
+        self._edit("pic supprimé", lambda: editing.remove_peak(run, index, ref))
+
+    def toggle(self) -> None:
+        run, index, ref = self.session.run, self.session.index, self.selected
+        if ref is None or not self.editing:
+            self.view.show_message("Choisir d'abord un pic : le cliquer sur le spectre ou dans le tableau.")
+            return
+        self._edit("pic activé ou désactivé", lambda: editing.toggle_peak(run, index, ref))

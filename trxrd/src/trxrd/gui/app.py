@@ -13,7 +13,7 @@ from typing import List, Optional, Sequence
 
 from trxrd import __version__
 from trxrd.gui.presenters.analysis import AnalysisPresenter
-from trxrd.gui.presenters.editing import EditingPresenter
+from trxrd.gui.presenters.editing import EditingPresenter, PeaksPresenter
 from trxrd.gui.presenters.treatment import DetectionPresenter, ProcessingPresenter
 from trxrd.gui.presenters.viewer import (
     CakePresenter, DisplaySettings, EvolutionPresenter, MainPresenter, MapPresenter, NavigatorPresenter,
@@ -35,6 +35,7 @@ class Viewer:
     main: MainPresenter
     analysis: AnalysisPresenter
     editing: EditingPresenter
+    peaks: PeaksPresenter
     presenters: List[object]
 
 
@@ -60,6 +61,7 @@ def create_viewer(session: Optional[Session] = None, runner=None) -> Viewer:
     main = MainPresenter(session, settings, window, runner, version=__version__)
     analysis = AnalysisPresenter(session, window, runner)
     editing = EditingPresenter(session, window.phases, window, runner)
+    peaks = PeaksPresenter(session, settings, window.peaks, window.spectrum, window.phases)
     window.on_close_request = main.may_discard
     window.on_unit = main.set_unit
 
@@ -76,6 +78,12 @@ def create_viewer(session: Optional[Session] = None, runner=None) -> Viewer:
     add("copy_model", EDIT, "&Copier le modèle du spectre", editing.copy, ["Ctrl+Shift+C"],
         "Phases et pics libres du spectre courant, à coller sur d'autres spectres")
     add("paste_model", EDIT, "C&oller le modèle sur la sélection", editing.paste, ["Ctrl+Shift+V"])
+    add("edit_peaks", EDIT, "Modifier les &pics à la souris", lambda: window.peaks.edit.setChecked(window.actions.get("edit_peaks").isChecked()),
+        ["Ctrl+E"], checkable=True, tip="Poignées sur les pics du modèle ; Ctrl + clic pour ajouter un pic")
+    add("delete_peak", EDIT, "&Supprimer le pic choisi", peaks.remove, ["Del"])
+    window.actions.get("delete_peak").setEnabled(False)  # the key stays free for the fields otherwise
+    window.peaks.edit.toggled.connect(window.actions.get("edit_peaks").setChecked)
+    window.peaks.edit.toggled.connect(window.actions.get("delete_peak").setEnabled)
     add("previous", NAVIGATION, "Spectre &précédent", lambda: main.step(-1), ["Ctrl+Left", "PgUp"])
     add("next", NAVIGATION, "Spectre &suivant", lambda: main.step(+1), ["Ctrl+Right", "PgDown"])
     add("first", NAVIGATION, "P&remier spectre", main.first, ["Ctrl+Home"])
@@ -110,7 +118,7 @@ def create_viewer(session: Optional[Session] = None, runner=None) -> Viewer:
     add("shortcuts", HELP, "&Raccourcis clavier", window.show_shortcuts, ["F1"])
     window.build_menus(toolbar=("new_run", "open", "save", "|", "previous", "next", "|", "raw", "auto"))
     main.update()  # the unit actions exist now
-    return Viewer(session, settings, window, main, analysis, editing, presenters)
+    return Viewer(session, settings, window, main, analysis, editing, peaks, presenters)
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:

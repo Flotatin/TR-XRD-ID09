@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
 )
 
 from trxrd.gui.actions import ActionRegistry
-from trxrd.gui.views.editing import PhasesPanel
+from trxrd.gui.views.editing import PeaksPanel, PhasesPanel
 from trxrd.gui.views.panels import Navigator, RowsTable
 from trxrd.gui.views.plots import CakeView, EvolutionView, RateView, SpectrumView, TimeMapView
 from trxrd.gui.views.treatment import DetectionPanel, ProcessingPanel
@@ -39,7 +39,7 @@ class MainWindow(QMainWindow):
         self.dpdt = RateView(link_to=self.evolution.plot)  # same time axis, as in the dDAC view of the v1
         self.map = TimeMapView(link_to=self.evolution.plot)
         self.phases = PhasesPanel()
-        self.peaks = RowsTable()
+        self.peaks = PeaksPanel()
         self.processing = ProcessingPanel()
         self.detection = DetectionPanel()
         # a histogram beside an image narrows its plot: the plot stacked above gets the same margin

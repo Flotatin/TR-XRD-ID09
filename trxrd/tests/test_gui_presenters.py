@@ -705,3 +705,69 @@ def test_every_kind_of_edit_can_be_undone(compression_run):
     assert all(s.phases for s in run.spectra) and session.undo_label == "analyse automatique"
     main.undo()
     assert not any(s.phases for s in run.spectra)
+
+
+def test_peaks_with_the_mouse(compression_run):
+    from synthetic import GASKET
+    from trxrd.gui.presenters.editing import PeaksPresenter
+    from trxrd.services import editing
+
+    ice = "H2O_Ice_VII"
+    session, settings, view, spectrum, phases = Session(), DisplaySettings(), Recorder(), Recorder(), Recorder(chosen_phase=ice)
+    presenter = PeaksPresenter(session, settings, view, spectrum, phases)
+    session.attach(compression_run, None)
+    session.select(5)
+    assert spectrum.last("show_handles") == (None, None)  # not editing the peaks
+    presenter.add(15.0)
+    presenter.remove()
+    assert session.spectrum.free_peaks == [] and "Choisir d'abord" in view.last("show_message")[0]
+
+    editing.add_phase(session.run, 5, ice, 3.7)
+    presenter.set_editing(True)
+    handles, selected = spectrum.last("show_handles")
+    first = session.spectrum.phases[0].peaks[0]
+    assert [h.ref for h in handles] == [(ice, 0), (ice, 1)] and selected is None
+    assert handles[0].x == first.center and handles[0].y == first.height and "(110)" in handles[0].tip
+
+    presenter.add(GASKET + 0.02, 0.0)  # Ctrl + click: no line of the chosen phase there
+    assert presenter.selected == (None, 0) and session.undo_label == "pic ajouté" and session.dirty
+    assert view.last("select_row") == (2,) and spectrum.last("show_handles")[0][2].color is None
+    presenter.move((None, 0), GASKET + 0.01, 900.0)
+    free = session.spectrum.free_peaks[0]
+    assert free.center == GASKET + 0.01 and free.height == 900.0 and session.undo_label == "pic déplacé"
+
+    settings.set_raw(True)  # on the raw signal the peak sits on the background
+    handle = spectrum.last("show_handles")[0][2]
+    assert handle.y > 900.0
+    presenter.move((None, 0), handle.x, handle.y)
+    assert session.spectrum.free_peaks[0].height == pytest.approx(900.0)
+    settings.set_raw(False)
+    settings.set_unit("q_A^-1")  # the handles are in the unit of the axis
+    handle = spectrum.last("show_handles")[0][2]
+    assert handle.x == pytest.approx(3.11, abs=0.01)
+    presenter.move((None, 0), handle.x, handle.y)
+    assert session.spectrum.free_peaks[0].center == pytest.approx(GASKET + 0.01)
+    settings.set_unit("d_A")
+    handle = spectrum.last("show_handles")[0][2]
+    presenter.move((None, 0), handle.x, handle.y)
+    assert session.spectrum.free_peaks[0].center == pytest.approx(GASKET + 0.01)
+    settings.set_unit("2th_deg")
+
+    presenter.pick_row(0)
+    assert presenter.selected == (ice, 0) and view.last("select_row") == (0,)
+    presenter.toggle()
+    assert not session.spectrum.phases[0].peaks[0].enabled and not spectrum.last("show_handles")[0][0].enabled
+    session.undo()
+    assert session.spectrum.phases[0].peaks[0].enabled
+    presenter.pick_row(1)
+    presenter.remove()
+    assert len(session.spectrum.phases[0].peaks) == 1 and presenter.selected is None
+    assert session.undo() == "pic supprimé" and len(session.spectrum.phases[0].peaks) == 2
+
+    phases.answers["chosen_phase"] = "H2O_Ice_VI"  # not on this spectrum: a free peak, even near a line of it
+    line = session.run.phases["H2O_Ice_VI"].two_theta_lines(1.0, session.run.calibration.energy_ev)[0][0]
+    presenter.add(line)
+    assert presenter.selected == (None, 1)
+
+    presenter.set_editing(False)
+    assert spectrum.last("show_handles") == (None, None) and view.last("select_row") == (None,)

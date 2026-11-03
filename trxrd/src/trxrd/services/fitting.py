@@ -30,6 +30,9 @@ class FitOptions:
     local_window: Optional[float] = 0.3  # deg: only points this close to a peak are fitted (None: whole range)
     # ...or this many FWHM of the peak when it is broader (liquid, amorphous, strained): its tails are fitted too
     local_fwhm: float = 1.0
+    # free peaks far from every phase peak do not matter to the phases and are left out, which is faster;
+    # True: fit them too (peaks added by hand)
+    fit_far_free_peaks: bool = False
     exclude: Optional[Sequence[Tuple[float, float]]] = None  # 2θ zones left out of the fit (gasket, diamond...)
     max_center_err: float = 0.1  # deg: peaks known worse than this do not enter the cell refinement
 
@@ -142,7 +145,7 @@ def fit_spectrum(
     diamond) cannot drag the fit. `extra_peaks` (peaks seen but assigned to no
     phase; default: the free peaks of the spectrum) are fitted alongside so
     that they do not bias their neighbours, and kept as its free peaks. Those
-    far from every phase peak do not matter to the fit and stay as they are.
+    far from every phase peak stay as they are, unless `fit_far_free_peaks`.
     """
     options = options or FitOptions()
     spectrum = run.spectra[index]
@@ -164,7 +167,8 @@ def fit_spectrum(
     free = list(spectrum.free_peaks if extra_peaks is None else extra_peaks)
     extra = [
         p for p in free
-        if window[0] <= p.center <= window[1] and centers and min(abs(p.center - c) for c in centers) <= reach
+        if p.enabled and window[0] <= p.center <= window[1]
+        and (options.fit_far_free_peaks or (centers and min(abs(p.center - c) for c in centers) <= reach))
     ]
     fwhms = [profiles.fwhm(p.model, p.width, p.shape) for p in peaks + extra]
     mask = fit_mask(x, window, centers + [p.center for p in extra], options, fwhms)
