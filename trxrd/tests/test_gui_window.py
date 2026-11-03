@@ -98,3 +98,32 @@ def test_thread_runner_reports_in_the_gui_thread(tmp_path, sample_run):
     assert run.name == sample_run.name and not dirty
     assert "ZeroDivisionError" in next(r for r in results if isinstance(r, str))
     assert threads[0] is app.thread()
+
+
+def test_new_run_dialog_browses_raw_data(raw_root, tmp_path):
+    from PySide6.QtCore import QSettings
+    from conftest import DATA
+    from trxrd.gui.views.main_window import application
+    from trxrd.gui.views.new_run import NewRunDialog
+    from trxrd.services import raw_data
+
+    application(["test"])
+    settings = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
+    settings.setValue("new_run/raw_root", str(raw_root))
+    dialog = NewRunDialog(raw_data, settings=settings)
+    assert dialog.tree.topLevelItemCount() == 1 and "1 jeux" in dialog.message.text()
+    dialog.tree.setCurrentItem(dialog.tree.topLevelItem(0).child(0))
+    assert dialog.table.rowCount() == 1 and dialog.table.item(0, 3).text() == "timescan 0.1 1"
+    dialog.images_only.setChecked(False)
+    assert dialog.table.rowCount() == 2
+    ok = dialog.buttons.button(dialog.buttons.StandardButton.Ok)
+    dialog.table.selectRow(1)
+    assert not ok.isEnabled()  # no calibration, no folder yet
+    dialog.poni.setText(str(DATA / "calib_THT8_correct_samedi.poni"))
+    dialog.folder.setText(str(tmp_path / "analyse"))
+    assert ok.isEnabled()
+    request = dialog.request()
+    assert request.scans == [raw_root / "water02" / "water02_0001" / "scan0003" / "scan_jf1m_0000.h5"]
+    assert request.two_theta_range == (8.0, 25.0) and [p.split("phases")[-1][1:] for p in request.phase_paths] == ["H2O", "Sn"]
+    dialog.accept()
+    assert NewRunDialog(raw_data, settings=settings).poni.text() == str(DATA / "calib_THT8_correct_samedi.poni")

@@ -6,6 +6,7 @@ import types
 import warnings
 from pathlib import Path
 
+import h5py
 import numpy as np
 import pytest
 
@@ -110,3 +111,42 @@ def sample_run():
         note="Pressure ramp — essai n°2 [P_H2O_Ice_VII] -> 0.1",
         ui_state={"zones": [[10, 12]], "theme": "light"},
     )
+
+
+@pytest.fixture
+def bliss_dataset(tmp_path, tuto_scan):
+    """Minimal ESRF layout: <ds>/<ds>.h5 (oscilloscope) + <ds>/scan0003/scan_jf1m_0000.h5 (3 frames)."""
+    dataset = tmp_path / "water02_0001"
+    scan_dir = dataset / "scan0003"
+    scan_dir.mkdir(parents=True)
+    with h5py.File(tuto_scan, "r") as src, h5py.File(scan_dir / "scan_jf1m_0000.h5", "w") as dst:
+        dst.attrs["default"] = "entry_0000"
+        entry = dst.create_group("entry_0000")
+        entry.attrs["default"] = "plot"
+        plot = entry.create_group("plot")
+        plot.attrs["signal"] = "data"
+        plot.create_dataset("data", data=src["entry_0000/ESRF-ID09/jf1m/data"][:3], compression="gzip")
+    t = np.linspace(0, 0.01, 2000)
+    trigger = sum(((t > c - 1e-4) & (t < c + 1e-4)).astype(float) for c in (0.002, 0.005, 0.008))
+    with h5py.File(dataset / "water02_0001.h5", "w") as master:
+        measurement = master.create_group("3.1/measurement")
+        measurement["ch5_time"] = t
+        measurement["ch5"] = trigger
+        measurement["ch6"] = np.sin(t)
+    return scan_dir / "scan_jf1m_0000.h5"
+
+
+@pytest.fixture
+def raw_root(tmp_path, bliss_dataset):
+    """RAW_DATA/water02/water02_0001/... with a titled scan, an alignment scan without images and a Fichier_CED_DRX."""
+    import shutil
+
+    raw = tmp_path / "campaign" / "RAW_DATA"
+    shutil.copytree(bliss_dataset.parents[1], raw / "water02" / "water02_0001")
+    with h5py.File(raw / "water02" / "water02_0001" / "water02_0001.h5", "a") as master:
+        master["3.1/title"] = "timescan 0.1 1"
+        master["3.1/start_time"] = "2026-01-22T22:18:41"
+        master.create_group("1.1/measurement")["piezoy"] = np.zeros(3)
+        master["1.1/title"] = "ascan piezoy 0 1 40 0.3"
+    (tmp_path / "campaign" / "Fichier_CED_DRX").mkdir()
+    return raw

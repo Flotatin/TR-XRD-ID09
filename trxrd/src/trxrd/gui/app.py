@@ -13,7 +13,7 @@ from typing import List, Optional, Sequence
 
 from trxrd import __version__
 from trxrd.gui.presenters.viewer import (
-    DisplaySettings, MainPresenter, MapPresenter, NavigatorPresenter, PressurePresenter, SpectrumPresenter,
+    CakePresenter, DisplaySettings, MainPresenter, MapPresenter, NavigatorPresenter, PressurePresenter, SpectrumPresenter,
     TablesPresenter,
 )
 from trxrd.gui.tasks import ThreadRunner
@@ -37,18 +37,23 @@ def create_viewer(session: Optional[Session] = None, runner=None) -> Viewer:
     session = session or Session()
     settings = DisplaySettings()
     window = MainWindow()
+    runner = runner or ThreadRunner()
+    cake = CakePresenter(session, settings, window.cake, runner)
     presenters = [
         SpectrumPresenter(session, settings, window.spectrum),
+        cake,
         PressurePresenter(session, window.pressure),
         MapPresenter(session, settings, window.map),
         TablesPresenter(session, window.phases, window.peaks),
         NavigatorPresenter(session, window.navigator),
     ]
-    main = MainPresenter(session, settings, window, runner or ThreadRunner(), version=__version__)
+    main = MainPresenter(session, settings, window, runner, version=__version__)
     window.on_close_request = main.may_discard
     window.on_unit = main.set_unit
 
     add = window.actions.add
+    add("new_run", FILE, "&Nouveau run depuis RAW_DATA…", main.new_run, ["Ctrl+N"],
+        "Intégrer des scans bruts (images Jungfrau + oscilloscope du fichier maître) en nouveaux runs")
     add("open", FILE, "&Ouvrir…", main.open, ["Ctrl+O"], "Ouvrir un run .trxrd.h5 ou un ancien fichier .CEDX")
     add("save", FILE, "&Enregistrer", main.save, ["Ctrl+S", "F3"], "Enregistrer le run (.trxrd.h5)")
     add("save_as", FILE, "Enregistrer &sous…", main.save_as, ["Ctrl+Shift+S"])
@@ -61,8 +66,17 @@ def create_viewer(session: Optional[Session] = None, runner=None) -> Viewer:
     add("unit_2th", VIEW, "Axe en &2θ", lambda: main.set_unit("2th_deg"), ["Ctrl+1"], checkable=True)
     add("unit_q", VIEW, "Axe en &Q (Å⁻¹)", lambda: main.set_unit("q_A^-1"), ["Ctrl+2"], checkable=True)
     add("unit_d", VIEW, "Axe en &d (Å)", lambda: main.set_unit("d_A"), ["Ctrl+3"], checkable=True)
+
+    def toggle_cake() -> None:
+        shown = window.actions.get("cake").isChecked()
+        window.cake.setVisible(shown)
+        cake.set_visible(shown)  # nothing is computed while it is hidden
+
+    add("cake", VIEW, "&Intégration sous le spectre (cake)", toggle_cake, ["Ctrl+K"], checkable=True,
+        tip="Cake (2θ × azimut) ou image brute du spectre courant, calculé depuis les images de RAW_DATA")
+    window.actions.get("cake").setChecked(True)
     add("shortcuts", HELP, "&Raccourcis clavier", window.show_shortcuts, ["F1"])
-    window.build_menus(toolbar=("open", "save", "|", "previous", "next"))
+    window.build_menus(toolbar=("new_run", "open", "save", "|", "previous", "next"))
     main.update()  # the unit actions exist now
     return Viewer(session, settings, window, main, presenters)
 

@@ -195,14 +195,62 @@ def intensity_map(run: Run, unit: str) -> Optional[MapData]:
         y = np.asarray(spectrum.corrected, dtype=float)
         x = np.asarray(spectrum.two_theta, dtype=float)
         rows.append(y if x.shape == reference.shape and np.allclose(x, reference) else np.interp(reference, x, y))
-    image = np.vstack(rows)
-    converted = to_unit(reference, unit, run)
+    grid, image = _resample(reference, np.vstack(rows), unit, run)  # Q and d are not uniform in 2θ
+    return MapData(AXIS_LABELS[unit], grid, image)
+
+
+# ---------------------------------------------------------------------------- cake
+
+
+@dataclass
+class CakeData:
+    x_label: str
+    x: np.ndarray  # uniform grid in the display unit, as the spectrum axis
+    azimuth: np.ndarray  # deg
+    image: np.ndarray  # [n_azimuth, n_x]
+
+
+def _resample(two_theta: np.ndarray, image: np.ndarray, unit: str, run: Optional[Run]):
+    """Columns of `image` (on a 2θ grid) on a uniform grid of the display unit."""
+    converted = to_unit(two_theta, unit, run)
     if converted[0] > converted[-1]:  # d decreases with 2θ
         converted, image = converted[::-1], image[:, ::-1]
+    if unit == "2th_deg" or wavelength(run) is None:
+        return converted, image
     grid = np.linspace(converted[0], converted[-1], converted.size)
-    if unit != "2th_deg":  # Q and d are not uniform in 2θ: resample
-        image = np.vstack([np.interp(grid, converted, row) for row in image])
-    return MapData(AXIS_LABELS[unit], grid, image)
+    return grid, np.vstack([np.interp(grid, converted, row) for row in image])
+
+
+def compact_azimuth(azimuth: np.ndarray, image: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    """Only the azimuth sector the detector covers, in one piece.
+
+    The Jungfrau 1M sees ~140° of the rings; pyFAI cuts the azimuth at ±180°,
+    which may split that sector in two. The rows are rolled so that the
+    largest empty gap is at the ends, then cut off (the azimuth goes past
+    180° where needed).
+    """
+    filled = np.isfinite(image).any(axis=1)
+    if filled.all() or not filled.any():
+        return azimuth, image
+    n = filled.size
+    gap, best, best_end = 0, 0, 0
+    for k, empty in enumerate(np.concatenate([~filled, ~filled])):  # circular: the gap may wrap
+        gap = gap + 1 if empty else 0
+        if gap > best:
+            best, best_end = gap, k
+    start = (best_end + 1) % n  # first covered row after the largest gap
+    azimuth = np.concatenate([azimuth[start:], azimuth[:start] + 360.0])
+    image = np.roll(image, -start, axis=0)
+    rows = np.flatnonzero(np.isfinite(image).any(axis=1))
+    return azimuth[rows[0]:rows[-1] + 1], image[rows[0]:rows[-1] + 1]
+
+
+def cake_data(cake, unit: str, run: Optional[Run]) -> CakeData:
+    """cake: services.images.Cake (2θ grid, azimuth, intensity)."""
+    azimuth, intensity = compact_azimuth(np.asarray(cake.azimuth, dtype=float), np.asarray(cake.intensity, dtype=float))
+    x, image = _resample(np.asarray(cake.two_theta, dtype=float), intensity, unit, run)
+    label = AXIS_LABELS[unit] if wavelength(run) is not None else AXIS_LABELS["2th_deg"]
+    return CakeData(label, x, azimuth, image)
 
 
 # ---------------------------------------------------------------------------- tables

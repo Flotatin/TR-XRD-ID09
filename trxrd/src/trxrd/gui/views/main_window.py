@@ -8,13 +8,13 @@ from typing import Callable, Optional, Sequence
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QCloseEvent, QGuiApplication
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QDialog, QFileDialog, QLabel, QMainWindow, QMessageBox, QSplitter, QTabWidget,
-    QVBoxLayout, QWidget,
+    QApplication, QComboBox, QDialog, QFileDialog, QLabel, QMainWindow, QMessageBox, QProgressDialog, QSplitter,
+    QTabWidget, QVBoxLayout, QWidget,
 )
 
 from trxrd.gui.actions import ActionRegistry
 from trxrd.gui.views.panels import Navigator, RowsTable
-from trxrd.gui.views.plots import MapView, PressureView, SpectrumView
+from trxrd.gui.views.plots import CakeView, MapView, PressureView, SpectrumView
 from trxrd.physics.lattice import AXIS_LABELS
 
 FILE_FILTER = "Runs (*.trxrd.h5 *.h5 *.CEDX *.CEDXUp *.cedx);;Tous les fichiers (*)"
@@ -32,6 +32,7 @@ class MainWindow(QMainWindow):
 
         self.navigator = Navigator()
         self.spectrum = SpectrumView()
+        self.cake = CakeView(link_to=self.spectrum.plot)  # under the spectrum, as in the v1
         self.pressure = PressureView()
         self.map = MapView()
         self.phases = RowsTable()
@@ -42,8 +43,9 @@ class MainWindow(QMainWindow):
         tabs.addTab(self.map, "Carte")
         center = QSplitter(Qt.Orientation.Vertical)
         center.addWidget(self.spectrum)
+        center.addWidget(self.cake)
         center.addWidget(tabs)
-        center.setSizes([520, 380])
+        center.setSizes([420, 260, 300])
         right = QSplitter(Qt.Orientation.Vertical)
         right.addWidget(_titled("Phases du spectre", self.phases))
         right.addWidget(_titled("Pics du spectre", self.peaks))
@@ -132,6 +134,34 @@ class MainWindow(QMainWindow):
 
     def show_error(self, title: str, text: str) -> None:
         QMessageBox.critical(self, title, text)
+
+    def show_info(self, title: str, text: str) -> None:
+        QMessageBox.information(self, title, text)
+
+    def ask_new_run(self, browse):
+        from trxrd.gui.views.new_run import NewRunDialog
+
+        dialog = NewRunDialog(browse, self)
+        return dialog.request() if dialog.exec() == QDialog.DialogCode.Accepted else None
+
+    def start_progress(self, text: str, on_cancel: Callable[[], None]) -> None:
+        self._progress = QProgressDialog(text, "Arrêter", 0, 1000, self)
+        self._progress.setWindowTitle("TR-XRD v2")
+        self._progress.setWindowModality(Qt.WindowModality.WindowModal)
+        self._progress.setMinimumDuration(0)
+        self._progress.canceled.connect(on_cancel)
+        self._progress.setValue(0)
+
+    def set_progress(self, done: int, total: int) -> None:
+        if getattr(self, "_progress", None) is not None:
+            self._progress.setMaximum(max(int(total), 1))
+            self._progress.setValue(int(done))
+
+    def end_progress(self) -> None:
+        if getattr(self, "_progress", None) is not None:
+            self._progress.canceled.disconnect()
+            self._progress.close()
+            self._progress = None
 
     # ------------------------------------------------------------------ help, closing
 

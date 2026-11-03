@@ -9,6 +9,9 @@ from typing import Callable, Dict, Optional, Sequence, Union
 
 from trxrd.domain import Calibration, Oscilloscope, PhaseCard, Processing, Run, Source, Spectrum
 from trxrd.io import esrf
+from trxrd.io.calibration import calibration_from_files
+from trxrd.io.h5store import save_run
+from trxrd.io.jcpds import read_library
 from trxrd.processing import background, timing
 from trxrd.processing.integration import Integrator
 
@@ -22,9 +25,11 @@ Progress = Callable[[int, int], bool]  # (done, total) -> keep going?
 class OscilloscopeSpec:
     """Which BLISS counters hold the oscilloscope traces (ID09 defaults)."""
 
-    channels: Dict[str, str] = field(default_factory=lambda: {"Channel2": "ch5", "Channel3": "ch6"})
+    # names of the v1 (Channel2 = trigger, Channel3 = piezo drive); ch2 exists only in some scans
+    channels: Dict[str, str] = field(default_factory=lambda: {"Channel2": "ch5", "Channel3": "ch6", "ch2": "ch2"})
     time_counter: str = "ch5_time"
     trigger_channel: str = "Channel2"
+    optional: Sequence[str] = ("ch2",)
 
 
 ID09_OSCILLOSCOPE = OscilloscopeSpec()
@@ -75,7 +80,8 @@ def build_run(
     if oscilloscope is not None:
         try:
             master, scan = esrf.locate_bliss_master(scan_file)
-            time, channels = esrf.read_bliss_channels(master, scan, oscilloscope.channels, oscilloscope.time_counter)
+            time, channels = esrf.read_bliss_channels(master, scan, oscilloscope.channels, oscilloscope.time_counter,
+                                                      oscilloscope.optional)
             osc = Oscilloscope(time=time, channels=channels, trigger_channel=oscilloscope.trigger_channel)
             source.master_file, source.scan = str(master.resolve()), scan
         except (OSError, KeyError, ValueError) as exc:
@@ -100,6 +106,43 @@ def build_run(
         source=source,
         oscilloscope=osc,
     )
+
+
+class Cancelled(Exception):
+    """The user stopped the task (its progress callback returned False)."""
+
+
+def build_and_save(
+    scan_file: PathLike,
+    folder: PathLike,
+    poni_file: PathLike,
+    mask_file: Optional[PathLike] = None,
+    *,
+    two_theta_range=(0.0, 40.0),
+    phase_paths: Sequence[PathLike] = (),
+    progress: Optional[Progress] = None,
+    **options,
+) -> Path:
+    """build_run from file names (calibration, phase cards), then save `<folder>/<name>.trxrd.h5`.
+
+    Raises Cancelled, and saves nothing, when `progress` asks to stop.
+    """
+    stopped = []
+
+    def watched(done: int, total: int) -> bool:
+        keep_going = progress is None or progress(done, total)
+        if not keep_going:
+            stopped.append(done)
+        return keep_going
+
+    calibration = calibration_from_files(poni_file, mask_file, two_theta_range=two_theta_range)
+    phases = read_library(list(phase_paths)) if phase_paths else None
+    run = build_run(scan_file, calibration, phases=phases, progress=watched, **options)
+    if stopped:
+        raise Cancelled(f"stopped after {stopped[0]} frames")
+    destination = output_path(run, folder)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    return save_run(run, destination)
 
 
 def default_run_name(scan_file: PathLike) -> str:

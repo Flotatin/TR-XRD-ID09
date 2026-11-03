@@ -13,7 +13,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterator, Optional, Sequence, Tuple, Union
+from typing import Dict, Iterator, List, Optional, Sequence, Tuple, Union
 
 import h5py
 import numpy as np
@@ -88,18 +88,67 @@ def locate_bliss_master(scan_file: PathLike) -> Tuple[Path, str]:
 
 
 def read_bliss_channels(
-    master_file: PathLike, scan: str, channels: Dict[str, str], time_counter: str
+    master_file: PathLike, scan: str, channels: Dict[str, str], time_counter: str,
+    optional: Sequence[str] = (),
 ) -> Tuple[np.ndarray, Dict[str, np.ndarray]]:
     """Read `measurement` counters of one scan.
 
     channels maps the name used in the run (e.g. "trigger") to the BLISS
-    counter (e.g. "ch5"); time_counter is e.g. "ch5_time".
+    counter (e.g. "ch5"); time_counter is e.g. "ch5_time". The channels named
+    in `optional` are skipped when the scan does not have them. All the
+    oscilloscope channels share one time base (ch5_time and ch6_time differ
+    by 19 ns for a 160 ns step).
     """
     with h5py.File(master_file, "r") as f:
         measurement = f[scan]["measurement"]
         time = np.asarray(measurement[time_counter][()], dtype=float).ravel()
-        data = {name: np.asarray(measurement[counter][()], dtype=float).ravel() for name, counter in channels.items()}
+        data = {name: np.asarray(measurement[counter][()], dtype=float).ravel() for name, counter in channels.items()
+                if counter in measurement or name not in optional}
     for name, values in data.items():
         if values.size != time.size:
             raise ValueError(f"Channel {name!r} has {values.size} points, time has {time.size}")
     return time, data
+
+
+@dataclass
+class BlissScan:
+    """One scan of a BLISS master file, as listed to the user."""
+
+    label: str  # "27.1"
+    number: int
+    title: str  # BLISS command, e.g. "timescan 0.1 1"
+    start_time: str
+    counters: Tuple[str, ...]  # names in measurement/
+    frames: int  # images of the detector (0: no image)
+
+
+def _text(value) -> str:
+    return value.decode("utf-8", "replace") if isinstance(value, bytes) else str(value)
+
+
+def read_bliss_scans(master_file: PathLike, detector: str = "jf1m") -> List[BlissScan]:
+    """Every scan of a master file (title, start time, counters, number of detector frames)."""
+    scans = []
+    with h5py.File(master_file, "r") as f:
+        for label in f:
+            match = re.fullmatch(r"(\d+)\.1", label)
+            if not match:
+                continue
+            entry = f[label]
+            measurement = entry.get("measurement")
+            counters = tuple(measurement.keys()) if measurement is not None else ()
+            frames = 0
+            if detector in counters:
+                try:  # external link to the LIMA file: may be missing
+                    frames = int(measurement[detector].shape[0])
+                except (KeyError, OSError):
+                    frames = 0
+            scans.append(BlissScan(
+                label=label,
+                number=int(match.group(1)),
+                title=_text(entry["title"][()]) if "title" in entry else "",
+                start_time=_text(entry["start_time"][()]) if "start_time" in entry else "",
+                counters=counters,
+                frames=frames,
+            ))
+    return sorted(scans, key=lambda s: s.number)

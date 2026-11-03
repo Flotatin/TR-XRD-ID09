@@ -218,14 +218,7 @@ class MapView(QWidget):
 
     def show_map(self, data) -> None:
         self._data = data
-        image = np.nan_to_num(data.image)
-        if self.log.isChecked():
-            positive = image[image > 0]
-            floor = max(float(np.percentile(positive, 5)), 1e-6) if positive.size else 1.0
-            image = np.log10(np.clip(image, floor, None))
-        levels = np.percentile(image, [1, 99.8]) if image.size else (0, 1)
-        if levels[1] <= levels[0]:
-            levels = (levels[0], levels[0] + 1)
+        image, levels = _levels(np.nan_to_num(data.image), self.log.isChecked())
         self.image.setImage(image, levels=levels)
         step = (data.x[-1] - data.x[0]) / max(len(data.x) - 1, 1)
         self.image.setRect(QRectF(data.x[0] - step / 2, -0.5, data.x[-1] - data.x[0] + step, image.shape[0]))
@@ -235,3 +228,96 @@ class MapView(QWidget):
 
     def set_marker(self, index: int) -> None:
         self.marker.setPos(index)
+
+
+def _levels(image: np.ndarray, log: bool):
+    """Display copy of an image (log10 if asked) and robust levels (percentiles, NaN ignored)."""
+    image = np.asarray(image, dtype=float)
+    finite = image[np.isfinite(image)]
+    if log and finite.size:
+        positive = finite[finite > 0]
+        floor = max(float(np.percentile(positive, 5)), 1e-6) if positive.size else 1.0
+        image = np.log10(np.clip(image, floor, None))
+        finite = image[np.isfinite(image)]
+    levels = np.percentile(finite, [1, 99.8]) if finite.size else (0.0, 1.0)
+    if levels[1] <= levels[0]:
+        levels = (levels[0], levels[0] + 1)
+    return image, levels
+
+
+class CakeView(QWidget):
+    """Cake (2θ × azimuth) of the current spectrum, on the same x axis as the spectrum; or the raw image."""
+
+    def __init__(self, link_to: Optional[pg.PlotWidget] = None, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.on_mode: Optional[Callable[[str], None]] = None
+        self.link_to = link_to
+        self.mode = QComboBox()
+        self.mode.addItem("cake (2θ × azimut)", "cake")
+        self.mode.addItem("image brute", "image")
+        self.mode.currentIndexChanged.connect(lambda i: self.on_mode and self.on_mode(self.mode.itemData(i)))
+        self.log = QCheckBox("échelle log")
+        self.log.setChecked(True)
+        self.log.toggled.connect(self._redraw)
+        self.message = QLabel("")
+        self.message.setStyleSheet("color: #8a5a00")
+        bar = QHBoxLayout()
+        for widget in (QLabel("Intégration :"), self.mode, self.log, self.message):
+            bar.addWidget(widget)
+        bar.addStretch(1)
+        self.plot = pg.PlotWidget()
+        self.image = pg.ImageItem(axisOrder="row-major")
+        self.image.setColorMap(pg.colormap.get("viridis"))
+        self.plot.addItem(self.image)
+        self._last = None
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addLayout(bar)
+        layout.addWidget(self.plot)
+
+    def clear(self) -> None:
+        self.image.clear()
+        self._last = None
+        self.message.setText("")
+
+    def show_message(self, text: str) -> None:
+        self.image.clear()
+        self._last = None
+        self.message.setText(text)
+
+    def _redraw(self) -> None:
+        if self._last is not None:
+            kind, data = self._last
+            self.show_cake(data) if kind == "cake" else self.show_image(data)
+
+    def show_cake(self, data) -> None:
+        self._last = ("cake", data)
+        self.message.setText("")
+        image, levels = _levels(data.image, self.log.isChecked())
+        self.image.setImage(np.nan_to_num(image, nan=levels[0]), levels=levels)
+        step = (data.x[-1] - data.x[0]) / max(len(data.x) - 1, 1)
+        az_step = (data.azimuth[-1] - data.azimuth[0]) / max(len(data.azimuth) - 1, 1)
+        self.image.setRect(QRectF(data.x[0] - step / 2, data.azimuth[0] - az_step / 2,
+                                  data.x[-1] - data.x[0] + step, data.azimuth[-1] - data.azimuth[0] + az_step))
+        item = self.plot.getPlotItem()
+        item.setLabel("bottom", data.x_label)
+        item.setLabel("left", "azimut (°)")
+        item.getViewBox().setAspectLocked(False)
+        item.invertY(False)
+        if self.link_to is not None:
+            item.setXLink(self.link_to.getPlotItem())  # the rings line up with the phase ticks
+        item.enableAutoRange(axis=pg.ViewBox.YAxis)
+
+    def show_image(self, image) -> None:
+        self._last = ("image", image)
+        self.message.setText("")
+        shown, levels = _levels(image, self.log.isChecked())
+        self.image.setImage(np.nan_to_num(shown, nan=levels[0]), levels=levels)
+        self.image.setRect(QRectF(0, 0, shown.shape[1], shown.shape[0]))
+        item = self.plot.getPlotItem()
+        item.setXLink(None)
+        item.setLabel("bottom", "pixel")
+        item.setLabel("left", "pixel")
+        item.getViewBox().setAspectLocked(True)
+        item.invertY(True)
+        item.enableAutoRange()

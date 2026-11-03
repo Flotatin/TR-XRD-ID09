@@ -160,3 +160,112 @@ def test_display_without_times_uses_the_index(sample_run):
     data = display.pressure_data(sample_run)
     assert data.x_label == "spectre" and list(data.x) == [0, 1, 2, 3, 4] and data.traces == []
     assert display.nearest_spectrum(data.x, 2.6) == 3
+
+
+def test_new_runs_from_raw_data(viewer, raw_root, tmp_path):
+    from conftest import DATA, LIBRARY
+    from trxrd.gui.presenters.viewer import NewRunRequest
+
+    session, settings, views, window, main, path, _ = viewer
+    scan = raw_root / "water02" / "water02_0001" / "scan0003" / "scan_jf1m_0000.h5"
+    request = NewRunRequest([scan, scan], tmp_path / "analyse", str(DATA / "calib_THT8_correct_samedi.poni"),
+                            str(DATA / "scan_jf1m_0000.mask"), (8.0, 25.0), [str(LIBRARY / "Ga")])
+    window.answers["ask_new_run"] = request
+    main.new_run()
+    assert window.last("ask_new_run")[0].find_datasets  # the dialog gets the browsing functions
+    progress = [args for name, args in window.calls if name == "set_progress"]
+    assert progress[-1] == (2000, 2000) and window.count("end_progress") == 1
+    assert session.run.name == "water02_0001_scan0003" and len(session.run) == 3 and not session.dirty
+    assert session.path == tmp_path / "analyse" / "water02_0001_scan0003.trxrd.h5"
+    assert window.last("show_info")[0] == "Runs créés" and views["navigator"].last("set_current") == (0, 3)
+
+
+def test_new_run_cancelled_or_failing(viewer, raw_root, tmp_path):
+    from conftest import DATA
+    from trxrd.gui.presenters.viewer import NewRunRequest
+
+    session, settings, views, window, main, path, _ = viewer
+    scan = raw_root / "water02" / "water02_0001" / "scan0003" / "scan_jf1m_0000.h5"
+    window.answers["ask_new_run"] = NewRunRequest([scan], tmp_path / "out", str(DATA / "calib_THT8_correct_samedi.poni"))
+    main.runner.cancelled = True  # the user presses "Arrêter"
+    main.new_run()
+    assert session.run is None and "arrêtée" in window.last("set_status")[0] and window.count("show_error") == 0
+    main.runner.cancelled = False
+    window.answers["ask_new_run"] = NewRunRequest([scan], tmp_path / "out", str(tmp_path / "missing.poni"))
+    main.new_run()
+    assert window.last("show_error")[0] == "Création du run impossible" and session.run is None
+    window.answers["ask_new_run"] = None  # dialog closed
+    main.new_run()
+    assert window.count("start_progress") == 2
+
+
+class DeferredRunner:
+    """Keeps the tasks; the test runs them in any order (out-of-order results of a thread pool)."""
+
+    def __init__(self):
+        self.jobs = []
+
+    def run(self, task, on_done, on_error, on_progress=None):
+        self.jobs.append((task, on_done, on_error))
+
+    def finish(self, k):
+        task, on_done, on_error = self.jobs[k]
+        on_done(task(lambda done, total: True))
+
+
+def test_cake_of_the_current_spectrum(tmp_path, raw_root, sample_run):
+    from conftest import DATA
+    from trxrd.gui.presenters.viewer import CakePresenter
+    from trxrd.services.run_builder import build_and_save
+
+    scan = raw_root / "water02" / "water02_0001" / "scan0003" / "scan_jf1m_0000.h5"
+    built = build_and_save(scan, tmp_path / "analyse", DATA / "calib_THT8_correct_samedi.poni",
+                           DATA / "scan_jf1m_0000.mask", two_theta_range=(8, 25))
+    session, settings, view = Session(), DisplaySettings(), Recorder()
+    presenter = CakePresenter(session, settings, view)
+    session.open(built)
+    cake = view.last("show_cake")[0]
+    assert cake.x_label == "2θ (°)" and cake.image.shape[1] == len(session.run.spectra[0].two_theta)
+    assert 0 < cake.image.shape[0] <= 360 and len(cake.azimuth) == cake.image.shape[0]  # covered sector only
+    np.testing.assert_allclose(cake.x, session.run.spectra[0].two_theta, atol=1e-6)  # same axis as the spectrum
+    assert np.nanmax(cake.image) > 0
+    settings.set_unit("q_A^-1")
+    assert view.last("show_cake")[0].x_label == "Q (Å⁻¹)" and np.all(np.diff(view.last("show_cake")[0].x) > 0)
+    presenter.set_mode("image")
+    assert view.last("show_image")[0].ndim == 2
+    presenter.set_visible(False)
+    count = len(view.calls)
+    session.select(2)
+    assert len(view.calls) == count  # nothing computed while hidden
+
+    session.attach(sample_run, tmp_path / "elsewhere.trxrd.h5")  # no raw scan anywhere
+    presenter.set_visible(True)
+    assert "introuvables" in view.last("show_message")[0]
+
+
+def test_cake_newest_request_wins(tmp_path, raw_root):
+    from conftest import DATA
+    from trxrd.gui.presenters.viewer import CakePresenter
+    from trxrd.services.run_builder import build_and_save
+
+    scan = raw_root / "water02" / "water02_0001" / "scan0003" / "scan_jf1m_0000.h5"
+    built = build_and_save(scan, tmp_path / "analyse", DATA / "calib_THT8_correct_samedi.poni", two_theta_range=(8, 25))
+    session, view, runner = Session(), Recorder(), DeferredRunner()
+    CakePresenter(session, DisplaySettings(), view, runner)
+    session.open(built)
+    session.select(2)
+    runner.finish(1)  # spectrum 2 comes back first
+    runner.finish(0)  # then the stale spectrum 0
+    assert view.count("show_cake") == 1
+
+
+def test_cake_keeps_the_covered_azimuth_sector_in_one_piece():
+    azimuth = np.arange(-179.5, 180, 1.0)
+    image = np.full((360, 4), np.nan)
+    image[:60] = 1.0  # -180..-120
+    image[280:] = 2.0  # 100..180: the same sector, cut at ±180°
+    az, cropped = display.compact_azimuth(azimuth, image)
+    assert cropped.shape == (140, 4) and np.isfinite(cropped).all()
+    assert az[0] == pytest.approx(100.5) and az[-1] == pytest.approx(239.5) and np.allclose(np.diff(az), 1.0)
+    full = np.ones((360, 4))
+    assert display.compact_azimuth(azimuth, full)[1].shape == (360, 4)

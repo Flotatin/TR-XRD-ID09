@@ -9,19 +9,25 @@ Views expected (duck typing):
 - spectrum: show_spectrum(SpectrumCurves, reset: bool), clear()
 - pressure: show_pressure(PressureData), set_marker(x), clear(), on_pick(x)
 - map: show_map(MapData), set_marker(index), clear(), on_pick(index)
+- cake: show_cake(CakeData), show_image(array), show_message(text), clear(), on_mode(mode)
 - table: show_rows(columns, rows)
 - navigator: show_spectra(columns, rows), set_current(index, count), on_select(index)
 - window: set_title, set_status, set_units(available, current), set_busy(text or None),
   ask_open_path() / ask_save_path(suggested) -> path or None, confirm_discard() -> bool,
-  show_error(title, text)
+  show_error(title, text), show_info(title, text), ask_new_run(browse) -> NewRunRequest or None,
+  start_progress(text, on_cancel), set_progress(done, total), end_progress()
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Tuple
 
 from trxrd.gui.presenters import display
+from trxrd.services import raw_data
+from trxrd.services.images import FrameSource
+from trxrd.services.run_builder import build_and_save
 from trxrd.services.session import Event, Session
 
 Task = Callable[[Callable[[int, int], bool]], object]  # task(progress) -> result
@@ -30,13 +36,35 @@ Task = Callable[[Callable[[int, int], bool]], object]  # task(progress) -> resul
 class ImmediateRunner:
     """Runs a task at once, in the caller's thread (tests, scripts). The GUI uses a thread pool."""
 
-    def run(self, task: Task, on_done: Callable[[object], None], on_error: Callable[[str], None]) -> None:
+    def __init__(self) -> None:
+        self.cancelled = False  # set it to stop the task at its next progress() (tests)
+
+    def run(self, task: Task, on_done: Callable[[object], None], on_error: Callable[[str], None],
+            on_progress: Optional[Callable[[int, int], None]] = None):
+        def progress(done: int, total: int) -> bool:
+            if on_progress is not None:
+                on_progress(done, total)
+            return not self.cancelled
+
         try:
-            result = task(lambda done, total: True)
+            result = task(progress)
         except Exception as exc:  # reported to the user, like the threaded runner does
             on_error(f"{type(exc).__name__}: {exc}")
         else:
             on_done(result)
+        return self
+
+
+@dataclass
+class NewRunRequest:
+    """What the "new run" dialog returns: raw scans to integrate and how."""
+
+    scans: List[Path]  # image files (scan_jf1m_0000.h5)
+    folder: Path  # where the .trxrd.h5 files are written
+    poni_file: str
+    mask_file: Optional[str] = None
+    two_theta_range: Tuple[float, float] = (0.0, 40.0)
+    phase_paths: List[str] = field(default_factory=list)
 
 
 class DisplaySettings:
@@ -138,6 +166,77 @@ class MapPresenter:
 
     def pick(self, index: int) -> None:
         self.session.select(index)
+
+
+class CakePresenter:
+    """Cake (2θ × azimuth) or raw detector image of the current spectrum, computed in the background.
+
+    The newest request wins: when the user scrolls through the spectra, the
+    results of the older requests are dropped.
+    """
+
+    MODES = ("cake", "image")
+
+    def __init__(self, session: Session, settings: DisplaySettings, view, runner=None) -> None:
+        self.session, self.settings, self.view = session, settings, view
+        self.runner = runner or ImmediateRunner()
+        self.mode = "cake"
+        self.visible = True
+        self._source = None
+        self._ticket = 0
+        view.on_mode = self.set_mode
+        session.subscribe(Event.RUN_CHANGED, self._new_run)
+        session.subscribe(Event.SPECTRUM_CHANGED, self.refresh)
+        settings.subscribe(self.refresh)
+
+    def _new_run(self, *_) -> None:
+        self._source = None
+
+    def set_mode(self, mode: str) -> None:
+        if mode not in self.MODES:
+            raise ValueError(f"unknown mode {mode!r}")
+        self.mode = mode
+        self.refresh()
+
+    def set_visible(self, visible: bool) -> None:
+        self.visible = bool(visible)
+        self.refresh()
+
+    def refresh(self, *_) -> None:
+        run = self.session.run
+        if not self.visible:
+            return
+        if run is None or not run.spectra:
+            self.view.clear()
+            return
+        index, unit, mode = self.session.index, self.settings.unit_for(run), self.mode
+        near = [self.session.path] if self.session.path is not None else []
+        self._ticket += 1
+        ticket = self._ticket
+
+        def task(progress):
+            if self._source is None or self._source.run is not run:
+                self._source = FrameSource(run, near)
+            source = self._source
+            if source.problem and not (mode == "image" and source.available):
+                return "message", source.problem
+            if mode == "image":
+                return "image", source.frame(index)
+            return "cake", display.cake_data(source.cake(index), unit, run)
+
+        self.runner.run(task, lambda result: self._show(ticket, result),
+                        lambda message: self._show(ticket, ("message", message)))
+
+    def _show(self, ticket: int, result) -> None:
+        if ticket != self._ticket:
+            return  # an older spectrum
+        kind, data = result
+        if kind == "cake":
+            self.view.show_cake(data)
+        elif kind == "image":
+            self.view.show_image(data)
+        else:
+            self.view.show_message(data)
 
 
 class TablesPresenter:
@@ -246,6 +345,50 @@ class MainPresenter:
     def close(self) -> None:
         if self.session.run is not None and self.may_discard():
             self.session.close()
+
+    # ------------------------------------------------------------------ new runs from raw data
+
+    def new_run(self) -> None:
+        """Ask which raw scans to integrate, build and save them in the background, open the last one."""
+        if not self.may_discard():
+            return
+        request = self.window.ask_new_run(raw_data)  # the dialog browses RAW_DATA with these functions
+        if request is None or not request.scans:
+            return
+        scans = list(request.scans)
+
+        def task(progress):
+            paths = []
+            for k, scan in enumerate(scans):
+                def frames(done, total, k=k):  # one progress bar over every scan
+                    return progress(int(1000 * (k + done / max(total, 1))), 1000 * len(scans))
+                paths.append(build_and_save(scan, request.folder, request.poni_file, request.mask_file,
+                                            two_theta_range=request.two_theta_range,
+                                            phase_paths=request.phase_paths, progress=frames))
+            return paths, Session.read(paths[-1])
+
+        self.window.start_progress(f"Intégration de {len(scans)} scan(s)…", self.cancel)
+        self._job = self.runner.run(task, self._built, self._build_failed, self.window.set_progress)
+
+    def cancel(self) -> None:
+        if getattr(self, "_job", None) is not None:
+            self._job.cancelled = True
+
+    def _built(self, result) -> None:
+        paths, opened = result
+        self.window.end_progress()
+        self._job = None
+        self.session.attach(*opened)
+        if len(paths) > 1:
+            self.window.show_info("Runs créés", "\n".join(str(p) for p in paths))
+
+    def _build_failed(self, message: str) -> None:
+        self.window.end_progress()
+        self._job = None
+        if message.startswith("Cancelled"):
+            self.window.set_status("Création arrêtée : les runs déjà terminés sont enregistrés.")
+        else:
+            self.window.show_error("Création du run impossible", message)
 
     def may_discard(self) -> bool:
         """True when the current run may be replaced or closed (saved, or the user agrees to lose it)."""

@@ -8,29 +8,6 @@ from trxrd.io.h5store import load_run, save_run
 from trxrd.services.run_builder import TimeMode, build_run
 
 
-@pytest.fixture
-def bliss_dataset(tmp_path, tuto_scan):
-    """Minimal ESRF layout: <ds>/<ds>.h5 (oscilloscope) + <ds>/scan0003/scan_jf1m_0000.h5 (3 frames)."""
-    dataset = tmp_path / "water02_0001"
-    scan_dir = dataset / "scan0003"
-    scan_dir.mkdir(parents=True)
-    with h5py.File(tuto_scan, "r") as src, h5py.File(scan_dir / "scan_jf1m_0000.h5", "w") as dst:
-        dst.attrs["default"] = "entry_0000"
-        entry = dst.create_group("entry_0000")
-        entry.attrs["default"] = "plot"
-        plot = entry.create_group("plot")
-        plot.attrs["signal"] = "data"
-        plot.create_dataset("data", data=src["entry_0000/ESRF-ID09/jf1m/data"][:3], compression="gzip")
-    t = np.linspace(0, 0.01, 2000)
-    trigger = sum(((t > c - 1e-4) & (t < c + 1e-4)).astype(float) for c in (0.002, 0.005, 0.008))
-    with h5py.File(dataset / "water02_0001.h5", "w") as master:
-        measurement = master.create_group("3.1/measurement")
-        measurement["ch5_time"] = t
-        measurement["ch5"] = trigger
-        measurement["ch6"] = np.sin(t)
-    return scan_dir / "scan_jf1m_0000.h5"
-
-
 def test_locate_bliss_master(bliss_dataset):
     master, scan = locate_bliss_master(bliss_dataset)
     assert master.name == "water02_0001.h5" and scan == "3.1"
@@ -78,3 +55,48 @@ def test_cli_build(tmp_path, bliss_dataset):
     assert code == 0
     run = XRDRun(out / "water02_0001_scan0003.trxrd.h5")
     assert len(run) == 3 and "Ga_I" in run.phases
+
+
+def test_optional_oscilloscope_channel(bliss_dataset, tuto_calibration):
+    run = build_run(bliss_dataset, tuto_calibration, frames=[0])
+    assert set(run.oscilloscope.channels) == {"Channel2", "Channel3"}  # no ch2 in this scan
+    with h5py.File(bliss_dataset.parents[1] / "water02_0001.h5", "a") as master:
+        master["3.1/measurement/ch2"] = np.cos(master["3.1/measurement/ch5_time"][()])
+    run = build_run(bliss_dataset, tuto_calibration, frames=[0])
+    assert set(run.oscilloscope.channels) == {"Channel2", "Channel3", "ch2"}
+
+
+def test_browse_raw_data(raw_root):
+    from trxrd.domain import Run, Source
+    from trxrd.services import raw_data
+
+    [dataset] = raw_data.find_datasets(raw_root)
+    assert (dataset.sample, dataset.name) == ("water02", "water02_0001") and dataset.master is not None
+    scans = raw_data.list_scans(dataset)
+    assert [(s.number, s.title, s.oscilloscope, s.image_file is not None) for s in scans] == [
+        (1, "ascan piezoy 0 1 40 0.3", False, False), (3, "timescan 0.1 1", True, True)]
+    assert [s.label for s in raw_data.list_scans(dataset, images_only=True)] == ["scan0003"]
+
+    old_file = raw_root.parent / "Fichier_CED_DRX" / "water02_scan0003.CEDX"  # where v1 runs live
+    image = raw_data.locate_raw_scan(Run("water02_scan0003"), [old_file])
+    assert image == scans[1].image_file
+    assert raw_data.locate_raw_scan(Run("water02_0001_scan0003"), [raw_root]) == image
+    assert raw_data.locate_raw_scan(Run("water02_scan0099"), [old_file]) is None
+    assert raw_data.locate_raw_scan(Run("x", source=Source(raw_file=str(image))), []) == image
+    assert raw_data.parse_run_name("Water05_0001_scan0009") == ("Water05", "0001", 9)
+
+
+def test_build_and_save(tmp_path, raw_root):
+    from conftest import DATA, LIBRARY
+    from trxrd.services.run_builder import Cancelled, build_and_save
+
+    scan = raw_root / "water02" / "water02_0001" / "scan0003" / "scan_jf1m_0000.h5"
+    steps = []
+    path = build_and_save(scan, tmp_path / "analyse", DATA / "calib_THT8_correct_samedi.poni", DATA / "scan_jf1m_0000.mask",
+                          two_theta_range=(8, 25), phase_paths=[LIBRARY / "Ga"], progress=lambda d, n: steps.append(d) or True)
+    assert path == tmp_path / "analyse" / "water02_0001_scan0003.trxrd.h5" and steps == [1, 2, 3]
+    run = load_run(path)
+    assert len(run) == 3 and "Ga_I" in run.phases and run.source.raw_file == str(scan.resolve())
+    with pytest.raises(Cancelled):
+        build_and_save(scan, tmp_path / "stopped", DATA / "calib_THT8_correct_samedi.poni", progress=lambda d, n: d < 2)
+    assert not (tmp_path / "stopped").exists()

@@ -62,6 +62,20 @@ class Integrator:
             width = pixel_two_theta_width(self.ai, calibration.two_theta_range, shape)
             calibration.points_per_degree = int(np.ceil(1.0 / width))
 
+    def cake(self, image: np.ndarray, n_azimuth: int = 360) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """2D integration on the same 2θ grid: (2θ (deg), azimuth (deg), intensity [n_azimuth, n_2θ])."""
+        calib = self.calibration
+        result = self.ai.integrate2d(
+            apply_flip(np.asarray(image), calib.flip_axis),
+            calib.n_points,
+            n_azimuth,
+            mask=calib.mask,
+            unit="2th_deg",
+            radial_range=tuple(calib.two_theta_range),
+        )
+        return (np.asarray(result.radial, dtype=float), np.asarray(result.azimuthal, dtype=float),
+                np.asarray(result.intensity, dtype=float))
+
     def integrate(self, image: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         calib = self.calibration
         result = self.ai.integrate1d(
