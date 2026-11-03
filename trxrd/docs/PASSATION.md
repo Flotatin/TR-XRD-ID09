@@ -64,13 +64,13 @@ Ne pas les remettre en cause sans lui en parler.
 | `8cc1c8c` | Validation sur un run réel (Water05) et cinq corrections qui en découlent ; nommage v1 / v2 |
 | `e135918` | Documentation : commit de référence de la v1 |
 | `68a1b7c` | Suivi des pics ; `trxrd compare` ; `CLAUDE.md` ; environnement virtuel séparé |
-| branche `gui-viewer` | Interface :<br>- étape 1, le lecteur : `trxrd-gui`, presenters sans Qt, registre d'actions, ouverture en arrière-plan (`Session.read` / `attach`) ;<br>- étape 2 : nouveaux runs depuis RAW_DATA, cake sous le spectre, calibration à la Dioptas validée sur le LaB6 réel ; aperçu du scan brut pour choisir la plage 2θ ;<br>- étape 2 (suite) : panneau dDAC de la v1 (grandeur au choix P, V, a, b, c, c/a, b/a, T, ou X/X₀, avec le piézo ; dP/dt par échantillon, moyen sur un intervalle ; carte des diffractogrammes en fonction du temps), images à échelle, niveaux et couleurs réglables |
+| branche `gui-viewer` | Interface :<br>- étape 1, le lecteur : `trxrd-gui`, presenters sans Qt, registre d'actions, ouverture en arrière-plan (`Session.read` / `attach`) ;<br>- étape 2 : nouveaux runs depuis RAW_DATA, cake sous le spectre, calibration à la Dioptas validée sur le LaB6 réel ; aperçu du scan brut pour choisir la plage 2θ ; analyse automatique depuis l'interface (Ctrl+R) ;<br>- étape 2 (suite) : panneau dDAC de la v1 (grandeur au choix P, V, a, b, c, c/a, b/a, T, ou X/X₀, avec le piézo ; dP/dt par échantillon, moyen sur un intervalle ; carte des diffractogrammes en fonction du temps), images à échelle, niveaux et couleurs réglables |
 | branche `p2-validation-2026` | Validation sur les 143 runs de janvier 2026 (61 % → 81 % de spectres aux mêmes phases) : conversion des runs Jungfrau « continu », `Vmin` de la v1 non repris, coût d'apparition d'une famille nul, suivi interrompu par un pic fort inexpliqué, pics larges ignorés, tri des pics fixes, `--temperature`, familles sans casse, CLI sous Windows |
 
 ### 3.2 Par fonctionnalité
 
-Tout est testé : `python -m pytest trxrd` compte 199 tests. Les 7 comparaisons numériques avec la v1 sont
-ignorées quand la v1 n'est pas importable, par exemple dans `.venv-v2`, qui n'a pas PyQt5 : 192 tests
+Tout est testé : `python -m pytest trxrd` compte 211 tests. Les 7 comparaisons numériques avec la v1 sont
+ignorées quand la v1 n'est pas importable, par exemple dans `.venv-v2`, qui n'a pas PyQt5 : 204 tests
 passent alors.
 
 | Fonctionnalité | Où | État / preuve |
@@ -90,6 +90,7 @@ passent alors.
 | Recherche de composition déterministe | `processing/phase_search.py` | ✅ 8/8 contre 0/8 pour l'algorithme génétique v1, 40 fois plus rapide (synthétique) |
 | Ajustement d'un spectre ou d'une série | `services/fitting.py` | ✅ |
 | Analyse automatique + suivi des pics + pics fixes | `services/identification.py` | ✅ |
+| Analyse automatique depuis l'interface : phases candidates, spectres, plage de P, zones exclues gardées dans le run, pics fixes proposés puis exclus, progression et arrêt | `services/analysis.py`, `gui/presenters/analysis.py`, `gui/views/analysis.py` | ✅ Water05 scan 9 : même résultat que `trxrd compare` (15/16, 0,03 / 0,165 GPa) en 1,6 s ; ~18 spectres/s sur Water01_scan0074 |
 | Construction d'un run depuis un scan brut | `services/run_builder.py` | ✅ (fichiers HDF5 uniquement) |
 | État de l'application pour l'interface | `services/session.py` | ✅ (sans Qt) |
 | Interface, étape 1 : le lecteur (`trxrd-gui`) | `gui/` | ✅ presenters testés avec de fausses vues, fenêtre testée hors écran ; essayée sur Water05 scan 9 et Water01_scan0074 (1 600 spectres) |
@@ -233,8 +234,8 @@ Seul `trxrd/gui/` a le droit d'importer PySide6/pyqtgraph (règle vérifiée par
   carte des couleurs, niveaux auto ou gardés d'un spectre à l'autre ; choix mémorisés ;
 - [x] aperçu du scan brut à la création d'un run (demandé par l'utilisateur) : image ou cake sur tout le
   détecteur (maximum du scan ou une image), diagramme et couverture en azimut, plage 2θ tirée à la souris ;
-- [ ] lancer l'analyse automatique (`auto_analyse`) depuis l'interface : phases candidates, plage de P,
-  zones exclues, pics fixes signalés, avec progression ;
+- [x] lancer l'analyse automatique depuis l'interface (Ctrl+R) : phases candidates, spectres, plage de P,
+  zones exclues (gardées dans le run), pics fixes proposés puis exclus en relançant, avec progression et arrêt ;
 - [ ] onglet « masque » de la calibration : dessiner ou modifier un masque, comme dans Dioptas. Pour
   l'instant, on charge celui de Dioptas.
 
@@ -250,7 +251,11 @@ Seul `trxrd/gui/` a le droit d'importer PySide6/pyqtgraph (règle vérifiée par
 
 Étape 3, l'ajustement interactif et la gestion des phases (demandés ensuite par l'utilisateur) (fonctions de la v1 à reprendre, d'après ses raccourcis) :
 - [ ] ajouter / retirer une phase sur un spectre, à une P de départ ; déplacer les raies attendues avec P ;
-- [ ] ajouter, remplacer, confirmer ou supprimer un pic à la souris ; annuler (undo) ;
+- [ ] ajouter, remplacer, confirmer ou supprimer un pic à la souris ; annuler (undo), y compris une analyse
+  automatique ;
+- [ ] garder et tracer les pics libres (zones exclues, pics inexpliqués) : ils sont ajustés, mais
+  `Spectrum.model` ne contient que les pics des phases, si bien que la courbe « ajustement » ne monte pas sur
+  le pic du joint ;
 - [ ] « fit total » d'un spectre, puis « fit all » d'une plage de spectres (`fit_spectra`, avec suivi) ;
 - [ ] zones d'ajustement / zones exclues dessinées à la souris (à stocker dans `Run.ui_state` ou dans le modèle) ;
 - [ ] copier / coller le modèle de phases d'un spectre sur une sélection de spectres ; supprimer les phases d'une zone de spectres ;

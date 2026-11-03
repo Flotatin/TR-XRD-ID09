@@ -248,3 +248,61 @@ def test_dpdt_view_with_its_interval(viewer):
     assert "H2O_Ice_VII :" in dpdt.result.text()
     dpdt.toggle.setChecked(False)
     assert not dpdt.interval.region.isVisible() and dpdt.result.text() == "" and not window.evolution._segments
+
+
+def test_analysis_dialog(viewer):
+    from conftest import LIBRARY
+    from trxrd.gui.presenters.analysis import AnalysisChoices
+    from trxrd.gui.views.analysis import AnalysisDialog
+    from trxrd.physics import eos
+    from trxrd.services import analysis
+    from trxrd.services.analysis import AnalysisSettings
+
+    settings = AnalysisSettings(phases=["H2O_Ice_VI"], pressure_range=(0.5, 12.0), exclude=[(18.48, 18.68)])
+    choices = AnalysisChoices([("H2O_Ice_VI", "H2O_Ice_VI", True), ("H2O_Ice_VII", "H2O_Ice_VII", False)],
+                              settings, count=6, current=2, analysed=3, two_theta=(8.0, 25.0))
+    dialog = AnalysisDialog(choices, analysis.library_phases)
+    assert dialog.zones.text() == "18.48:18.68" and (dialog.pmin.value(), dialog.pmax.value()) == (0.5, 12.0)
+    request = dialog.request()
+    assert request.indices == list(range(6)) and request.settings.phases == ["H2O_Ice_VI"]
+    assert request.settings.exclude == [(18.48, 18.68)] and request.settings.window is None
+    assert request.settings.temperature == eos.T_REF and request.settings.max_step is None
+    dialog.current.setChecked(True)
+    assert dialog.request().indices == [2]
+    dialog.first.setValue(1)
+    dialog.last.setValue(3)
+    assert dialog.between.isChecked() and dialog.request().indices == [1, 2, 3]
+    dialog.limit.setChecked(True)
+    assert dialog.request().settings.window == (8.0, 25.0)
+
+    dialog.add_folder(str(LIBRARY / "Sn"))
+    assert "Sn_Beta" in dialog.phase_names() and dialog.request().settings.library == [str(LIBRARY / "Sn")]
+    dialog.add_folder(str(LIBRARY / "H2O"))  # a card of the run: kept, with the P range of the library
+    assert dialog.phase_names(checked_only=False).count("H2O_Ice_VI") == 1
+    assert dialog.phases.item(0).text() == "H2O_Ice_VI  (-0.2–3 GPa)"
+    dialog.zones.setText("18.5")
+    dialog.accept()
+    assert dialog.answer is None and "18.5" in dialog.message.text()  # stays open
+    dialog.zones.setText("")
+    dialog._check_all(True)
+    assert dialog.request().settings.phases is None  # every phase, those added later too
+    dialog._check_all(False)
+    dialog.accept()
+    assert dialog.answer is None and "Cocher" in dialog.message.text()
+
+
+def test_automatic_analysis_action(viewer, compression_run):
+    from trxrd.gui.presenters.analysis import AnalysisRequest
+    from trxrd.services.analysis import AnalysisSettings
+
+    window = viewer.window
+    assert window.actions.get("auto").shortcut().toString() == "Ctrl+R"
+    viewer.session.attach(compression_run, None)
+    asked = []
+    window.ask_analysis = lambda choices, library: asked.append(choices) or AnalysisRequest(
+        AnalysisSettings(pressure_range=(0.0, 10.0)), list(range(6)))
+    window.ask_yes_no = lambda title, text: False  # do not exclude the gasket line this time
+    window.actions.get("auto").trigger()
+    assert asked[0].count == 6 and all(s.phases for s in viewer.session.run.spectra)
+    assert window.windowTitle().endswith("*") and window.statusBar().currentMessage().startswith("Analyse automatique")
+    assert window.phases.rowCount() >= 1  # the views show the new fits

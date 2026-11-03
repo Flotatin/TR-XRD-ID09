@@ -68,46 +68,38 @@ def _frames(text: Optional[str], n: int) -> range:
 
 
 def _add_library(run, paths) -> None:
-    from trxrd.io.jcpds import read_library
+    from trxrd.services.analysis import add_library
 
-    for name, card in read_library(paths or []).items():
-        own = run.phases.setdefault(name, card)  # the cards already in the run (those really used) win...
-        if own is not card and card.p_range is not None:
-            own.p_range = card.p_range  # ...but the P range, a prior of the search only, is the library's
+    add_library(run, paths or [])
 
 
-def _auto_options(args: argparse.Namespace, temperature: Optional[float] = None):
-    from trxrd.physics.eos import T_REF
-    from trxrd.processing.peaks import DetectionOptions
-    from trxrd.processing.phase_search import SearchOptions
-    from trxrd.services.fitting import FitOptions
-    from trxrd.services.identification import AutoOptions
+def _settings(args: argparse.Namespace, temperature: Optional[float] = None):
+    from trxrd.services.analysis import AnalysisSettings
 
-    temperature = args.temperature or temperature or T_REF  # search and fit at the same T
-    return AutoOptions(
-        detection=DetectionOptions(min_snr=args.min_snr),
-        fit=FitOptions(temperature=temperature),
-        search=SearchOptions(
-            pressure_range=(args.pmin, args.pmax), tolerance=args.tolerance, max_phases=args.max_phases,
-            max_pressure_step=args.max_step, max_pressure_spread=args.max_spread, temperature=temperature,
-        ),
+    return AnalysisSettings(
+        phases=args.phases or None,
+        library=[str(path) for path in args.library or []],
+        pressure_range=(args.pmin, args.pmax),
+        temperature=args.temperature or temperature,  # search and fit at the same T (default 298 K)
+        tolerance=args.tolerance, max_phases=args.max_phases, min_snr=args.min_snr,
+        max_step=args.max_step, max_spread=args.max_spread,
+        exclude=[tuple(float(v) for v in zone.split(":")) for zone in args.exclude or []],
         window=(args.tth_min, args.tth_max) if args.tth_min is not None and args.tth_max is not None else None,
-        exclude=[tuple(float(v) for v in zone.split(":")) for zone in args.exclude or []] or None,
         track=not args.no_track,
     )
 
 
+def _auto_options(args: argparse.Namespace, temperature: Optional[float] = None):
+    return _settings(args, temperature).options()
+
+
 def _report_static_peaks(run, frames, options) -> None:
     """After the analysis: static peaks that are no line of the sample (gasket, diamond...)."""
-    from trxrd.services.identification import find_static_peaks, screen_static_peaks
+    from trxrd.services.analysis import static_peaks
 
-    if len(frames) < 5:
-        return
-    static = find_static_peaks(run, frames, options.window, options.detection)
-    for peak in screen_static_peaks(run, static, frames):
-        if not any(lo <= peak.position <= hi for lo, hi in options.exclude or ()):
-            print(f"note: peak at {peak.position:.3f}° does not move (seen in {peak.fraction:.0%} of the spectra, "
-                  f"±{peak.spread:.3f}°): gasket/diamond? if so use --exclude {peak.zone()[0]}:{peak.zone()[1]}")
+    for peak in static_peaks(run, list(frames), options):
+        print(f"note: peak at {peak.position:.3f}° does not move (seen in {peak.fraction:.0%} of the spectra, "
+              f"±{peak.spread:.3f}°): gasket/diamond? if so use --exclude {peak.zone()[0]}:{peak.zone()[1]}")
 
 
 def _phases_text(pressures) -> str:

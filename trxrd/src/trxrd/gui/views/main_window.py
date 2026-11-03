@@ -154,6 +154,23 @@ class MainWindow(QMainWindow):
     def show_info(self, title: str, text: str) -> None:
         QMessageBox.information(self, title, text)
 
+    def show_message(self, text: str) -> None:
+        """Temporary message in the status bar (a minute)."""
+        self.statusBar().showMessage(text, 60000)
+
+    def ask_yes_no(self, title: str, text: str) -> bool:
+        answer = QMessageBox.question(self, title, text, QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                      QMessageBox.StandardButton.Yes)
+        return answer == QMessageBox.StandardButton.Yes
+
+    def ask_analysis(self, choices, library_phases):
+        from trxrd.gui.views.analysis import AnalysisDialog
+
+        dialog = AnalysisDialog(choices, library_phases, self)
+        answer = dialog.answer if dialog.exec() == QDialog.DialogCode.Accepted else None
+        dialog.deleteLater()
+        return answer
+
     def ask_new_run(self, browse):
         from trxrd.gui.views.new_run import NewRunDialog
 

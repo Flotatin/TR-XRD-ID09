@@ -161,3 +161,19 @@ def raw_root(tmp_path, bliss_dataset):
         master["1.1/title"] = "ascan piezoy 0 1 40 0.3"
     (tmp_path / "campaign" / "Fichier_CED_DRX").mkdir()
     return raw
+
+
+@pytest.fixture
+def compression_run():
+    """Six synthetic spectra through the ice VI -> VII transition, with a static gasket line (synthetic.GASKET)."""
+    from synthetic import COMPRESSION, ENERGY, GASKET, X, pearson_peaks, phase_pattern
+    from trxrd.domain import Calibration, Run, Spectrum
+    from trxrd.io.jcpds import read_library
+
+    library = read_library([LIBRARY / "H2O"])
+    gasket = pearson_peaks(X, [(GASKET, 3000, 0.04, 1.5, 0.3)], background=0.0, seed=99)
+    spectra = []
+    for i, truth in enumerate(COMPRESSION):
+        x, y = phase_pattern([library[n] for n in truth], list(truth.values()), seed=i, texture=0.4)
+        spectra.append(Spectrum(x, y + gasket, time=i * 1e-3, frame=i))
+    return Run("compression", spectra, Calibration(energy_ev=ENERGY, poni="Distance: 0.164\n"), library)

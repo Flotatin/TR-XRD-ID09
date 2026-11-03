@@ -130,6 +130,7 @@ trxrd/
 │   │   ├── run_builder.py      ✅ scan brut → Run (intégration, fond, oscilloscope, base de temps)
 │   │   ├── fitting.py          ✅ ajuster un spectre ou une série (en suivant l'évolution)
 │   │   ├── identification.py   ✅ analyse automatique : détection → phases → ajustement → P, suivi des pics
+│   │   ├── analysis.py         ✅ réglages de l'utilisateur, analyse sur une copie, pics fixes (GUI, CLI)
 │   │   ├── validation.py       ✅ comparaison avec une analyse de référence (`trxrd compare`)
 │   │   ├── raw_data.py         ✅ parcours de RAW_DATA (jeux de données, scans du fichier maître), scan brut d'un run
 │   │   ├── images.py           ✅ image brute et cake (2θ × azimut) d'un spectre ; aperçu d'un scan brut
@@ -139,14 +140,14 @@ trxrd/
 │   ├── notebook.py             ✅ XRDRun : lecture seule pour notebooks
 │   ├── cli.py                  ✅ trxrd build | auto | compare | convert | info
 │   └── gui/                    ✅ lecteur PySide6 + pyqtgraph (§9) : `trxrd-gui`
-│       ├── presenters/         display.py (données affichées), viewer.py, preview.py, calibration.py
+│       ├── presenters/         display.py (données affichées), viewer.py, preview.py, analysis.py, calibration.py
 │       │                       (presenters), sans Qt
 │       ├── views/              plots.py (spectre, cake, grandeurs(t), carte), images.py (échelle, niveaux, couleurs),
-│       │                       panels.py, new_run.py, preview.py, calibration.py, main_window.py
+│       │                       panels.py, new_run.py, preview.py, analysis.py, calibration.py, main_window.py
 │       ├── actions.py          registre unique des QAction (menus, barre d'outils, raccourcis)
 │       ├── tasks.py            calculs longs dans un thread, résultat rendu au thread de l'interface
 │       └── app.py              assemblage : fenêtre + presenters + actions
-└── tests/                      199 tests ; data/ = scan TUTO, calibration, ancien fichier .CEDX d'exemple
+└── tests/                      211 tests ; data/ = scan TUTO, calibration, ancien fichier .CEDX d'exemple
 ```
 
 ## 5. Le format de fichier `trxrd-run` (HDF5)
@@ -673,8 +674,43 @@ En notebook : `from trxrd.services import rates`, puis `rates.dpdt(run)` ou
 `rates.mean_dpdt(run, t1_ms, t2_ms)`, avec `run = XRDRun(fichier).to_run()`. Le lecteur `XRDRun` reste
 limité à `io`, `domain` et `physics` (`tests/test_architecture.py`).
 
+**Analyse automatique depuis l'interface** (Analyse, Ctrl+R ; `services/analysis.py`,
+`gui/presenters/analysis.py`, `gui/views/analysis.py`) :
+- **Le dialogue** propose :
+  - les phases candidates du run, cochées par défaut, avec leur plage de pression. On peut ajouter un
+    dossier de fiches : les fiches du run restent prioritaires (§5, point 9), mais la recherche prend la
+    plage de P de la bibliothèque, comme `trxrd auto --library` ;
+  - les spectres : tous, le spectre courant, ou une plage ;
+  - la plage de P, la température, les zones exclues (`18.48:18.68; 21.1:21.3`, virgule ou point) ;
+  - des réglages avancés, repliés par défaut : plage 2θ, tolérance, nombre de phases, seuil, écart et saut
+    de P, suivi des pics.
+- **Les réglages sont gardés dans le run** (`Run.ui_state["auto_analysis"]`, enregistré dans le fichier),
+  zones exclues comprises : elles dépendent du montage, donc du run. Pour un ancien `.CEDX`, la température
+  par défaut est la médiane de celles de ses ajustements, comme dans `trxrd compare`.
+- **Le calcul** tourne dans un thread, sur une copie des spectres analysés et des fiches
+  (`analysis.analyse`). Le résultat est ensuite mis dans le run, dans le thread de l'interface
+  (`Analysis.apply_to`) : les vues ne lisent jamais un spectre en cours d'ajustement. Une barre de
+  progression permet d'arrêter : les spectres déjà analysés sont gardés, les autres ne changent pas. Si des
+  spectres ont déjà des phases, l'interface demande avant de les remplacer. Le fichier ne change qu'à
+  l'enregistrement.
+- **Pics fixes** : après l'analyse, les pics qui ne bougent pas et ne sont des raies d'aucune phase trouvée
+  (`find_static_peaks` puis `screen_static_peaks`) sont proposés comme zones exclues. On peut relancer
+  l'analyse avec ces zones en un clic. Sur une longue série, ces pics sont cherchés sur 200 spectres au
+  plus, également espacés. Sur le run synthétique des tests, le pic du joint, inexpliqué, interrompt le
+  suivi à chaque spectre ; une fois exclu, le suivi reprend.
+- `trxrd auto` et `trxrd compare` passent par les mêmes réglages (`AnalysisSettings`), le même ajout de
+  fiches et la même recherche de pics fixes.
+
+Sur Water05 scan 9, l'analyse lancée depuis l'interface (dossiers H2O et Sn, P ≤ 10 GPa, zone
+18,479–18,679°) donne le résultat de référence de `trxrd compare` (§6.7) : mêmes phases dans 15 spectres sur
+16, |ΔP| ≤ 0,03 GPa pour les glaces et 0,165 GPa pour Sn, en 1,6 s. Sur Water01_scan0074 (1 600 spectres),
+l'analyse avance à environ 18 spectres par seconde, et l'arrêt garde les spectres déjà faits.
+
+Remarque : la courbe « ajustement » enregistrée (`Spectrum.model`) ne contient que les pics des phases. Les
+pics libres (zones exclues, pics inexpliqués) sont ajustés, mais ni tracés ni gardés. À revoir avec
+l'ajustement interactif (étape 3).
+
 **Ensuite** :
-- étape 2 (suite) : lancer l'analyse automatique depuis l'interface, avec une barre de progression ;
 - étape 3 : ajustement interactif (pics, phases, zones), gestion des phases, puis le reste
   (`docs/PASSATION.md` §6, P1).
 

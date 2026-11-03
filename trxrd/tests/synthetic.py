@@ -25,3 +25,9 @@ def phase_pattern(cards, pressures, seed=0, scale=4000.0, width=0.035, spurious=
             peaks.append((two_theta, scale * reflection.intensity / 100 * factor, width, 1.5, 0.6))
     peaks.extend((t, h, width, 1.5, 0.6) for t, h in spurious)
     return x, pearson_peaks(x, peaks, seed=seed)
+
+
+# ice VI -> ice VII transition during a compression (GPa), and a gasket line (deg) that does not move
+COMPRESSION = [{"H2O_Ice_VI": 1.0}, {"H2O_Ice_VI": 1.4}, {"H2O_Ice_VI": 1.8, "H2O_Ice_VII": 2.2},
+               {"H2O_Ice_VII": 2.6}, {"H2O_Ice_VII": 3.1}, {"H2O_Ice_VII": 3.7}]
+GASKET = 18.58

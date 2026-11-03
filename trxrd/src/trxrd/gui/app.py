@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Sequence
 
 from trxrd import __version__
+from trxrd.gui.presenters.analysis import AnalysisPresenter
 from trxrd.gui.presenters.viewer import (
     CakePresenter, DisplaySettings, EvolutionPresenter, MainPresenter, MapPresenter, NavigatorPresenter,
     RatePresenter, RateSettings, SpectrumPresenter, TablesPresenter,
@@ -20,7 +21,7 @@ from trxrd.gui.tasks import ThreadRunner
 from trxrd.gui.views.main_window import MainWindow, application
 from trxrd.services.session import Session
 
-FILE, NAVIGATION, VIEW, TOOLS, HELP = "&Fichier", "&Navigation", "&Affichage", "&Outils", "&Aide"
+FILE, NAVIGATION, VIEW, ANALYSIS, TOOLS, HELP = "&Fichier", "&Navigation", "&Affichage", "A&nalyse", "&Outils", "&Aide"
 
 
 @dataclass
@@ -29,6 +30,7 @@ class Viewer:
     settings: DisplaySettings
     window: MainWindow
     main: MainPresenter
+    analysis: AnalysisPresenter
     presenters: List[object]
 
 
@@ -50,6 +52,7 @@ def create_viewer(session: Optional[Session] = None, runner=None) -> Viewer:
         NavigatorPresenter(session, window.navigator),
     ]
     main = MainPresenter(session, settings, window, runner, version=__version__)
+    analysis = AnalysisPresenter(session, window, runner)
     window.on_close_request = main.may_discard
     window.on_unit = main.set_unit
 
@@ -78,12 +81,14 @@ def create_viewer(session: Optional[Session] = None, runner=None) -> Viewer:
     add("cake", VIEW, "&Intégration sous le spectre (cake)", toggle_cake, ["Ctrl+K"], checkable=True,
         tip="Cake (2θ × azimut) ou image brute du spectre courant, calculé depuis les images de RAW_DATA")
     window.actions.get("cake").setChecked(True)
+    add("auto", ANALYSIS, "Analyse &automatique…", analysis.start, ["Ctrl+R"],
+        "Détecter les pics, trouver les phases et leurs pressions, ajuster (Pearson IV), avec suivi des pics")
     add("calibration", TOOLS, "&Calibration du détecteur…", window.show_calibration, ["Ctrl+L"],
         "Calibrer la géométrie sur une image de LaB6 / CeO2 et enregistrer le .poni")
     add("shortcuts", HELP, "&Raccourcis clavier", window.show_shortcuts, ["F1"])
-    window.build_menus(toolbar=("new_run", "open", "save", "|", "previous", "next"))
+    window.build_menus(toolbar=("new_run", "open", "save", "|", "previous", "next", "|", "auto"))
     main.update()  # the unit actions exist now
-    return Viewer(session, settings, window, main, presenters)
+    return Viewer(session, settings, window, main, analysis, presenters)
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:

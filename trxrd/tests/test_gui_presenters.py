@@ -467,3 +467,67 @@ def test_raw_scan_preview_newest_request_wins_and_closing_drops_results():
     presenter.close()  # the dialog is closed before the result
     runner.finish(2)
     assert view.count("show_preview") == 1
+
+
+def test_automatic_analysis_from_the_gui(compression_run):
+    from synthetic import GASKET, X
+    from trxrd.gui.presenters.analysis import AnalysisPresenter, AnalysisRequest
+    from trxrd.services import analysis
+    from trxrd.services.analysis import AnalysisSettings
+
+    session, window = Session(), Recorder(ask_yes_no=True)
+    session.attach(compression_run, None)
+    changes = []
+    session.subscribe("data_changed", lambda *_: changes.append(1))
+    presenter = AnalysisPresenter(session, window)
+    choices = presenter.choices()
+    assert [name for name, _, checked in choices.phases if checked] == list(compression_run.phases)
+    assert choices.count == 6 and choices.analysed == 0 and choices.two_theta == (8.0, float(X[-1]))
+    assert dict((n, label) for n, label, _ in choices.phases)["H2O_Ice_VII"] == "H2O_Ice_VII  (-1–70 GPa)"
+
+    window.answers["ask_analysis"] = AnalysisRequest(AnalysisSettings(pressure_range=(0.0, 10.0)), list(range(6)))
+    presenter.start()
+    title, text = window.last("ask_yes_no")
+    assert title == "Pics fixes" and f"{GASKET:.1f}" in text  # the gasket line is proposed...
+    assert window.count("start_progress") == 2 and window.count("end_progress") == 2  # ...and the analysis run again
+    assert window.count("ask_yes_no") == 1 and changes == [1, 1] and session.dirty
+    saved = analysis.saved_settings(session.run)
+    assert len(saved.exclude) == 1 and saved.exclude[0][0] < GASKET < saved.exclude[0][1]
+    assert presenter.last.tracked >= 1 and all(s.phases for s in session.run.spectra)
+    assert window.last("show_message")[0].endswith("phases : H2O_Ice_VI 3, H2O_Ice_VII 4")
+
+    assert presenter.choices().settings.exclude == saved.exclude and presenter.choices().analysed == 6
+    window.answers["ask_yes_no"] = False  # "6 spectra already hold phases: replace them?" -> no
+    presenter.start()
+    assert window.count("start_progress") == 2 and "déjà des phases" in window.last("ask_yes_no")[1]
+
+    window.answers["ask_yes_no"] = True
+    presenter.runner.cancelled = True  # the user presses "Arrêter" at once
+    presenter.start()
+    presenter.runner.cancelled = False
+    assert "arrêtée" in window.last("show_message")[0] and presenter.last.indices == [0]
+
+    window.answers["ask_analysis"] = AnalysisRequest(AnalysisSettings(phases=["missing"]), [0])
+    presenter.start()
+    assert window.last("show_error") == ("Analyse impossible", "ValueError: Aucune phase candidate : en cocher au moins une")
+    assert not presenter.running
+    window.answers["ask_analysis"] = None  # dialog closed
+    presenter.start()
+    assert window.count("start_progress") == 4
+
+
+def test_analysis_needs_a_run_with_its_energy(sample_run):
+    from trxrd.gui.presenters.analysis import AnalysisPresenter, parse_zones, zones_text
+
+    session, window = Session(), Recorder()
+    presenter = AnalysisPresenter(session, window)
+    presenter.start()  # no run: nothing
+    sample_run.calibration = None
+    session.attach(sample_run, None)
+    presenter.start()
+    assert window.last("show_error")[0] == "Analyse impossible" and window.count("ask_analysis") == 0
+
+    assert parse_zones(" 18.479:18.679; 20,1 - 20,3\n21.5:21.2 ") == [(18.479, 18.679), (20.1, 20.3), (21.2, 21.5)]
+    assert parse_zones("") == [] and zones_text([(18.479, 18.679), (20.1, 20.3)]) == "18.479:18.679; 20.1:20.3"
+    with pytest.raises(ValueError, match="18.5"):
+        parse_zones("18.5")

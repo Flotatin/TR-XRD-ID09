@@ -71,6 +71,7 @@ values). Never commit the user's data (raw scans, .CEDX) to the repository.
 | Peak detection / phase search | `processing/peaks.py`, `processing/phase_search.py` |
 | Peak fit, cell, pressure | `processing/peakfit.py`, `processing/cell.py`, `services/fitting.py` |
 | Automatic analysis with peak tracking | `services/identification.py` |
+| Analysis as the user asks for it (settings kept in the run, work on a copy, static peaks), GUI and CLI | `services/analysis.py`, `gui/presenters/analysis.py` |
 | GUI state (Qt-free) | `services/session.py` |
 | GUI (`trxrd-gui`): display data and presenters without Qt, passive views, actions, threads | `gui/presenters/`, `gui/views/`, `gui/actions.py`, `gui/tasks.py`, `gui/app.py` |
 | Raw data browsing, raw image and cake of a spectrum | `services/raw_data.py`, `services/images.py` |
@@ -82,6 +83,6 @@ values). Never commit the user's data (raw scans, .CEDX) to the repository.
 
 ## Next steps
 
-See `docs/PASSATION.md` §6 (P1: GUI, viewer + run creation + cake + calibration + dDAC panel done, next: automatic
-analysis from the GUI, mask editing, then interactive fitting and phase management; P2: remaining validation items; P4: v1 features not ported yet;
+See `docs/PASSATION.md` §6 (P1: GUI, viewer + run creation + cake + calibration + dDAC panel + raw-scan preview +
+automatic analysis done, next: mask editing, then interactive fitting and phase management; P2: remaining validation items; P4: v1 features not ported yet;
 P5: algorithm ideas; P6: repository split).
