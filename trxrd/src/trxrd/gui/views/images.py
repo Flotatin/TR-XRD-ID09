@@ -30,6 +30,52 @@ def colormap(name: str) -> pg.ColorMap:
     return pg.colormap.get(name)
 
 
+def _box(view) -> pg.ViewBox:
+    return view if isinstance(view, pg.ViewBox) else view.getViewBox()
+
+
+def limit_view(view, x: Optional[Tuple[float, float]] = None, y: Optional[Tuple[float, float]] = None,
+               margin: float = 0.03) -> None:
+    """Zooming out stops at these ranges (data coordinates), plus `margin` of their width; None: no limit.
+
+    `view`: a plot or a view box. A plot linked to another on x has no x limit of its own: see keep_in_limits.
+    """
+    limits = {}
+    for axis, span in (("x", x), ("y", y)):
+        low = high = None
+        if span is not None and np.isfinite(span).all():
+            low, high = float(min(span)), float(max(span))
+            pad = margin * (high - low) if high > low else 0.5
+            low, high = low - pad, high + pad
+        limits[f"{axis}Min"], limits[f"{axis}Max"] = low, high
+    _box(view).setLimits(**limits)
+
+
+def keep_in_limits(follower, main) -> None:
+    """`follower`, while linked to `main` on x, stays inside the x limits of `main`.
+
+    A view already at its limit does not move, and then nothing brings back the plots linked to it.
+    """
+    box, target = _box(follower), _box(main)
+
+    def clamp(*_) -> None:
+        if box.linkedView(pg.ViewBox.XAxis) is not target:
+            return
+        low, high = target.state["limits"]["xLimits"]
+        start, stop = box.viewRange()[0]
+        if (low is not None and start < low) or (high is not None and stop > high):
+            box.setXRange(start if low is None else max(start, low), stop if high is None else min(stop, high), padding=0)
+
+    box.sigXRangeChanged.connect(clamp)
+
+
+def span_of(*arrays) -> Optional[Tuple[float, float]]:
+    """(min, max) of the finite values of `arrays`; None when there are none."""
+    values = np.concatenate([np.ravel(np.asarray(a, dtype=float)) for a in arrays if a is not None] or [np.array([])])
+    values = values[np.isfinite(values)]
+    return (float(values.min()), float(values.max())) if values.size else None
+
+
 def _combo(choices) -> QComboBox:
     box = QComboBox()
     for label, key in choices:
@@ -55,6 +101,8 @@ class ImagePanel(QWidget):
         self.on_histogram: Optional[Callable[[bool], None]] = None
         self._raw: Optional[np.ndarray] = None
         self._rect: Optional[QRectF] = None
+        self._extent: Optional[QRectF] = None  # what the image covers, in data coordinates
+        self._limit_x = True
         self._levels: Optional[Tuple[float, float]] = None
         self._drawing = False  # levels set by the program, not dragged by the user
 
@@ -62,6 +110,7 @@ class ImagePanel(QWidget):
         self.plot.getAxis("left").setWidth(AXIS_WIDTH)
         self.image = pg.ImageItem(axisOrder="row-major")
         self.plot.addItem(self.image)
+        self.plot.getViewBox().sigResized.connect(lambda *_: self.update_limits())
         self.histogram = pg.HistogramLUTWidget(image=self.image)
         self.histogram.setFixedWidth(self.HISTOGRAM_WIDTH)
         self.histogram.item.sigLevelChangeFinished.connect(self._levels_dragged)
@@ -109,15 +158,38 @@ class ImagePanel(QWidget):
         self.bar.insertWidget(self._custom, widget)
         self._custom += 1
 
-    def set_image(self, image: np.ndarray, rect: Optional[QRectF] = None) -> None:
-        """Show `image` ([rows, columns], NaN allowed) over `rect` in data coordinates (pixels if None)."""
+    def set_image(self, image: np.ndarray, rect: Optional[QRectF] = None, limit_x: bool = True) -> None:
+        """Show `image` ([rows, columns], NaN allowed) over `rect` in data coordinates (pixels if None).
+
+        `limit_x`: False when the x axis of the plot is linked to another plot, which holds the limits.
+        """
         self._raw = np.asarray(image, dtype=float)
         self._rect = rect
+        self._extent = rect if rect is not None else QRectF(0, 0, self._raw.shape[1], self._raw.shape[0])
+        self._limit_x = limit_x
         self._draw(self.auto.isChecked() or self._levels is None)
+        self.update_limits()
 
     def clear(self) -> None:
         self._raw = None
+        self._extent = None
         self.image.clear()
+        self.update_limits()
+
+    def update_limits(self) -> None:
+        """Zooming out stops when the whole image is seen. With locked proportions the view is wider, or
+        taller, than the image: strict limits would crop it."""
+        if self._extent is None:
+            limit_view(self.plot)
+            return
+        box, rect = self.plot.getViewBox(), self._extent
+        extra_x = extra_y = 0.0
+        if box.state["aspectLocked"]:
+            ratio = box.width() / max(box.height(), 1.0)
+            extra_x = max(rect.height() * ratio - rect.width(), 0.0) / 2
+            extra_y = max(rect.width() / max(ratio, 1e-6) - rect.height(), 0.0) / 2
+        x = (rect.left() - extra_x, rect.right() + extra_x) if self._limit_x else None
+        limit_view(self.plot, x, (rect.top() - extra_y, rect.bottom() + extra_y), margin=0.0)
 
     @property
     def levels(self) -> Optional[Tuple[float, float]]:

@@ -151,7 +151,7 @@ trxrd/
 │       ├── actions.py          registre unique des QAction (menus, barre d'outils, raccourcis)
 │       ├── tasks.py            calculs longs dans un thread, résultat rendu au thread de l'interface
 │       └── app.py              assemblage : fenêtre + presenters + actions
-└── tests/                      241 tests ; data/ = scan TUTO, calibration, ancien fichier .CEDX d'exemple
+└── tests/                      243 tests ; data/ = scan TUTO, calibration, ancien fichier .CEDX d'exemple
 ```
 
 ## 5. Le format de fichier `trxrd-run` (HDF5)
@@ -816,6 +816,14 @@ ajustement, propagation aux spectres 0 à 8, puis glace VI à 0,6 GPa sur le spe
 spectre 13. Les pressions restent à moins de 0,05 GPa de l'analyse manuelle de la v1, sauf le spectre 4
 (3,75 contre 3,66 GPa). Le spectre 0, que l'analyse automatique mettait à −0,18 GPa, sort à 5,75 GPa (5,79).
 Il faut 0,3 s pour les 9 premiers spectres et 1,9 s pour les 5 suivants.
+
+**Limites de zoom** (demandées par l'utilisateur ; `limit_view`, `keep_in_limits`, `ImagePanel.update_limits`) :
+on ne peut pas dézoomer au-delà des données de chaque graphe, avec 3 % de marge. Deux pièges :
+- Un graphe lié sur x n'a pas de limite propre, car elle gênerait le mode « oscilloscope entier ». Mais une vue
+  déjà à sa limite ne bouge plus, et rien ne ramène alors les graphes liés : `keep_in_limits` les y maintient.
+- Sur une image à proportions verrouillées, une limite stricte couperait l'image dès que la fenêtre n'a pas les
+  mêmes proportions. La limite tient donc compte de la forme de la fenêtre, et se recalcule à chaque
+  redimensionnement.
 
 **Ensuite** :
 - étape 3 (suite) : pics à la souris, zones d'ajustement et zones exclues dessinées à la souris, note du run

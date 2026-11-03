@@ -10,7 +10,7 @@ import pyqtgraph as pg
 from PySide6.QtCore import QRectF, QSettings, Qt
 from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QPushButton, QSpinBox, QSplitter, QVBoxLayout, QWidget
 
-from trxrd.gui.views.images import AXIS_WIDTH, ImagePanel, spacer
+from trxrd.gui.views.images import AXIS_WIDTH, ImagePanel, keep_in_limits, limit_view, span_of, spacer
 from trxrd.gui.views.plots import RIGHT_AXIS_WIDTH, MovableRegion
 
 RANGE_BRUSH, RANGE_PEN = (40, 160, 70, 40), "#2a8a3e"  # green: what is integrated
@@ -82,6 +82,7 @@ class ScanPreviewView(QWidget):
         self.coverage = pg.PlotDataItem(pen=pg.mkPen("#8a8a8a", width=1, style=Qt.PenStyle.DashLine))
         self.seen.addItem(self.coverage)
         self.range = MovableRegion(self.pattern, self._dragged, RANGE_BRUSH, RANGE_PEN)
+        keep_in_limits(self.panel.plot, self.pattern)
         margin = spacer()  # stays aligned with the image when its histogram is shown
         margin.setVisible(self.panel.show_histogram.isChecked())
         self.panel.on_histogram = margin.setVisible
@@ -150,30 +151,32 @@ class ScanPreviewView(QWidget):
             cake = data.cake
             step = (cake.x[-1] - cake.x[0]) / max(len(cake.x) - 1, 1)
             az_step = (cake.azimuth[-1] - cake.azimuth[0]) / max(len(cake.azimuth) - 1, 1)
+            item.getViewBox().setAspectLocked(False)
             self.panel.set_image(cake.image, QRectF(cake.x[0] - step / 2, cake.azimuth[0] - az_step / 2,
                                                     cake.x[-1] - cake.x[0] + step,
-                                                    cake.azimuth[-1] - cake.azimuth[0] + az_step))
+                                                    cake.azimuth[-1] - cake.azimuth[0] + az_step),
+                                 limit_x=False)  # linked to the pattern, which holds the limits
             self.shade.hide()
             if kind != self._kind:
                 item.setLabel("bottom", cake.x_label)
                 item.setLabel("left", "azimut (°)")
-                item.getViewBox().setAspectLocked(False)
                 item.invertY(False)
                 item.setXLink(self.pattern.getPlotItem())  # the rings line up with the peaks of the pattern
                 item.enableAutoRange(axis=pg.ViewBox.YAxis)
         else:
             rows, columns = data.image.shape
+            item.setXLink(None)
+            item.getViewBox().setAspectLocked(True)
             self.panel.set_image(data.image, QRectF(0, 0, columns, rows))
             self.cake_range.show(None)
             if kind != self._kind:
-                item.setXLink(None)
                 item.setLabel("bottom", "pixel")
                 item.setLabel("left", "pixel")
-                item.getViewBox().setAspectLocked(True)
                 item.invertY(True)
                 item.enableAutoRange()
         self._kind = kind
         if data.x is not None:
+            limit_view(self.pattern, span_of(data.x), span_of(data.intensity))
             self.curve.setData(data.x, data.intensity)
             self.coverage.setData(data.x, data.coverage)
             self.seen.setYRange(0, max(float(np.nanmax(data.coverage)) * 1.1, 1.0))

@@ -453,3 +453,49 @@ def test_expected_lines_stay_in_sight_when_zooming(viewer):
     assert view._guides and not any(guide.isVisible() for guide in view._guides)  # stays off on the next spectrum
     window.actions.get("guides").trigger()
     assert all(guide.isVisible() for guide in view._guides)
+
+
+def test_zooming_out_stops_at_the_natural_limits(viewer):
+    window = viewer.window
+    viewer.main.open(str(viewer.path))
+
+    def zoomed_out(plot):
+        plot.getViewBox().scaleBy((50, 50))
+        return plot.getViewBox().viewRange()
+
+    x, y = zoomed_out(window.spectrum.plot)
+    assert x[0] >= 8.0 - 0.6 and x[1] <= 25.0 + 0.6  # the pattern and 3 % of its width
+    assert zoomed_out(window.spectrum.band)[0] == pytest.approx(x)  # linked plots stay with it
+    assert window.spectrum.band.getViewBox().viewRange()[1] == [0.0, 1.0]
+
+    x = zoomed_out(window.evolution.plot)[0]
+    assert x[0] >= -0.2 and x[1] <= 4.2  # ms, the spectra
+    assert zoomed_out(window.map.plot)[0] == pytest.approx(x)
+    assert zoomed_out(window.dpdt.plot)[0] == pytest.approx(x)
+    window.evolution.span.setCurrentIndex(1)  # the whole oscilloscope record is allowed then
+    x = zoomed_out(window.evolution.plot)[0]
+    assert x[1] > 900 and window.map.plot.getViewBox().viewRange()[0] == pytest.approx(x)
+
+
+def test_image_limits_with_locked_proportions(viewer):
+    """In a wide window the whole image stays visible: strict limits would crop it."""
+    from trxrd.gui.views.images import ImagePanel
+    from trxrd.gui.views.main_window import application
+
+    app = application(["test"])
+    panel = ImagePanel("test", histogram=False)
+    panel.resize(900, 300)
+    panel.show()
+    app.processEvents()  # the plot gets its real size
+    box = panel.plot.getViewBox()
+    box.setAspectLocked(True)
+    panel.set_image(np.arange(10000.0).reshape(100, 100))
+    panel.plot.enableAutoRange()
+    app.processEvents()
+    box.scaleBy((50, 50))
+    app.processEvents()
+    x, y = box.viewRange()
+    assert y[0] <= 0.5 and y[1] >= 99.5 and y[1] - y[0] < 110 and x[1] - x[0] > 100  # all of it, not more than needed
+    panel.clear()
+    assert box.state["limits"]["xLimits"] == [None, None]
+    panel.close()

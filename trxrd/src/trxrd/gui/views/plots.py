@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QHBoxLayout, QLabel, QPushButton, QSpinBox, QVBoxLayout, QWidget,
 )
 
-from trxrd.gui.views.images import AXIS_WIDTH, ImagePanel, spacer
+from trxrd.gui.views.images import AXIS_WIDTH, ImagePanel, keep_in_limits, limit_view, span_of, spacer
 
 pg.setConfigOptions(antialias=True, background="w", foreground="k")
 
@@ -109,6 +109,7 @@ class SpectrumView(QWidget):
         self.band.setMenuEnabled(False)
         self.band.hideButtons()
         self.band.getPlotItem().setXLink(self.plot.getPlotItem())
+        keep_in_limits(self.band, self.plot)
         self.band.setYRange(0, 1, padding=0)
         self.band.setFixedHeight(self.AXIS_HEIGHT + self.ROW_HEIGHT)
         self.guides_shown = True
@@ -140,6 +141,7 @@ class SpectrumView(QWidget):
         self._clear_ticks()
         self.show_detection(None)
         self.plot.setTitle("")
+        limit_view(self.plot)
 
     def set_guides(self, shown: bool) -> None:
         """Vertical lines of the expected reflections across the pattern."""
@@ -210,6 +212,7 @@ class SpectrumView(QWidget):
         self.band.setLabel("bottom", curves.x_label)
         self._set_data_label(curves.data_label)
         self._list_baseline(curves.baseline is not None)
+        limit_view(self.plot, span_of(curves.x), span_of(curves.intensity, curves.baseline, curves.fit))
         self.data.setData(curves.x, curves.intensity)
         for item, y in ((self.baseline, curves.baseline), (self.fit, curves.fit)):
             item.setData(curves.x, y) if y is not None else item.setData([], [])
@@ -237,6 +240,7 @@ class SpectrumView(QWidget):
             names.append((bottom + 0.4, lines.short))
             self._add_guides(lines, color)
         self.band.getAxis("left").setTicks([names])
+        limit_view(self.band, y=(0, max(len(rows), 1)), margin=0.0)  # on x it follows the spectrum
         self.band.setYRange(0, max(len(rows), 1), padding=0)
         self.band.setFixedHeight(self.AXIS_HEIGHT + self.ROW_HEIGHT * max(len(rows), 1))
         if reset:
@@ -299,6 +303,7 @@ class EvolutionView(QWidget):
         item.scene().addItem(self.scope)
         item.getAxis("right").linkToView(self.scope)
         self.scope.setXLink(item)
+        keep_in_limits(self.scope, self.plot)
         item.vb.sigResized.connect(lambda: self.scope.setGeometry(item.vb.sceneBoundingRect()))
         self.trace = pg.PlotDataItem(pen=pg.mkPen("#4a6fa5", width=1))
         self.trace.setDownsampling(auto=True, method="peak")
@@ -392,6 +397,8 @@ class EvolutionView(QWidget):
         span = self._data.trace_span if self.span.currentData() == "trace" else None
         low, high = span or self._data.span
         pad = 0.03 * (high - low) if high > low else 0.5
+        values = [a for s in self._data.series for a in (s.y - np.nan_to_num(s.error), s.y + np.nan_to_num(s.error))]
+        limit_view(self.plot, (low, high), span_of(*values))  # the plots below follow on x
         self.plot.setXRange(low - pad, high + pad, padding=0)
         self.plot.enableAutoRange(axis=pg.ViewBox.YAxis)
 
@@ -402,6 +409,7 @@ class EvolutionView(QWidget):
             self.plot.getPlotItem().getAxis("right").setLabel("")
             return
         self.trace.setData(trace.x, trace.y)
+        limit_view(self.scope, y=span_of(trace.y), margin=0.05)
         self.plot.getPlotItem().getAxis("right").setLabel(trace.name)
         self.scope.enableAutoRange(axis=pg.ViewBox.YAxis)
 
@@ -468,6 +476,7 @@ class RateView(QWidget):
         self.plot.addItem(pg.InfiniteLine(pos=0, angle=0, pen=pg.mkPen("#b0b0b0")), ignoreBounds=True)
         if link_to is not None:
             item.setXLink(link_to.getPlotItem())
+            keep_in_limits(self.plot, link_to)
         self.marker = pg.InfiniteLine(angle=90, movable=False, pen=pg.mkPen("#808080", style=Qt.PenStyle.DotLine))
         self.plot.addItem(self.marker, ignoreBounds=True)
         self.interval = MovableRegion(self.plot, lambda start, stop: self.on_interval and self.on_interval(start, stop))
@@ -521,6 +530,8 @@ class RateView(QWidget):
             self.plot.addItem(bars, ignoreBounds=True)
             self.plot.addItem(curve)
             self._items += [bars, curve]
+        values = [a for s in data.series for a in (s.y - np.nan_to_num(s.error), s.y + np.nan_to_num(s.error), [0.0])]
+        limit_view(self.plot, y=span_of(*values))
         self.plot.enableAutoRange(axis=pg.ViewBox.YAxis)  # x follows the evolution plot
 
     def show_interval(self, found) -> None:
@@ -563,6 +574,7 @@ class TimeMapView(QWidget):
         item.getAxis("right").setStyle(showValues=False)
         if link_to is not None:
             item.setXLink(link_to.getPlotItem())  # its x autorange is off: the evolution plot sets the range
+            keep_in_limits(self.plot, link_to)
         self.marker = pg.InfiniteLine(angle=90, movable=False, pen=pg.mkPen("w", width=1, style=Qt.PenStyle.DashLine))
         self.plot.addItem(self.marker, ignoreBounds=True)
         _scene_click(self.plot, lambda x, y: self.on_pick and self.on_pick(x))
@@ -577,7 +589,7 @@ class TimeMapView(QWidget):
         x_step = (data.x[-1] - data.x[0]) / (len(data.x) - 1) if len(data.x) > 1 else 1.0
         y_step = (data.y[-1] - data.y[0]) / max(len(data.y) - 1, 1)
         rect = QRectF(data.x[0] - x_step / 2, data.y[0] - y_step / 2, len(data.x) * x_step, len(data.y) * y_step)
-        self.panel.set_image(data.image, rect)
+        self.panel.set_image(data.image, rect, limit_x=False)  # x follows the evolution plot
         self.plot.setLabel("bottom", data.x_label)
         self.plot.setLabel("left", data.y_label)
         self.plot.enableAutoRange(axis=pg.ViewBox.YAxis)  # x follows the evolution plot
@@ -600,6 +612,8 @@ class CakeView(QWidget):
         self.message = QLabel("")
         self.message.setStyleSheet("color: #8a5a00")
         self.panel = ImagePanel("cake", scale="log", histogram=False)  # narrow: the histogram is optional
+        if link_to is not None:
+            keep_in_limits(self.panel.plot, link_to)
         for widget in (QLabel("Intégration :"), self.mode):
             self.panel.add_control(widget)
         self.panel.bar.addWidget(self.message)
@@ -620,13 +634,14 @@ class CakeView(QWidget):
         self.message.setText("")
         step = (data.x[-1] - data.x[0]) / max(len(data.x) - 1, 1)
         az_step = (data.azimuth[-1] - data.azimuth[0]) / max(len(data.azimuth) - 1, 1)
+        self.plot.getViewBox().setAspectLocked(False)
         self.panel.set_image(data.image, QRectF(data.x[0] - step / 2, data.azimuth[0] - az_step / 2,
                                                 data.x[-1] - data.x[0] + step,
-                                                data.azimuth[-1] - data.azimuth[0] + az_step))
+                                                data.azimuth[-1] - data.azimuth[0] + az_step),
+                             limit_x=self.link_to is None)  # linked: the spectrum holds the limits
         item = self.plot.getPlotItem()
         item.setLabel("bottom", data.x_label)
         item.setLabel("left", "azimut (°)")
-        item.getViewBox().setAspectLocked(False)
         item.invertY(False)
         if self.link_to is not None:
             item.setXLink(self.link_to.getPlotItem())  # the rings line up with the phase ticks
@@ -635,11 +650,11 @@ class CakeView(QWidget):
     def show_image(self, image) -> None:
         self.message.setText("")
         image = np.asarray(image, dtype=float)
-        self.panel.set_image(image, QRectF(0, 0, image.shape[1], image.shape[0]))
         item = self.plot.getPlotItem()
         item.setXLink(None)
+        item.getViewBox().setAspectLocked(True)
+        self.panel.set_image(image, QRectF(0, 0, image.shape[1], image.shape[0]))
         item.setLabel("bottom", "pixel")
         item.setLabel("left", "pixel")
-        item.getViewBox().setAspectLocked(True)
         item.invertY(True)
         item.enableAutoRange()
