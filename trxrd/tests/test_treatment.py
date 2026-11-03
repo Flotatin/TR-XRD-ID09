@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 from scipy.signal import savgol_coeffs, savgol_filter
 
+from conftest import LIBRARY
 from synthetic import GASKET, X
 from trxrd.domain import Processing
 from trxrd.processing import background
@@ -106,3 +107,49 @@ def test_selection_of_several_spectra(compression_run):
     assert heard == [[2, 4]]  # no change, no event
     session.attach(compression_run, None)
     assert session.selection == []
+
+
+def test_background_window_for_broad_peaks():
+    """With broad, heavy-tailed peaks the automatic SNIP window overshoots and the background dives below zero;
+    a window a little wider than the peaks gives it back."""
+    from synthetic import ENERGY, phase_pattern
+    from trxrd.io.jcpds import read_library
+
+    card = read_library([LIBRARY / "H2O"])["H2O_Ice_VII"]
+    x, y = phase_pattern([card], [3.0], width=0.6, scale=20000)  # FWHM 0.94 deg, flat background 300
+    auto = background.treat(x, y, Processing())[1]
+    chosen = background.treat(x, y, Processing(baseline_window=1.0))[1]
+    assert auto.min() < -1000 and 250 < np.median(chosen) < 600
+    assert background.window_points(x, Processing(baseline_window=1.0)) == 48
+    assert background.window_points(x, Processing()) is None
+    with pytest.raises(ValueError, match="positive"):
+        background.check(Processing(baseline_window=-1.0), x.size, 1 / 48)
+    with pytest.raises(ValueError, match="moitié"):
+        background.check(Processing(baseline_window=10.0), x.size, 1 / 48)
+
+
+def test_broad_lines_are_fitted_on_their_tails_too():
+    from synthetic import ENERGY, phase_pattern
+    from trxrd.domain import Calibration, Run, Spectrum
+    from trxrd.io.jcpds import read_library
+    from trxrd.physics import profiles
+    from trxrd.services import analysis
+    from trxrd.services.fitting import FitOptions, fit_mask
+
+    x = np.linspace(10, 20, 501)
+    mask = fit_mask(x, (10, 20), [15.0], FitOptions(), fwhms=[1.0])  # one FWHM on each side
+    assert x[mask].min() == pytest.approx(14.0, abs=0.02) and x[mask].max() == pytest.approx(16.0, abs=0.02)
+    narrow = fit_mask(x, (10, 20), [15.0], FitOptions(), fwhms=[0.05])  # crystalline lines: unchanged
+    assert x[narrow].min() == pytest.approx(14.7, abs=0.02) and x[narrow].max() == pytest.approx(15.3, abs=0.02)
+
+    library = read_library([LIBRARY / "H2O"])
+    xs, y = phase_pattern([library["H2O_Ice_VII"]], [3.0], width=0.6, scale=20000)  # FWHM 0.94 deg
+    run = Run("broad", [Spectrum(xs, y, time=0.0, frame=0, processing=Processing(baseline_window=1.0))],
+              Calibration(energy_ev=ENERGY, poni="Distance: 0.164\n"), library)
+    settings = AnalysisSettings(phases=["H2O_Ice_VII"], pressure_range=(0, 10), max_fwhm=5.0, broad_fwhm=None)
+    assert settings.options().search.max_fwhm is None  # every peak counts in the search (liquid)
+    fit = analysis.analyse(run, [0], settings).spectra[0].phases[0]
+    assert fit.pressure == pytest.approx(3.0, abs=0.01)
+    true = profiles.fwhm("PearsonIV", 0.6, (1.5, 0.6))
+    assert all(abs(profiles.fwhm(p.model, p.width, p.shape) - true) < 0.05 for p in fit.peaks)
+    assert not any(treatment.detection(run, 0, settings).broad)  # no peak too broad any more

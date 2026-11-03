@@ -351,6 +351,10 @@ def test_treatment_tab_and_selection_of_spectra(viewer, compression_run):
     assert session.index == 5 and window.navigator.selected_rows() == [5] and session.selection == [5]
     panel.all.click()
     assert all(s.processing == Processing(1, "svg", (9, 2)) for s in session.run.spectra)  # that of spectrum 5
+    panel.window.setValue(1.0)  # background window for broad peaks
+    assert session.spectrum.processing.baseline_window == 1.0
+    panel.window.setValue(0.0)
+    assert session.spectrum.processing.baseline_window is None and panel.window.text() == "auto"
 
 
 def test_detection_tab_draws_the_peaks(viewer, compression_run):
@@ -367,3 +371,9 @@ def test_detection_tab_draws_the_peaks(viewer, compression_run):
     tab.visible.setChecked(True)
     window.actions.get("raw").trigger()
     assert len(window.spectrum.detected.data) == tab.table.rowCount()
+
+    from trxrd.services import analysis
+    tab.broad_fwhm.setValue(0.0)  # liquids: broad peaks count in the search
+    assert analysis.saved_settings(viewer.session.run).broad_fwhm is None and tab.broad_fwhm.text() == "jamais"
+    tab.broad_fwhm.setValue(0.8)
+    assert analysis.saved_settings(viewer.session.run).broad_fwhm == 0.8

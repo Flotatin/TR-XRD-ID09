@@ -150,7 +150,7 @@ trxrd/
 │       ├── actions.py          registre unique des QAction (menus, barre d'outils, raccourcis)
 │       ├── tasks.py            calculs longs dans un thread, résultat rendu au thread de l'interface
 │       └── app.py              assemblage : fenêtre + presenters + actions
-└── tests/                      224 tests ; data/ = scan TUTO, calibration, ancien fichier .CEDX d'exemple
+└── tests/                      227 tests ; data/ = scan TUTO, calibration, ancien fichier .CEDX d'exemple
 ```
 
 ## 5. Le format de fichier `trxrd-run` (HDF5)
@@ -167,7 +167,7 @@ Nom conseillé : `<dataset>_<scan>.trxrd.h5`, par exemple `water02_0001_scan0027
 ### 5.2 Arborescence
 
 ```
-/                                   NXroot   file_format="trxrd-run", format_version="1.0", creator
+/                                   NXroot   file_format="trxrd-run", format_version="1.1", creator
 └── entry                           NXentry  default → results (ou spectra)
     ├── title, note, created        texte
     ├── ui_state                    JSON libre (zones, préférences d'affichage du GUI)
@@ -186,7 +186,8 @@ Nom conseillé : `<dataset>_<scan>.trxrd.h5`, par exemple `water02_0001_scan0027
     │   ├── baseline  [n, npt]      fond SNIP (ligne NaN = non calculé)
     │   ├── model     [n, npt]      courbe ajustée totale, sans le fond (NaN = pas d'ajustement)
     │   ├── n_points, time [s], frame, label, fit_range [n, 2]
-    │   └── processing/             table : baseline_degree, filter_type, filter_p1, filter_p2
+    │   └── processing/             table : baseline_degree, filter_type, filter_p1, filter_p2,
+    │                               baseline_window (°, NaN = automatique ; depuis 1.1)
     ├── fits/
     │   ├── phases/                 une ligne par (spectre, phase) : spectrum, phase, state, a, a_err, b, b_err,
     │   │                           c, c_err, volume, volume_err, pressure, pressure_err, temperature, temperature_err
@@ -203,6 +204,8 @@ on écrit un fichier `.tmp`, puis on le renomme.
 
 **Versions.** `format_version` suit le schéma majeur.mineur. Un ajout compatible change le mineur. Un
 changement incompatible change le majeur, et `load_run` refuse alors le fichier avec un message clair.
+- 1.1 (novembre 2026) : colonne `baseline_window` du traitement, la fenêtre du fond SNIP, pour les pics
+  larges. Un fichier 1.0 se relit avec une fenêtre automatique, comme avant.
 
 ## 6. Traitements
 
@@ -225,6 +228,12 @@ L'ajustement se fait sur **l'intensité brute moins le fond, sans lissage**. Lis
 déplace son maximum ; sur nos essais, le lissage de l'ancien code biaisait P de −0,01 à −0,02 GPa, pour
 une incertitude annoncée de 0,002. Lisser corrèle aussi le bruit, et les erreurs sont alors sous-estimées.
 Le lissage ne sert donc qu'à la détection et à l'affichage. Le profil par défaut est **Pearson IV**.
+
+Seuls les points proches d'un pic entrent dans l'ajustement : à moins de 0,3° de son centre, ou d'une
+largeur à mi-hauteur pour un pic plus large (`FitOptions.local_fwhm`), afin que les queues d'un pic de
+liquide ou d'amorphe soient ajustées. Avec 1,5 largeur, des raies cristallines de 0,2 à 0,3° étaient touchées
+aussi, et la glace VI de Water05 passait de 0,029 à 0,041 GPa d'écart. Avec 1 largeur, Water05 reste à
+0,029 GPa pour les glaces et 0,169 GPa pour Sn.
 
 Les profils (`physics/profiles.py`) partagent la signature `f(x, center, height, width, *shape)`.
 `center` est la position du **maximum**, `height` sa valeur. Ce sont les conventions des anciens modèles
@@ -758,6 +767,19 @@ Ce qu'on a appris sur D2O_03_0001_scan0006 :
   laisse la raie (110) inexpliquée (glace VII à 0,01 GPa) coûte 2,18, contre 2,23 pour la bonne (5,91 GPa).
   En effet, le poids d'un pic sature à SNR = 10 : un pic de SNR 217 ne compte pas plus qu'un pic de SNR 10.
   À reprendre (PASSATION, P5).
+
+**Pics larges (liquide, amorphe)**, demandés par l'utilisateur pour étudier des liquides :
+- **Fond** (Traitement > Fond : fenêtre, en degrés, `Processing.baseline_window`, format 1.1). Avec des pics
+  larges à queues longues, la fenêtre automatique de SNIP (pybaselines) devient trop grande et le fond
+  plonge sous zéro par effet de bord. Sur des raies synthétiques de 0,94°, il descend à −3 800 pour un vrai
+  fond de 300. Une fenêtre un peu plus large que les pics (1°) le rétablit. Les bosses jusqu'à 2° de large
+  restent sinon au-dessus du fond automatique.
+- **Détection** (onglet Détection) : relever la largeur max (1,5° par défaut).
+- **Recherche des phases** (Détection > Pics larges ignorés au-delà de, `AnalysisSettings.broad_fwhm`) :
+  0,5° par défaut ; « jamais » fait compter tous les pics, pour identifier un liquide par ses pics larges.
+- **Ajustement** : la fenêtre suit la largeur de chaque pic (§6.2). Sur des raies de glace VII de 0,94°,
+  avec une fenêtre de fond de 1°, les largeurs ajustées tombent à 0,05° près et P à 0,01 GPa près. Avant,
+  la seconde raie sortait à 1,66°.
 
 **Ensuite** :
 - étape 3 : ajustement interactif (pics, phases, zones), gestion des phases, puis le reste

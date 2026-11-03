@@ -58,7 +58,7 @@ from trxrd.io.h5utils import (
 PathLike = Union[str, Path]
 
 FORMAT_NAME = "trxrd-run"
-FORMAT_VERSION = "1.0"
+FORMAT_VERSION = "1.1"  # 1.1: processing/baseline_window
 ENTRY = "entry"
 
 PHASE_FIT_FIELDS = (
@@ -218,8 +218,16 @@ def _write_spectra(entry: h5py.Group, spectra: List[Spectrum]) -> None:
             "filter_type": [s.processing.filter_type for s in spectra],
             "filter_p1": np.array([s.processing.filter_params[0] for s in spectra], dtype=float),
             "filter_p2": np.array([s.processing.filter_params[1] for s in spectra], dtype=float),
+            "baseline_window": np.array([np.nan if s.processing.baseline_window is None else s.processing.baseline_window
+                                         for s in spectra], dtype=float),
         },
     )
+
+
+def _window(processing: Dict[str, np.ndarray], i: int) -> Optional[float]:
+    """SNIP window of spectrum i (format 1.1); files 1.0 have none: automatic."""
+    values = processing.get("baseline_window")
+    return None if values is None or not np.isfinite(values[i]) else float(values[i])
 
 
 def _write_fits(entry: h5py.Group, spectra: List[Spectrum]) -> None:
@@ -437,6 +445,7 @@ def _read_spectra(group: h5py.Group) -> List[Spectrum]:
                     baseline_degree=int(proc["baseline_degree"][i]),
                     filter_type=str(proc["filter_type"][i]),
                     filter_params=(float(proc["filter_p1"][i]), float(proc["filter_p2"][i])),
+                    baseline_window=_window(proc, i),
                 ),
                 baseline=_row(baseline, i, n),
                 model=_row(model, i, n),

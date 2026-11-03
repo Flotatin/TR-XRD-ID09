@@ -51,6 +51,12 @@ class ProcessingPanel(QWidget):
         self.degree.setKeyboardTracking(False)
         self.degree.setRange(0, 200)
         self.degree.setToolTip("Lissage du fond SNIP : fenêtre de 5 × n points (0 : pas de lissage)")
+        self.window = _spin(2, 0.0, 20.0, 0.25)
+        self.window.setSuffix(" °")
+        self.window.setSpecialValueText("auto")
+        self.window.setToolTip("Le fond suit tout ce qui est plus large que cette fenêtre.\n"
+                               "auto : estimée par pybaselines ; elle échoue avec des pics larges (liquide,\n"
+                               "amorphe) : mettre alors un peu plus que leur largeur (1 à 2°).")
         self.filter = QComboBox()
         for key, label, _ in FILTERS:
             self.filter.addItem(label, key)
@@ -62,7 +68,7 @@ class ProcessingPanel(QWidget):
         self.message = QLabel("")
         self.message.setWordWrap(True)
         self.message.setStyleSheet("color: #8a5a00")
-        for box in (self.degree, self.p1, self.p2):
+        for box in (self.degree, self.window, self.p1, self.p2):
             box.valueChanged.connect(self._changed)
         self.filter.currentIndexChanged.connect(self._filter_chosen)
         self.all.clicked.connect(lambda: self.on_propagate and self.on_propagate("all"))
@@ -70,6 +76,7 @@ class ProcessingPanel(QWidget):
 
         form = QFormLayout()
         form.addRow("Fond (SNIP) : lissage", self.degree)
+        form.addRow("Fond : fenêtre", self.window)
         form.addRow("Filtre", self.filter)
         form.addRow(self.p1_label, self.p1)
         form.addRow(self.p2_label, self.p2)
@@ -100,7 +107,8 @@ class ProcessingPanel(QWidget):
             box.setEnabled(kind != "none")
 
     def processing(self) -> Processing:
-        return Processing(int(self.degree.value()), self.filter.currentData(), (self.p1.value(), self.p2.value()))
+        return Processing(int(self.degree.value()), self.filter.currentData(), (self.p1.value(), self.p2.value()),
+                          self.window.value() or None)
 
     def _filter_chosen(self, *_) -> None:
         kind = self.filter.currentData()
@@ -122,6 +130,7 @@ class ProcessingPanel(QWidget):
             self.filter.setCurrentIndex(max(self.filter.findData(processing.filter_type), 0))
             self._labels(self.filter.currentData())
             self.degree.setValue(int(processing.baseline_degree))
+            self.window.setValue(processing.baseline_window or 0.0)
             self.p1.setValue(float(processing.filter_params[0]))
             self.p2.setValue(float(processing.filter_params[1]))
             self.all.setText(f"Appliquer à tous les spectres ({count})")
@@ -155,10 +164,17 @@ class DetectionPanel(QWidget):
         self.noise_window = _spin(2, 0.2, 20.0, 0.25)
         self.noise_window.setSuffix(" °")
         self.noise_window.setToolTip("Fenêtre du bruit local et du niveau local (médiane glissante)")
+        self.broad_fwhm = _spin(2, 0.0, 10.0, 0.1)
+        self.broad_fwhm.setSuffix(" °")
+        self.broad_fwhm.setSpecialValueText("jamais")
+        self.broad_fwhm.setToolTip("Les pics plus larges n'expliquent rien et ne coûtent rien dans la recherche des\n"
+                                   "phases (bosse d'un liquide à côté des raies d'un cristal).\n"
+                                   "« jamais » : tous comptent, pour identifier un liquide par ses pics larges.")
         self.shoulders = QCheckBox("épaulements (pics sans maximum propre)")
         self.spectrum_filter = QCheckBox("sur le signal filtré du spectre (sinon Savitzky-Golay de 7 points)")
         for key, box in (("min_snr", self.min_snr), ("max_fwhm", self.max_fwhm), ("noise_window", self.noise_window)):
             box.valueChanged.connect(lambda value, key=key: self._option(key, float(value)))
+        self.broad_fwhm.valueChanged.connect(lambda value: self._option("broad_fwhm", float(value) or None))
         for key, box in (("shoulders", self.shoulders), ("spectrum_filter", self.spectrum_filter)):
             box.toggled.connect(lambda checked, key=key: self._option(key, bool(checked)))
         self.summary = QLabel("")
@@ -169,6 +185,7 @@ class DetectionPanel(QWidget):
         form.addRow("Seuil (σ du bruit)", self.min_snr)
         form.addRow("Largeur max", self.max_fwhm)
         form.addRow("Fenêtre du bruit", self.noise_window)
+        form.addRow("Pics larges ignorés au-delà de", self.broad_fwhm)
         layout = QVBoxLayout(self)
         layout.addWidget(self.visible)
         layout.addLayout(form)
@@ -176,7 +193,9 @@ class DetectionPanel(QWidget):
         layout.addWidget(self.spectrum_filter)
         layout.addWidget(_note("Réglages de l'analyse automatique (Ctrl+R), gardés dans le run. Sur le spectre : "
                                "vert, pic utilisé ; orange, trop large, ignoré ; gris, zone exclue ; "
-                               "triangle vide, épaulement ; pointillés, seuil."))
+                               "triangle vide, épaulement ; pointillés, seuil. Liquide ou amorphe : relever la "
+                               "largeur max, « jamais » pour les pics larges, et régler la fenêtre du fond "
+                               "(onglet Traitement)."))
         layout.addWidget(self.summary)
         layout.addWidget(self.table, 1)
 
@@ -190,6 +209,7 @@ class DetectionPanel(QWidget):
             self.min_snr.setValue(settings.min_snr)
             self.max_fwhm.setValue(settings.max_fwhm)
             self.noise_window.setValue(settings.noise_window)
+            self.broad_fwhm.setValue(settings.broad_fwhm or 0.0)
             self.shoulders.setChecked(settings.shoulders)
             self.spectrum_filter.setChecked(settings.spectrum_filter)
         finally:

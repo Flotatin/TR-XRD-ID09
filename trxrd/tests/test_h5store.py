@@ -92,6 +92,17 @@ def test_rejects_foreign_or_future_files(tmp_path):
         load_run(foreign)
 
 
+def test_files_of_version_1_0_have_an_automatic_background_window(tmp_path, sample_run):
+    path = save_run(sample_run, tmp_path / "run.trxrd.h5")
+    assert load_run(path).spectra[2].processing.baseline_window == 1.25  # format 1.1
+    with h5py.File(path, "a") as f:
+        f.attrs["format_version"] = "1.0"
+        table = f["entry/spectra/processing"]
+        del table["baseline_window"]
+        table.attrs["columns"] = [c for c in table.attrs["columns"] if c != "baseline_window"]
+    assert [s.processing.baseline_window for s in load_run(path).spectra] == [None] * len(sample_run)
+
+
 def test_numpy_string_names_are_written_as_plain_strings(tmp_path, sample_run):
     """Old files hold some names as numpy.str_, which HDF5 attributes refuse."""
     card = sample_run.phases.pop("H2O_Ice_VI")

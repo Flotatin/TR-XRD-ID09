@@ -219,6 +219,9 @@ class Processing:
     baseline_degree: int = 1
     filter_type: str = "svg"  # svg | fft | none
     filter_params: Tuple[float, float] = (9, 2)
+    # deg, largest SNIP window: the background follows everything broader. None: automatic, which fails with
+    # broad peaks (liquid, amorphous): set it a little wider than them
+    baseline_window: Optional[float] = None
 
 
 @dataclass

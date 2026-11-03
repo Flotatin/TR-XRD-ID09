@@ -30,9 +30,11 @@ def corrected(spectrum: Spectrum) -> Tuple[np.ndarray, np.ndarray]:
     return background.corrected(spectrum)
 
 
-def check(processing: Processing, points: int) -> None:
-    """ValueError, with a message for the user, when `processing` cannot be applied to `points` points."""
-    background.check(processing, points)
+def check(processing: Processing, spectrum: Spectrum) -> None:
+    """ValueError, with a message for the user, when `processing` cannot be applied to `spectrum`."""
+    x = np.asarray(spectrum.two_theta, dtype=float)
+    step = float(np.median(np.abs(np.diff(x)))) if x.size > 1 else None
+    background.check(processing, x.size, step)
 
 
 def set_processing(run: Run, indices: Iterable[int], processing: Processing) -> List[int]:
@@ -42,7 +44,7 @@ def set_processing(run: Run, indices: Iterable[int], processing: Processing) -> 
     """
     indices = list(indices)
     for index in indices:
-        check(processing, len(run.spectra[index].two_theta))
+        check(processing, run.spectra[index])
     for index in indices:
         spectrum = run.spectra[index]
         spectrum.processing = dataclasses.replace(processing)  # each spectrum its own copy

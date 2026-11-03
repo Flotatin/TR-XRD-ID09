@@ -25,7 +25,7 @@ from trxrd.gui.presenters.viewer import DisplaySettings
 from trxrd.services import analysis, treatment
 from trxrd.services.session import Event, Session
 
-DETECTION_OPTIONS = ("min_snr", "max_fwhm", "noise_window", "shoulders", "spectrum_filter")
+DETECTION_OPTIONS = ("min_snr", "max_fwhm", "noise_window", "broad_fwhm", "shoulders", "spectrum_filter")
 
 
 class ProcessingPresenter:

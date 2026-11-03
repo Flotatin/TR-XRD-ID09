@@ -51,6 +51,7 @@ Ne pas les remettre en cause sans lui en parler.
 | Versions | v1 = `cedapp`, v2 = `trxrd` ; à afficher clairement (README racine, `trxrd --version`) |
 | dP/dt moyen sur un intervalle | Pas besoin d'enregistrer l'intervalle ni ses résultats dans le run (novembre 2026) : la copie dans le presse-papiers suffit |
 | Finitions de l'interface | Avancer d'abord sur les fonctions ; on reviendra peaufiner à la fin (novembre 2026) |
+| Liquides | Ils seront étudiés par moments : les pics larges doivent pouvoir être détectés, compter dans la recherche et être ajustés (seuils réglables, fenêtre du fond, fenêtre d'ajustement selon la largeur ; novembre 2026) |
 | Affichage du spectre et détection | Montrer par défaut le signal filtré, fond soustrait, le brut seulement sur demande ; chercher les pics sur ce signal filtré (novembre 2026). L'ajustement reste sur le brut moins le fond (§5, point 1) |
 
 ## 3. Ce qui est fait
@@ -70,8 +71,8 @@ Ne pas les remettre en cause sans lui en parler.
 
 ### 3.2 Par fonctionnalité
 
-Tout est testé : `python -m pytest trxrd` compte 224 tests. Les 7 comparaisons numériques avec la v1 sont
-ignorées quand la v1 n'est pas importable, par exemple dans `.venv-v2`, qui n'a pas PyQt5 : 217 tests
+Tout est testé : `python -m pytest trxrd` compte 227 tests. Les 7 comparaisons numériques avec la v1 sont
+ignorées quand la v1 n'est pas importable, par exemple dans `.venv-v2`, qui n'a pas PyQt5 : 220 tests
 passent alors.
 
 | Fonctionnalité | Où | État / preuve |
@@ -179,7 +180,8 @@ run par run, avec une passe sans exclusion puis une passe avec les zones fixes r
 16. **Le suivi doit vérifier ce qui reste inexpliqué.** Une raie forte jamais attribuée est « appariée »
     d'un spectre au suivant, et une solution incomplète pouvait alors durer des centaines de spectres.
 17. **Une bosse large n'est pas une raie.** Au-delà de 0,5° de largeur (liquide, amorphe), un pic n'explique
-    rien et ne coûte rien dans la recherche.
+    rien et ne coûte rien dans la recherche. Ce seuil est réglable (« jamais » pour un liquide qu'on veut
+    identifier par ses pics larges).
 18. **Température.** Certains runs ont été analysés à 370-490 K. Comparer à 298 K faussait la glace VII
     de −0,5 GPa.
 19. **L'analyse manuelle n'est pas la vérité.** Avant de corriger un réglage, vérifier la référence :
@@ -200,6 +202,13 @@ run par run, avec une passe sans exclusion puis une passe avec les zones fixes r
 22. **dP/dt moyen : la pente d'une droite n'est pas ΔP/Δt** quand P(t) est courbe. Sur tout Water05 scan 9,
     elles valent −29 et −24 GPa/ms. On affiche les deux. La moyenne de toutes les phases, comme dans la v1,
     mélange l'échantillon et le marqueur : on calcule une courbe par échantillon (famille de phases).
+23. **Vérifier la calibration sur une phase connue.** Un `.poni` faux de 4,4 mm (D2O_03, `test.poni`)
+    décale toutes les pressions de plusieurs GPa sans rien casser d'autre. La glace Ih décompressée doit
+    sortir vers 0 GPa.
+24. **Le fond SNIP automatique échoue avec des pics larges.** Sa fenêtre devient trop grande, et le fond
+    plonge sous zéro par effet de bord (−3 800 pour 300 sur des raies de 0,94°). Il faut alors régler la
+    fenêtre du fond, un peu plus large que les pics. La fenêtre d'ajustement doit aussi suivre leur
+    largeur, sans toucher les raies cristallines : une largeur à mi-hauteur, pas 1,5.
 
 ## 6. Reste à faire (par priorité)
 
@@ -243,6 +252,9 @@ Seul `trxrd/gui/` a le droit d'importer PySide6/pyqtgraph (règle vérifiée par
   est faux de 4,4 mm sur la distance (glace Ih décompressée à −0,55 GPa). Savoir sur quelle image et avec
   quels anneaux il a été fait ; ajouter une vérification (glace Ih ou calibrant intégré, écart des raies) ;
 - [ ] traitement de tous les spectres dans un thread (3,2 s pour 1 600 spectres, l'interface est bloquée) ;
+- [x] pics larges (liquides) : fenêtre du fond SNIP réglable (format 1.1), largeur max de la détection,
+  seuil des pics larges de la recherche (« jamais »), fenêtre d'ajustement qui suit la largeur des pics.
+  Reste à essayer sur un vrai liquide (Ga liquide de janvier 2026, fiche `Ga_liq`) ;
 - [x] lancer l'analyse automatique depuis l'interface (Ctrl+R) : phases candidates, spectres, plage de P,
   zones exclues (gardées dans le run), pics fixes proposés puis exclus en relançant, avec progression et arrêt ;
 - [ ] onglet « masque » de la calibration : dessiner ou modifier un masque, comme dans Dioptas. Pour

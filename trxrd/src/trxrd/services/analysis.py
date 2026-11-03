@@ -51,6 +51,9 @@ class AnalysisSettings:
     max_fwhm: float = 1.5  # deg: wider bumps are not detected (background, amorphous)
     noise_window: float = 1.5  # deg, window of the local noise and level of the detection
     shoulders: bool = True  # detect shoulders (peaks without their own maximum)
+    # peaks broader than this (deg) neither explain nor cost anything in the phase search (a liquid or amorphous
+    # hump next to crystalline lines); None: every peak counts (to identify a liquid from its broad peaks)
+    broad_fwhm: Optional[float] = 0.5
     # maxima searched on the filtered signal of the spectrum (what is shown) rather than on a Savitzky-Golay
     # filter of 7 points: 805 instead of 797 spectra with the phases of the manual analysis on 29 runs of
     # January 2026 (docs/ARCHITECTURE.md §6.5)
@@ -70,6 +73,7 @@ class AnalysisSettings:
             search=SearchOptions(
                 pressure_range=tuple(self.pressure_range), tolerance=self.tolerance, max_phases=self.max_phases,
                 max_pressure_step=self.max_step, max_pressure_spread=self.max_spread, temperature=temperature,
+                max_fwhm=self.broad_fwhm or None,
             ),
             window=tuple(self.window) if self.window is not None else None,
             exclude=[tuple(zone) for zone in self.exclude] or None,

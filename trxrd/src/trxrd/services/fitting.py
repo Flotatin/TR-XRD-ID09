@@ -10,7 +10,7 @@ from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 import numpy as np
 
 from trxrd.domain import FitState, Peak, PhaseCard, PhaseFit, Run, Spectrum
-from trxrd.physics import eos
+from trxrd.physics import eos, profiles
 from trxrd.processing import background
 from trxrd.processing.cell import Reflex, pressure_with_error, refine_cell, sigma_two_theta_from_distance
 from trxrd.processing.peakfit import fit_peaks, total_curve
@@ -28,6 +28,8 @@ class FitOptions:
     min_intensity: float = 0.0  # reflections of the card weaker than this (%) are not used
     temperature: float = eos.T_REF
     local_window: Optional[float] = 0.3  # deg: only points this close to a peak are fitted (None: whole range)
+    # ...or this many FWHM of the peak when it is broader (liquid, amorphous, strained): its tails are fitted too
+    local_fwhm: float = 1.0
     exclude: Optional[Sequence[Tuple[float, float]]] = None  # 2θ zones left out of the fit (gasket, diamond...)
     max_center_err: float = 0.1  # deg: peaks known worse than this do not enter the cell refinement
 
@@ -102,11 +104,18 @@ def _update_phase(run: Run, phase_fit: PhaseFit, options: FitOptions) -> None:
     phase_fit.temperature = temperature
 
 
-def fit_mask(x: np.ndarray, window: Tuple[float, float], centers: Sequence[float], options: FitOptions) -> np.ndarray:
-    """Points used by the fit: inside the window, near a peak, outside the excluded zones."""
+def fit_mask(x: np.ndarray, window: Tuple[float, float], centers: Sequence[float], options: FitOptions,
+             fwhms: Optional[Sequence[float]] = None) -> np.ndarray:
+    """Points used by the fit: inside the window, near a peak, outside the excluded zones.
+
+    "Near" is within `local_window` of the centre, or `local_fwhm` FWHM for a broader peak.
+    """
     mask = (x >= window[0]) & (x <= window[1])
     if options.local_window and len(centers):
-        near = np.min(np.abs(x[:, None] - np.asarray(centers)[None, :]), axis=1) <= options.local_window
+        reach = np.full(len(centers), float(options.local_window))
+        if fwhms is not None:
+            reach = np.maximum(reach, options.local_fwhm * np.nan_to_num(np.asarray(fwhms, dtype=float)))
+        near = np.any(np.abs(x[:, None] - np.asarray(centers)[None, :]) <= reach[None, :], axis=1)
         mask &= near
     for lo, hi in options.exclude or ():
         mask &= ~((x >= lo) & (x <= hi))
@@ -155,7 +164,8 @@ def fit_spectrum(
         p for p in extra_peaks
         if window[0] <= p.center <= window[1] and centers and min(abs(p.center - c) for c in centers) <= reach
     ]
-    mask = fit_mask(x, window, centers + [p.center for p in extra], options)
+    fwhms = [profiles.fwhm(p.model, p.width, p.shape) for p in peaks + extra]
+    mask = fit_mask(x, window, centers + [p.center for p in extra], options, fwhms)
     result = fit_peaks(x[mask], y[mask], peaks + extra, center_tolerance=options.center_tolerance)
     if not result.success:
         logger.warning("Spectrum %d: %s", index, result.message)
