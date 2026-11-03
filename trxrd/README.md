@@ -18,7 +18,7 @@ Un environnement virtuel dédié, séparé de celui de la v1 : PyQt5 (v1) et PyS
 python -m venv .venv-v2
 .venv-v2\Scripts\activate                    # Windows ; Linux/macOS : source .venv-v2/bin/activate
 pip install -e "./trxrd[notebook,gui,dev]"  # depuis la racine du dépôt
-python -m pytest trxrd                      # 144 tests
+python -m pytest trxrd                      # 170 tests
 ```
 
 ## Interface graphique
@@ -35,6 +35,11 @@ Le lecteur (étape 1) ouvre un `.trxrd.h5` ou un ancien `.CEDX`, et affiche :
 - les tableaux des phases et des pics.
 
 L'axe peut être en 2θ, Q ou d. Les raccourcis sont listés avec F1.
+
+L'interface sait aussi :
+- créer des runs depuis `RAW_DATA` (Ctrl+N) : choisir les scans, la calibration et les phases ;
+- afficher sous le spectre le cake ou l'image brute du spectre courant (Ctrl+K) ;
+- calibrer le détecteur sur une image de LaB6 ou de CeO2, à la Dioptas (Ctrl+L).
 
 ## Ligne de commande
 

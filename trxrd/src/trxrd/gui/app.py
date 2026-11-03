@@ -20,7 +20,7 @@ from trxrd.gui.tasks import ThreadRunner
 from trxrd.gui.views.main_window import MainWindow, application
 from trxrd.services.session import Session
 
-FILE, NAVIGATION, VIEW, HELP = "&Fichier", "&Navigation", "&Affichage", "&Aide"
+FILE, NAVIGATION, VIEW, TOOLS, HELP = "&Fichier", "&Navigation", "&Affichage", "&Outils", "&Aide"
 
 
 @dataclass
@@ -75,6 +75,8 @@ def create_viewer(session: Optional[Session] = None, runner=None) -> Viewer:
     add("cake", VIEW, "&Intégration sous le spectre (cake)", toggle_cake, ["Ctrl+K"], checkable=True,
         tip="Cake (2θ × azimut) ou image brute du spectre courant, calculé depuis les images de RAW_DATA")
     window.actions.get("cake").setChecked(True)
+    add("calibration", TOOLS, "&Calibration du détecteur…", window.show_calibration, ["Ctrl+L"],
+        "Calibrer la géométrie sur une image de LaB6 / CeO2 et enregistrer le .poni")
     add("shortcuts", HELP, "&Raccourcis clavier", window.show_shortcuts, ["F1"])
     window.build_menus(toolbar=("new_run", "open", "save", "|", "previous", "next"))
     main.update()  # the unit actions exist now

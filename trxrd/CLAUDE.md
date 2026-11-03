@@ -73,9 +73,11 @@ values). Never commit the user's data (raw scans, .CEDX) to the repository.
 | Automatic analysis with peak tracking | `services/identification.py` |
 | GUI state (Qt-free) | `services/session.py` |
 | GUI (`trxrd-gui`): display data and presenters without Qt, passive views, actions, threads | `gui/presenters/`, `gui/views/`, `gui/actions.py`, `gui/tasks.py`, `gui/app.py` |
+| Raw data browsing, raw image and cake of a spectrum | `services/raw_data.py`, `services/images.py` |
+| Detector calibration (LaB6/CeO2, no pyFAI.goniometer: silx DLL blocked on Windows) | `processing/geometry.py`, `services/calibration.py` |
 
 ## Next steps
 
-See `docs/PASSATION.md` §6 (P1: GUI, the viewer is done, next: run creation and automatic analysis
-with progress, then interactive fitting; P2: remaining validation items; P4: v1 features not ported yet;
+See `docs/PASSATION.md` §6 (P1: GUI, viewer + run creation + cake + calibration done, next: automatic
+analysis from the GUI, mask editing, then interactive fitting and phase management; P2: remaining validation items; P4: v1 features not ported yet;
 P5: algorithm ideas; P6: repository split).

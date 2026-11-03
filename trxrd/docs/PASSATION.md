@@ -62,13 +62,13 @@ Ne pas les remettre en cause sans lui en parler.
 | `8cc1c8c` | Validation sur un run réel (Water05) et cinq corrections qui en découlent ; nommage v1 / v2 |
 | `e135918` | Documentation : commit de référence de la v1 |
 | `68a1b7c` | Suivi des pics ; `trxrd compare` ; `CLAUDE.md` ; environnement virtuel séparé |
-| branche `gui-viewer` | Interface, étape 1 (le lecteur) : `trxrd-gui`, presenters sans Qt, registre d'actions, ouverture en arrière-plan (`Session.read` / `attach`) |
+| branche `gui-viewer` | Interface :<br>- étape 1, le lecteur : `trxrd-gui`, presenters sans Qt, registre d'actions, ouverture en arrière-plan (`Session.read` / `attach`) ;<br>- étape 2 : nouveaux runs depuis RAW_DATA, cake sous le spectre, calibration à la Dioptas validée sur le LaB6 réel |
 | branche `p2-validation-2026` | Validation sur les 143 runs de janvier 2026 (61 % → 81 % de spectres aux mêmes phases) : conversion des runs Jungfrau « continu », `Vmin` de la v1 non repris, coût d'apparition d'une famille nul, suivi interrompu par un pic fort inexpliqué, pics larges ignorés, tri des pics fixes, `--temperature`, familles sans casse, CLI sous Windows |
 
 ### 3.2 Par fonctionnalité
 
-Tout est testé : `python -m pytest trxrd` compte 144 tests. Les 7 comparaisons numériques avec la v1 sont
-ignorées quand la v1 n'est pas importable, par exemple dans `.venv-v2`, qui n'a pas PyQt5 : 137 tests
+Tout est testé : `python -m pytest trxrd` compte 170 tests. Les 7 comparaisons numériques avec la v1 sont
+ignorées quand la v1 n'est pas importable, par exemple dans `.venv-v2`, qui n'a pas PyQt5 : 163 tests
 passent alors.
 
 | Fonctionnalité | Où | État / preuve |
@@ -91,6 +91,9 @@ passent alors.
 | Construction d'un run depuis un scan brut | `services/run_builder.py` | ✅ (fichiers HDF5 uniquement) |
 | État de l'application pour l'interface | `services/session.py` | ✅ (sans Qt) |
 | Interface, étape 1 : le lecteur (`trxrd-gui`) | `gui/` | ✅ presenters testés avec de fausses vues, fenêtre testée hors écran ; essayée sur Water05 scan 9 et Water01_scan0074 (1 600 spectres) |
+| Parcours de RAW_DATA, nouveaux runs depuis l'interface | `services/raw_data.py`, `run_builder.build_and_save`, `gui/views/new_run.py` | ✅ 43 jeux de données de janvier 2026 lus en 0,7 s ; scan 9 de Water05 intégré en 2 s, temps identiques au `.CEDX` |
+| Cake / image brute sous le spectre | `services/images.py`, `CakePresenter` | ✅ image brute d'un `.CEDX` retrouvée par le nom du run ; 0,03 s par spectre |
+| Calibration du détecteur (LaB6 / CeO2) | `processing/geometry.py`, `services/calibration.py`, `gui/views/calibration.py` | ✅ synthétique : géométrie retrouvée à 0,01° ; LaB6 réel : distance à 0,3 mm de Dioptas, pics à ≤ 0,035° |
 | Comparaison avec une analyse de référence | `services/validation.py` | ✅ |
 | Lecture en notebook (`XRDRun` : summary, peaks, pressure, tracés en 2θ/Q/d, `find`) | `notebook.py` | ✅ |
 | CLI `trxrd build / auto / compare / convert / info / --version` | `cli.py` | ✅ |
@@ -175,6 +178,16 @@ run par run, avec une passe sans exclusion puis une passe avec les zones fixes r
     - pressions copiées d'un spectre au suivant ;
     - phases mal nommées ;
     - cohérence des pressions de Sn et de la glace dans une même cellule.
+20. **Calibration avec le centre du faisceau hors du détecteur** (Jungfrau 1M à ID09) : on ne voit
+    qu'environ 80° d'azimut de chaque anneau. La distance, le centre et l'inclinaison se compensent :
+    - affiner par étapes, rotations fixées d'abord ;
+    - juger sur la position des pics intégrés, pas seulement sur l'écart quadratique (plusieurs solutions
+      ont le même) ;
+    - le LaB6 est granuleux : prendre le centroïde du profil moyen par secteur, et non le pixel le plus
+      brillant.
+21. **Windows bloque `silx.image.marchingsquares`** (contrôle d'application), donc `pyFAI.goniometer` :
+    ne pas en dépendre. `pyFAI.geometryRefinement`, `calibrant` et `massif` restent utilisables.
+    `twoThetaArray` et `chiArray` sont dépréciés : utiliser `center_array(unit=...)`.
 
 ## 6. Reste à faire (par priorité)
 
@@ -194,17 +207,24 @@ Seul `trxrd/gui/` a le droit d'importer PySide6/pyqtgraph (règle vérifiée par
 - [x] tables des phases et des pics du spectre courant ;
 - [x] fenêtre des raccourcis (F1), confirmation avant de perdre des modifications.
 
+Étape 2, première partie (fait, branche `gui-viewer`) :
+- [x] nouveau run depuis RAW_DATA (Ctrl+N) : jeu de données, scans du fichier maître, calibration,
+  phases, dossier ; intégration en arrière-plan avec progression et arrêt ;
+- [x] cake (2θ × azimut) ou image brute du spectre courant sous le spectre, aligné sur son axe (Ctrl+K) ;
+- [x] calibration à la Dioptas (Ctrl+L, ou « Calibrer… » à la création d'un run) : image du calibrant,
+  LaB6 / CeO2, départ `.poni` ou estimation, clic sur deux anneaux, calibration, `.poni` enregistré ;
+- [ ] lancer l'analyse automatique (`auto_analyse`) depuis l'interface : phases candidates, plage de P,
+  zones exclues, pics fixes signalés, avec progression ;
+- [ ] onglet « masque » de la calibration : dessiner ou modifier un masque, comme dans Dioptas. Pour
+  l'instant, on charge celui de Dioptas.
+
 À reprendre selon l'usage de l'utilisateur :
-- la voie « piézo » de la v1 : il faut confirmer quelle voie de l'oscilloscope l'est ; la première voie qui
-  n'est pas le trigger est montrée par défaut ;
+- la voie « piézo » : `ch6` (`Channel3`) varie de 0 à 7,4 V, c'est probablement la consigne du piézo. Il est
+  montré par défaut, mais il faut le confirmer avec l'utilisateur. Le rôle de `ch2` est inconnu ;
 - des icônes pour la barre d'outils ;
 - le zoom de la carte, qui revient à la vue complète à chaque modification du run.
 
-Étape 2 : lancer depuis l'interface `trxrd build` (scan + calibration), `trxrd auto` (phases candidates,
-plage de P, zones exclues, pics fixes signalés) et le suivi, avec une barre de progression et la
-possibilité d'arrêter.
-
-Étape 3, l'ajustement interactif (fonctions de la v1 à reprendre, d'après ses raccourcis) :
+Étape 3, l'ajustement interactif et la gestion des phases (demandés ensuite par l'utilisateur) (fonctions de la v1 à reprendre, d'après ses raccourcis) :
 - [ ] ajouter / retirer une phase sur un spectre, à une P de départ ; déplacer les raies attendues avec P ;
 - [ ] ajouter, remplacer, confirmer ou supprimer un pic à la souris ; annuler (undo) ;
 - [ ] « fit total » d'un spectre, puis « fit all » d'une plage de spectres (`fit_spectra`, avec suivi) ;

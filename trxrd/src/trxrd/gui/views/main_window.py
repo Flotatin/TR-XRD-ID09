@@ -165,6 +165,13 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------ help, closing
 
+    def show_calibration(self) -> None:
+        from trxrd.gui.views.calibration import calibrate
+
+        chosen = calibrate(self)
+        if chosen is not None:
+            self.statusBar().showMessage(f"Calibration enregistrée : {chosen[0]}", 10000)
+
     def show_shortcuts(self) -> None:
         dialog = QDialog(self)
         dialog.setWindowTitle("Raccourcis clavier")

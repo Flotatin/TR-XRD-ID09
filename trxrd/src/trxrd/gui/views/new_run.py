@@ -77,8 +77,8 @@ class NewRunDialog(QDialog):
             box.setSuffix(" °")
             box.setValue(float(self._get(key, default)))
         self.calibrate = QPushButton("Calibrer…")
-        self.calibrate.setToolTip("Calibration sur une image de LaB6 / CeO2 (à venir)")
-        self.calibrate.setEnabled(False)
+        self.calibrate.setToolTip("Calibration sur une image de LaB6 / CeO2, comme dans Dioptas")
+        self.calibrate.clicked.connect(self._calibrate)
         tth = QWidget()
         tth_layout = QHBoxLayout(tth)
         tth_layout.setContentsMargins(0, 0, 0, 0)
@@ -174,6 +174,15 @@ class NewRunDialog(QDialog):
         if folder:
             self.folder.setText(folder)
             self._update_ok()
+
+    def _calibrate(self) -> None:
+        from trxrd.gui.views.calibration import calibrate
+
+        chosen = calibrate(self, self.poni.text() or None, self.mask.text() or None)
+        if chosen is not None:
+            self.poni.setText(chosen[0])
+            if chosen[1]:
+                self.mask.setText(chosen[1])
 
     def _add_phase_folder(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Dossier de fiches .jcpds", "")

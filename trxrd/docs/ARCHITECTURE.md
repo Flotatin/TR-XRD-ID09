@@ -123,22 +123,26 @@ trxrd/
 │   │   ├── peakfit.py          ✅ ajustement simultané des pics (curve_fit)
 │   │   ├── cell.py             ✅ affinement de maille → V → P, avec incertitudes
 │   │   ├── peaks.py            ✅ détection des pics (bruit local, épaulements)
-│   │   └── phase_search.py     ✅ quelles phases, à quelles pressions (recherche déterministe)
+│   │   ├── phase_search.py     ✅ quelles phases, à quelles pressions (recherche déterministe)
+│   │   └── geometry.py         ✅ calibration du détecteur sur LaB6 / CeO2 (suivi d'anneau, affinement pyFAI)
 │   ├── services/
 │   │   ├── run_builder.py      ✅ scan brut → Run (intégration, fond, oscilloscope, base de temps)
 │   │   ├── fitting.py          ✅ ajuster un spectre ou une série (en suivant l'évolution)
 │   │   ├── identification.py   ✅ analyse automatique : détection → phases → ajustement → P, suivi des pics
 │   │   ├── validation.py       ✅ comparaison avec une analyse de référence (`trxrd compare`)
+│   │   ├── raw_data.py         ✅ parcours de RAW_DATA (jeux de données, scans du fichier maître), scan brut d'un run
+│   │   ├── images.py           ✅ image brute et cake (2θ × azimut) d'un spectre
+│   │   ├── calibration.py      ✅ calibration pas à pas (image, clics, affinement, .poni)
 │   │   └── session.py          ✅ état de l'application pour le GUI (run courant, sélection, événements)
 │   ├── notebook.py             ✅ XRDRun : lecture seule pour notebooks
 │   ├── cli.py                  ✅ trxrd build | auto | compare | convert | info
 │   └── gui/                    ✅ lecteur PySide6 + pyqtgraph (§9) : `trxrd-gui`
-│       ├── presenters/         display.py (données affichées) et viewer.py (presenters), sans Qt
-│       ├── views/              plots.py (spectre, P(t), carte), panels.py (tableaux, navigateur), main_window.py
+│       ├── presenters/         display.py (données affichées), viewer.py, calibration.py (presenters), sans Qt
+│       ├── views/              plots.py (spectre, cake, P(t), carte), panels.py, new_run.py, calibration.py, main_window.py
 │       ├── actions.py          registre unique des QAction (menus, barre d'outils, raccourcis)
 │       ├── tasks.py            calculs longs dans un thread, résultat rendu au thread de l'interface
 │       └── app.py              assemblage : fenêtre + presenters + actions
-└── tests/                      144 tests ; data/ = scan TUTO, calibration, ancien fichier .CEDX d'exemple
+└── tests/                      170 tests ; data/ = scan TUTO, calibration, ancien fichier .CEDX d'exemple
 ```
 
 ## 5. Le format de fichier `trxrd-run` (HDF5)
@@ -531,9 +535,65 @@ Architecture **MVP** au-dessus de `services.Session` :
 - un clic sur P(t) ou sur la carte sélectionne le spectre ;
 - avant de fermer un run modifié ou de quitter, l'interface demande confirmation.
 
+**Étape 2, première partie (novembre 2026)** :
+- **Nouveau run depuis RAW_DATA** (Ctrl+N). Le dialogue lit la structure ID09
+  `RAW_DATA/<échantillon>/<échantillon>_0001/` : le fichier maître `<échantillon>_0001.h5` (une entrée par
+  scan, avec la commande BLISS, le nombre d'images et l'oscilloscope) et les dossiers `scanNNNN/` (images).
+  On y choisit :
+  - un jeu de données et un ou plusieurs scans ;
+  - la calibration (`.poni` + masque, ou « Calibrer… ») et la plage 2θ ;
+  - les fiches de phase et le dossier de sortie.
+
+  L'intégration tourne dans un thread, avec une barre de progression et un bouton « Arrêter ». Le dernier
+  run est ouvert ensuite. Les champs sont gardés d'une session à l'autre.
+- **Oscilloscope** : `ch5` est le trigger (`Channel2` dans la v1), `ch6` est probablement la consigne du
+  piézo (0-7,4 V, `Channel3`). `ch2` est lue quand elle existe. Toutes les voies ont la même base de temps :
+  `ch6_time` est décalé de 19 ns, pour un pas de 160 ns.
+- **Intégration sous le spectre** (Ctrl+K), comme dans la v1 : le cake (2θ × azimut, pyFAI `integrate2d`)
+  ou l'image brute du spectre courant, sur le même axe x que le spectre. Les anneaux tombent ainsi sous les
+  traits des phases. Le Jungfrau 1M ne voit qu'un secteur d'environ 140° : seul ce secteur est montré, d'un
+  seul tenant. Le calcul se fait en arrière-plan (0,9 s la première fois, puis 0,03 s par spectre), et seule
+  la dernière demande est affichée. L'image brute d'un ancien `.CEDX` est retrouvée par le nom du run dans
+  le `RAW_DATA` voisin, car la v1 n'a souvent pas gardé son chemin.
+- **Calibration** (Outils, Ctrl+L, ou « Calibrer… » dans le dialogue de création), à la Dioptas :
+  1. charger l'image du calibrant (moyenne de la pile HDF5) et le masque ;
+  2. choisir LaB6 ou CeO2 et l'énergie ;
+  3. partir d'un `.poni` ou d'une estimation (distance, centre du faisceau, qui peut être hors du
+     détecteur) ;
+  4. choisir un numéro d'anneau et cliquer dessus ; recommencer sur un deuxième anneau ;
+  5. « Calibrer ».
+
+  Le moteur (`processing/geometry.py`) :
+  - **suit l'anneau** secteur par secteur depuis le clic, en recentrant la fenêtre sur le pic précédent :
+    l'anneau peut s'écarter de la géométrie de départ ;
+  - prend dans chaque secteur de 1° le **centroïde du profil moyen** I(2θ), ce qui résiste aux anneaux
+    granuleux ;
+  - **affine par étapes** avec `GeometryRefinement` de pyFAI : d'abord rotations fixées, puis libérées sur
+    une fenêtre étroite. Avec un centre hors du détecteur, la distance, le centre et l'inclinaison sont très
+    corrélés ;
+  - enregistre le `.poni`, qui sert directement à créer les runs.
+
+  Validation sur l'image réelle de LaB6 (`LaB6_ddac2`, scan 3), comparée au `.poni` de Dioptas
+  (`calib_ddac2_correct.poni`), avec quatre départs :
+  - le `.poni` de Dioptas ;
+  - Dioptas avec la distance +5 % et le centre +10 px ;
+  - Dioptas avec la distance −8 % et le centre −15 px ;
+  - une estimation grossière (160 mm, faisceau en (1 200 ; 500)), avec deux clics.
+
+  Résultats :
+  - distance de 164,9 à 165,4 mm, contre 165,2 mm pour Dioptas ;
+  - centre à ±1 px de celui de Dioptas ;
+  - pics de LaB6 intégrés à ≤ 0,035° des raies sur les cinq premières, comme avec la géométrie de Dioptas ;
+  - environ 2,5 s.
+
+  Les inclinaisons diffèrent de celles de Dioptas dans une direction que ces données ne contraignent pas. La
+  dispersion de 0,03° vient des grains du LaB6. `pyFAI.goniometer` n'est pas utilisé : Windows (contrôle
+  d'application) bloque une bibliothèque de silx dont il dépend.
+
 **Ensuite** :
-- étape 2 : création d'un run depuis un scan, et analyse automatique avec barre de progression ;
-- étape 3 : ajustement interactif (pics, phases, zones), puis le reste (`docs/PASSATION.md` §6, P1).
+- étape 2 (suite) : lancer l'analyse automatique depuis l'interface, avec une barre de progression ;
+- étape 3 : ajustement interactif (pics, phases, zones), gestion des phases, puis le reste
+  (`docs/PASSATION.md` §6, P1).
 
 ## 10. Séparation en deux dépôts
 
