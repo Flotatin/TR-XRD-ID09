@@ -151,7 +151,7 @@ trxrd/
 │       ├── actions.py          registre unique des QAction (menus, barre d'outils, raccourcis)
 │       ├── tasks.py            calculs longs dans un thread, résultat rendu au thread de l'interface
 │       └── app.py              assemblage : fenêtre + presenters + actions
-└── tests/                      240 tests ; data/ = scan TUTO, calibration, ancien fichier .CEDX d'exemple
+└── tests/                      241 tests ; data/ = scan TUTO, calibration, ancien fichier .CEDX d'exemple
 ```
 
 ## 5. Le format de fichier `trxrd-run` (HDF5)
@@ -741,6 +741,11 @@ sur D2O_03_0001_scan0006 ; `services/treatment.py`, `gui/presenters/treatment.py
 - **Affichage** : le spectre est montré **filtré, fond soustrait**, le signal où l'on cherche les pics. Le
   signal brut avec son fond s'affiche à la demande (Affichage > Signal brut, Ctrl+B). La courbe ajustée
   suit : le modèle seul, ou le modèle plus le fond.
+- **Raies attendues** : un bandeau sous le spectre, une ligne par phase, comme sous un affinement de Rietveld,
+  avec sa propre échelle verticale : il ne partage que l'axe des x. Les traits y restent visibles quand on zoome
+  sur un petit pic ; dans la v2 d'origine, ils étaient en coordonnées d'intensité, sous la courbe, et sortaient
+  du cadre (demande de l'utilisateur). De fins traits verticaux montrent aussi les raies de plus de 5 % à
+  travers le spectre (Affichage > Raies sur le spectre, Ctrl+G).
 - **Onglet Traitement** : lissage du fond SNIP et filtre (Savitzky-Golay, FFT ou aucun) du spectre courant.
   Un changement s'applique tout de suite à ce spectre (au cas par cas). On le propage ensuite à tous les
   spectres, ou à la sélection de la liste (Maj + clic, Ctrl + clic). Les paramètres impossibles (fenêtre

@@ -62,6 +62,7 @@ class Lines:
     intensity: np.ndarray  # relative intensity of the card (%)
     labels: List[str]  # "hkl" of each line
     pressure: float
+    short: str = ""  # short name of the phase, beside its row of ticks
 
 
 @dataclass
@@ -97,6 +98,7 @@ def expected_lines(run: Run, spectrum: Spectrum, unit: str, min_intensity: float
             intensity=np.array([card.reflections[k].intensity for k in keep], dtype=float),
             labels=[card.reflections[k].label for k in keep],
             pressure=float(fit.pressure),
+            short=_short(fit.phase),
         ))
     return out
 

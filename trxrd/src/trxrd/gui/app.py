@@ -93,6 +93,9 @@ def create_viewer(session: Optional[Session] = None, runner=None) -> Viewer:
     add("raw", VIEW, "Signal &brut (avec le fond)", lambda: settings.set_raw(window.actions.get("raw").isChecked()),
         ["Ctrl+B"], checkable=True,
         tip="Par défaut le spectre est montré filtré, fond soustrait : c'est sur ce signal qu'on cherche les pics")
+    add("guides", VIEW, "Raies sur le spec&tre", lambda: window.spectrum.set_guides(window.actions.get("guides").isChecked()),
+        ["Ctrl+G"], checkable=True, tip="Traits verticaux des raies attendues à travers le spectre, à tout zoom")
+    window.actions.get("guides").setChecked(True)
     add("cake", VIEW, "&Intégration sous le spectre (cake)", toggle_cake, ["Ctrl+K"], checkable=True,
         tip="Cake (2θ × azimut) ou image brute du spectre courant, calculé depuis les images de RAW_DATA")
     window.actions.get("cake").setChecked(True)

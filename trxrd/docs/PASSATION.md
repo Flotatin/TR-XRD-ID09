@@ -71,8 +71,8 @@ Ne pas les remettre en cause sans lui en parler.
 
 ### 3.2 Par fonctionnalité
 
-Tout est testé : `python -m pytest trxrd` compte 240 tests. Les 7 comparaisons numériques avec la v1 sont
-ignorées quand la v1 n'est pas importable, par exemple dans `.venv-v2`, qui n'a pas PyQt5 : 233 tests
+Tout est testé : `python -m pytest trxrd` compte 241 tests. Les 7 comparaisons numériques avec la v1 sont
+ignorées quand la v1 n'est pas importable, par exemple dans `.venv-v2`, qui n'a pas PyQt5 : 234 tests
 passent alors.
 
 | Fonctionnalité | Où | État / preuve |
@@ -223,7 +223,8 @@ Seul `trxrd/gui/` a le droit d'importer PySide6/pyqtgraph (règle vérifiée par
 Étape 1, le lecteur (fait, branche `gui-viewer`) :
 - [x] ouvrir un `.trxrd.h5` ou un `.CEDX`, en arrière-plan ; un `.CEDX` s'enregistre en `.trxrd.h5` à côté ;
 - [x] liste et curseur des spectres ;
-- [x] spectre courant : données, fond, ajustement, raies attendues de chaque phase ; axe 2θ / Q / d ;
+- [x] spectre courant : données, fond, ajustement ; raies attendues de chaque phase dans un bandeau sous le
+  spectre, qui reste visible au zoom, et en traits fins à travers le spectre (Ctrl+G) ; axe 2θ / Q / d ;
 - [x] P(t) par phase avec barres d'erreur, et une voie de l'oscilloscope sur l'axe de droite ;
 - [x] carte intensité (échelle log par défaut) ;
 - [x] tables des phases et des pics du spectre courant ;

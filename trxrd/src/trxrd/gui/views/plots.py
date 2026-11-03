@@ -78,19 +78,43 @@ class MovableRegion:
 
 
 class SpectrumView(QWidget):
-    """Data, background, fit, and one row of ticks per phase under the pattern (height ~ intensity)."""
+    """Data, background and fit; under them a band with one row of ticks per phase (height ~ intensity).
+
+    The band has its own vertical scale and only shares the x axis: zooming on
+    a small peak never moves the ticks out of sight. Faint vertical lines show
+    the expected lines across the pattern too, at any zoom.
+    """
+
+    ROW_HEIGHT = 16  # px, one row of the band
+    AXIS_HEIGHT = 46  # px, the x axis and its label, under the band
+    GUIDE_MIN_INTENSITY = 5.0  # % of the card: weaker lines get no vertical line
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.plot = pg.PlotWidget()
         self.plot.getAxis("left").setWidth(AXIS_WIDTH)  # aligned with the cake below
+        self.plot.getAxis("bottom").setStyle(showValues=False)  # the x axis is under the band
+        self.plot.getAxis("bottom").setHeight(2)
         self.legend = self.plot.addLegend(offset=(-10, 10))
         self.plot.setLabel("left", "Intensité")
         self.plot.showGrid(x=True, y=True, alpha=0.15)
         self.data = self.plot.plot(pen=pg.mkPen("#404040", width=1), name="filtré − fond")
         self.baseline = self.plot.plot(pen=pg.mkPen("#1f77b4", width=1, style=Qt.PenStyle.DashLine), name="fond")
         self.fit = self.plot.plot(pen=pg.mkPen("#d62728", width=1.5), name="ajustement")
-        self._ticks: List[pg.GraphicsObject] = []
+        self.band = pg.PlotWidget()
+        self.band.getAxis("left").setWidth(AXIS_WIDTH)
+        self.band.getAxis("left").setStyle(tickLength=0)
+        self.band.showGrid(x=True, alpha=0.15)
+        self.band.setMouseEnabled(x=True, y=False)
+        self.band.setMenuEnabled(False)
+        self.band.hideButtons()
+        self.band.getPlotItem().setXLink(self.plot.getPlotItem())
+        self.band.setYRange(0, 1, padding=0)
+        self.band.setFixedHeight(self.AXIS_HEIGHT + self.ROW_HEIGHT)
+        self.guides_shown = True
+        self._ticks: List[pg.GraphicsObject] = []  # in the band
+        self._guides: List[pg.GraphicsObject] = []  # vertical lines in the plot
+        self._samples: List[pg.GraphicsObject] = []  # legend entries of the phases
         # detected peaks (Détection tab): markers, threshold, excluded zones; not in the legend
         self.threshold = pg.PlotDataItem(pen=pg.mkPen("#8a8a8a", width=1, style=Qt.PenStyle.DotLine))
         self.detected = pg.ScatterPlotItem(hoverable=True, tip=lambda x, y, data: data)
@@ -100,9 +124,15 @@ class SpectrumView(QWidget):
         self._zones: List[pg.GraphicsObject] = []
         self.spacer = spacer()  # shown with the histogram of the cake, so that both x axes line up
         self.spacer.hide()
+        plots = QWidget()
+        stacked = QVBoxLayout(plots)
+        stacked.setContentsMargins(0, 0, 0, 0)
+        stacked.setSpacing(0)
+        stacked.addWidget(self.plot, 1)
+        stacked.addWidget(self.band)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addLayout(_row(self.plot, self.spacer))
+        layout.addLayout(_row(plots, self.spacer))
 
     def clear(self) -> None:
         for curve in (self.data, self.baseline, self.fit):
@@ -111,10 +141,24 @@ class SpectrumView(QWidget):
         self.show_detection(None)
         self.plot.setTitle("")
 
+    def set_guides(self, shown: bool) -> None:
+        """Vertical lines of the expected reflections across the pattern."""
+        self.guides_shown = bool(shown)
+        for guide in self._guides:
+            guide.setVisible(self.guides_shown)
+
     def _set_data_label(self, text: str) -> None:
         for sample, label in self.legend.items:
             if sample.item is self.data and label.text != text:
                 label.setText(text)
+
+    def _list_baseline(self, shown: bool) -> None:
+        """The background is only in the legend when it is drawn (raw signal)."""
+        listed = any(sample.item is self.baseline for sample, _ in self.legend.items)
+        if shown and not listed:
+            self.legend.addItem(self.baseline, "fond")
+        elif listed and not shown:
+            self.legend.removeItem(self.baseline)
 
     def show_detection(self, marks) -> None:
         """Detected peaks (display.DetectionMarks), or None to hide them."""
@@ -141,38 +185,60 @@ class SpectrumView(QWidget):
 
     def _clear_ticks(self) -> None:
         for item in self._ticks:
+            self.band.removeItem(item)
+        for item in self._guides:
             self.plot.removeItem(item)
-        self._ticks = []
+        for item in self._samples:
+            self.legend.removeItem(item)
+        self._ticks, self._guides, self._samples = [], [], []
+        self.band.getAxis("left").setTicks([[]])
+
+    def _add_guides(self, lines, color: str) -> None:
+        faint = pg.mkColor(color)
+        faint.setAlpha(90)
+        pen = pg.mkPen(faint, width=1, style=Qt.PenStyle.DashLine)
+        for position, intensity in zip(lines.x, lines.intensity):
+            if intensity >= self.GUIDE_MIN_INTENSITY:
+                guide = pg.InfiniteLine(pos=float(position), angle=90, movable=False, pen=pen)
+                guide.setZValue(-5)
+                guide.setVisible(self.guides_shown)
+                self.plot.addItem(guide, ignoreBounds=True)
+                self._guides.append(guide)
 
     def show_spectrum(self, curves, reset: bool) -> None:
         self.plot.setTitle(curves.title)
-        self.plot.setLabel("bottom", curves.x_label)
+        self.band.setLabel("bottom", curves.x_label)
         self._set_data_label(curves.data_label)
+        self._list_baseline(curves.baseline is not None)
         self.data.setData(curves.x, curves.intensity)
         for item, y in ((self.baseline, curves.baseline), (self.fit, curves.fit)):
             item.setData(curves.x, y) if y is not None else item.setData([], [])
         self._clear_ticks()
-        finite = curves.intensity[np.isfinite(curves.intensity)]
-        low, high = (float(finite.min()), float(finite.max())) if finite.size else (0.0, 1.0)
-        step = 0.06 * max(high - low, 1e-9)
-        for row, lines in enumerate(curves.lines):
-            if not len(lines.x):
-                continue
+        rows = [lines for lines in curves.lines if len(lines.x)]
+        names = []
+        for row, lines in enumerate(rows):
             color = phase_color(lines.color)
-            bottom = low - (row + 1) * step
-            heights = step * 0.8 * (0.3 + 0.7 * np.clip(lines.intensity, 0, 100) / 100)
+            bottom = len(rows) - 1 - row + 0.1  # first phase on top
+            heights = 0.8 * (0.3 + 0.7 * np.clip(lines.intensity, 0, 100) / 100)
             x = np.repeat(lines.x, 2)
             y = np.column_stack([np.full(len(lines.x), bottom), bottom + heights]).ravel()
-            ticks = pg.PlotDataItem(x, y, connect="pairs", pen=pg.mkPen(color, width=2),
-                                    name=f"{lines.phase}  {lines.pressure:.2f} GPa")
+            ticks = pg.PlotDataItem(x, y, connect="pairs", pen=pg.mkPen(color, width=2))
             tips = pg.ScatterPlotItem(
                 lines.x, bottom + heights, size=6, brush=pg.mkBrush(color), pen=None, hoverable=True,
                 data=[f"{lines.phase} ({label})  I = {i:.0f} %" for label, i in zip(lines.labels, lines.intensity)],
                 tip=lambda x, y, data: f"{data}\nx = {x:.4f}",
             )
             for item in (ticks, tips):
-                self.plot.addItem(item)
+                self.band.addItem(item)
                 self._ticks.append(item)
+            sample = pg.PlotDataItem(pen=pg.mkPen(color, width=2))
+            self.legend.addItem(sample, f"{lines.phase}  {lines.pressure:.2f} GPa")
+            self._samples.append(sample)
+            names.append((bottom + 0.4, lines.short))
+            self._add_guides(lines, color)
+        self.band.getAxis("left").setTicks([names])
+        self.band.setYRange(0, max(len(rows), 1), padding=0)
+        self.band.setFixedHeight(self.AXIS_HEIGHT + self.ROW_HEIGHT * max(len(rows), 1))
         if reset:
             self.plot.enableAutoRange()
 

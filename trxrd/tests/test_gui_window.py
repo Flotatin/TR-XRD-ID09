@@ -422,3 +422,34 @@ def test_phases_tab_and_undo(viewer, compression_run):
     assert panel.card.currentData() == ice
     panel.remove.click()
     assert session.spectrum.phases == [] and panel.table.rowCount() == 0
+
+
+def test_expected_lines_stay_in_sight_when_zooming(viewer):
+    window = viewer.window
+    viewer.main.open(str(viewer.path))
+    viewer.session.select(2)  # ice VII and ice VI
+    view = window.spectrum
+    box = view.band.getViewBox()
+    assert len(view._ticks) == 4 and all(item.getViewBox() is box for item in view._ticks)
+    assert view.band.maximumHeight() == view.AXIS_HEIGHT + 2 * view.ROW_HEIGHT  # one row per phase
+    assert box.viewRange()[1] == [0.0, 2.0]
+
+    view.plot.setYRange(0, 1)  # on the small peaks: the band keeps its own scale
+    assert box.viewRange()[1] == [0.0, 2.0]
+    view.plot.setXRange(15, 17, padding=0)  # but it shares the x axis
+    assert box.viewRange()[0] == pytest.approx([15, 17])
+
+    labels = [label.text for sample, label in view.legend.items]
+    assert "H2O_Ice_VII  4.00 GPa" in labels and "fond" not in labels  # no background drawn: not in the legend
+    window.actions.get("raw").trigger()
+    assert "fond" in [label.text for sample, label in view.legend.items]
+    window.actions.get("raw").trigger()
+    assert sum("GPa" in label.text for sample, label in view.legend.items) == 2  # not repeated at each refresh
+
+    assert view._guides and all(guide.isVisible() for guide in view._guides)
+    window.actions.get("guides").trigger()  # Ctrl+G
+    assert not any(guide.isVisible() for guide in view._guides)
+    viewer.session.select(1)
+    assert view._guides and not any(guide.isVisible() for guide in view._guides)  # stays off on the next spectrum
+    window.actions.get("guides").trigger()
+    assert all(guide.isVisible() for guide in view._guides)
