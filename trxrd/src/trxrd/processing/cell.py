@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Sequence, Tuple
+from typing import Sequence, Tuple
 
 import numpy as np
 from scipy.optimize import least_squares
@@ -11,16 +11,6 @@ from scipy.optimize import least_squares
 from trxrd.domain import PhaseCard
 from trxrd.physics import eos, lattice
 
-# Cell lengths refined for each crystal system (angles are kept from the card).
-FREE_LENGTHS: Dict[str, Tuple[str, ...]] = {
-    "CUBIC": ("a",),
-    "TETRAGONAL": ("a", "c"),
-    "HEXAGONAL": ("a", "c"),
-    "RHOMBOHEDRAL": ("a",),
-    "ORTHORHOMBIC": ("a", "b", "c"),
-    "MONOCLINIC": ("a", "b", "c"),
-    "TRICLINIC": ("a", "b", "c"),
-}
 MIN_SIGMA_TWO_THETA = 1e-4  # deg, floor for peaks without a usable error
 
 
@@ -55,13 +45,6 @@ def sigma_two_theta_from_distance(two_theta_deg: float, distance_m: float, sigma
     return float(np.degrees(abs(derivative) * sigma_distance_m))
 
 
-def _free_lengths(symmetry: str) -> Tuple[str, ...]:
-    for key, names in FREE_LENGTHS.items():
-        if key in symmetry:
-            return names
-    return ("a", "b", "c")
-
-
 def _cell(card: PhaseCard, names: Sequence[str], values: Sequence[float], isotropic: bool) -> lattice.Cell:
     base = lattice.constrain(card.symmetry, card.cell)
     if isotropic:
@@ -80,7 +63,7 @@ def refine_cell(card: PhaseCard, reflexes: Sequence[Reflex], wavelength_m: float
     """
     if not reflexes:
         raise ValueError(f"No reflection to refine {card.name}")
-    names = _free_lengths(card.symmetry)
+    names = lattice.free_lengths(card.symmetry)  # angles are kept from the card
     isotropic = len(reflexes) < len(names)
     tth = np.array([r.two_theta for r in reflexes], dtype=float)
     sigma_tth = np.maximum(np.nan_to_num(np.array([r.sigma for r in reflexes], dtype=float)), MIN_SIGMA_TWO_THETA)

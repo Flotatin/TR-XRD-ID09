@@ -7,8 +7,8 @@ presenter sets (`view.on_pick`, `view.on_select`); it never changes the data.
 
 Views expected (duck typing):
 - spectrum: show_spectrum(SpectrumCurves, reset: bool), clear()
-- pressure: show_pressure(PressureData), set_marker(x), clear(), on_pick(x)
-- map: show_map(MapData), set_marker(index), clear(), on_pick(index)
+- evolution: show_evolution(EvolutionData), set_marker(x), clear(), on_pick(x), on_quantity(key, relative)
+- map: show_map(TimeMapData), set_marker(x), clear(), on_pick(x)
 - cake: show_cake(CakeData), show_image(array), show_message(text), clear(), on_mode(mode)
 - table: show_rows(columns, rows)
 - navigator: show_spectra(columns, rows), set_current(index, count), on_select(index)
@@ -112,14 +112,25 @@ class SpectrumPresenter:
         self._reset = False
 
 
-class PressurePresenter:
+class EvolutionPresenter:
+    """P, V, a, c/a... of every phase versus time, with an oscilloscope channel (dDAC view of the v1)."""
+
     def __init__(self, session: Session, view) -> None:
         self.session, self.view = session, view
+        self.quantity, self.relative = "P", False
         self._x = []
         view.on_pick = self.pick
+        view.on_quantity = self.set_quantity
         session.subscribe(Event.RUN_CHANGED, self.refresh)
         session.subscribe(Event.DATA_CHANGED, self.refresh)
         session.subscribe(Event.SPECTRUM_CHANGED, self.marker)
+
+    def set_quantity(self, quantity: str, relative: bool = False) -> None:
+        """Show `quantity` (key of display.QUANTITIES), divided by the card value when `relative`."""
+        if quantity not in display.QUANTITIES:
+            raise ValueError(f"unknown quantity {quantity!r}")
+        self.quantity, self.relative = quantity, bool(relative)
+        self.refresh()
 
     def refresh(self, *_) -> None:
         run = self.session.run
@@ -127,9 +138,9 @@ class PressurePresenter:
             self._x = []
             self.view.clear()
             return
-        data = display.pressure_data(run)
+        data = display.evolution_data(run, self.quantity, self.relative)
         self._x = data.x
-        self.view.show_pressure(data)
+        self.view.show_evolution(data)
         self.marker()
 
     def marker(self, *_) -> None:
@@ -143,8 +154,11 @@ class PressurePresenter:
 
 
 class MapPresenter:
+    """Integrated patterns versus time (x, shared with the evolution plot) and 2θ / Q / d (y)."""
+
     def __init__(self, session: Session, settings: DisplaySettings, view) -> None:
         self.session, self.settings, self.view = session, settings, view
+        self._x = []
         view.on_pick = self.pick
         session.subscribe(Event.RUN_CHANGED, self.refresh)
         session.subscribe(Event.DATA_CHANGED, self.refresh)
@@ -153,19 +167,23 @@ class MapPresenter:
 
     def refresh(self, *_) -> None:
         run = self.session.run
-        data = display.intensity_map(run, self.settings.unit_for(run)) if run is not None else None
+        data = display.time_map(run, self.settings.unit_for(run)) if run is not None else None
         if data is None:
+            self._x = []
             self.view.clear()
             return
+        self._x = display.spectrum_axis(run)[0]
         self.view.show_map(data)
         self.marker()
 
     def marker(self, *_) -> None:
-        if self.session.run is not None and self.session.run.spectra:
-            self.view.set_marker(self.session.index)
+        if len(self._x):
+            self.view.set_marker(float(self._x[self.session.index]))
 
-    def pick(self, index: int) -> None:
-        self.session.select(index)
+    def pick(self, x: float) -> None:
+        index = display.nearest_spectrum(self._x, x)
+        if index is not None:
+            self.session.select(index)
 
 
 class CakePresenter:

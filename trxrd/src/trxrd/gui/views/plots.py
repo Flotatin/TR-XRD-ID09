@@ -1,4 +1,4 @@
-"""Plots of the viewer (pyqtgraph): current spectrum, P(t) with the oscilloscope, intensity map."""
+"""Plots of the viewer (pyqtgraph): current spectrum and its cake, quantities versus time, map of the patterns."""
 
 from __future__ import annotations
 
@@ -9,10 +9,13 @@ import pyqtgraph as pg
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtWidgets import QCheckBox, QComboBox, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
+from trxrd.gui.views.images import AXIS_WIDTH, ImagePanel, spacer
+
 pg.setConfigOptions(antialias=True, background="w", foreground="k")
 
 # one colour per phase, in the order of display.phase_order (colour-blind friendly)
 PALETTE = ("#1f77b4", "#d62728", "#2ca02c", "#9467bd", "#ff7f0e", "#8c564b", "#e377c2", "#17becf", "#bcbd22", "#7f7f7f")
+RIGHT_AXIS_WIDTH = 56  # oscilloscope axis of the evolution plot; the map below keeps the same margin
 
 
 def phase_color(index: int) -> str:
@@ -31,12 +34,21 @@ def _scene_click(plot: pg.PlotWidget, callback: Callable[[float, float], None]) 
     plot.scene().sigMouseClicked.connect(clicked)
 
 
+def _row(plot: QWidget, margin: QWidget) -> QHBoxLayout:
+    row = QHBoxLayout()
+    row.setSpacing(0)
+    row.addWidget(plot)
+    row.addWidget(margin)
+    return row
+
+
 class SpectrumView(QWidget):
     """Data, background, fit, and one row of ticks per phase under the pattern (height ~ intensity)."""
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.plot = pg.PlotWidget()
+        self.plot.getAxis("left").setWidth(AXIS_WIDTH)  # aligned with the cake below
         self.plot.addLegend(offset=(-10, 10))
         self.plot.setLabel("left", "Intensité")
         self.plot.showGrid(x=True, y=True, alpha=0.15)
@@ -44,9 +56,11 @@ class SpectrumView(QWidget):
         self.baseline = self.plot.plot(pen=pg.mkPen("#1f77b4", width=1, style=Qt.PenStyle.DashLine), name="fond")
         self.fit = self.plot.plot(pen=pg.mkPen("#d62728", width=1.5), name="ajustement")
         self._ticks: List[pg.GraphicsObject] = []
+        self.spacer = spacer()  # shown with the histogram of the cake, so that both x axes line up
+        self.spacer.hide()
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(self.plot)
+        layout.addLayout(_row(self.plot, self.spacer))
 
     def clear(self) -> None:
         for curve in (self.data, self.baseline, self.fit):
@@ -91,79 +105,141 @@ class SpectrumView(QWidget):
             self.plot.enableAutoRange()
 
 
-class PressureView(QWidget):
-    """P(t) of every phase with error bars; oscilloscope channel on the right axis (DDAC view of the v1)."""
+class EvolutionView(QWidget):
+    """P, V, a, c/a... of every phase versus time with error bars; an oscilloscope channel on the right axis.
+
+    The dDAC view of the v1. The grey band marks the time range of the
+    spectra; "Plage" switches between that range and the whole oscilloscope
+    record (to see the piezo ramp around the spectra).
+    """
 
     NO_TRACE = "aucun"
+    RANGES = (("spectres", "spectra"), ("oscilloscope entier", "trace"))
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.on_pick: Optional[Callable[[float], None]] = None
+        self.on_quantity: Optional[Callable[[str, bool], None]] = None
+        self.quantity = QComboBox()
+        self.quantity.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+        self.quantity.setToolTip("Grandeur tracée pour chaque phase")
+        self.relative = QCheckBox("÷ fiche (X/X₀)")
+        self.relative.setToolTip("Diviser par la valeur de la fiche à pression ambiante : V/V₀, a/a₀, (c/a)/(c/a)₀…\n"
+                                 "Permet de comparer des phases différentes sur le même axe.")
         self.channel = QComboBox()
         self.channel.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+        self.span = QComboBox()
+        for label, key in self.RANGES:
+            self.span.addItem(label, key)
+        self.quantity.currentIndexChanged.connect(self._quantity_chosen)
+        self.relative.toggled.connect(self._quantity_chosen)
         self.channel.currentTextChanged.connect(self._show_trace)
+        self.span.currentIndexChanged.connect(lambda _: self._set_range())
         bar = QHBoxLayout()
-        bar.addWidget(QLabel("Oscilloscope :"))
-        bar.addWidget(self.channel)
+        for widget in (QLabel("Grandeur :"), self.quantity, self.relative, QLabel("  Oscilloscope :"), self.channel,
+                       QLabel("  Plage :"), self.span):
+            bar.addWidget(widget)
         bar.addStretch(1)
+
         self.plot = pg.PlotWidget()
+        item = self.plot.getPlotItem()
+        item.getAxis("left").setWidth(AXIS_WIDTH)
         self.plot.addLegend(offset=(10, 10))
         self.plot.setLabel("left", "P (GPa)")
         self.plot.showGrid(x=True, y=True, alpha=0.15)
+        self.band = pg.LinearRegionItem(movable=False, brush=pg.mkBrush(128, 128, 128, 25), pen=pg.mkPen(None))
+        self.band.setZValue(-20)
+        self.band.hide()
+        self.plot.addItem(self.band, ignoreBounds=True)
         self.marker = pg.InfiniteLine(angle=90, movable=False, pen=pg.mkPen("#808080", style=Qt.PenStyle.DotLine))
         self.plot.addItem(self.marker, ignoreBounds=True)
         # second view box sharing x, for the oscilloscope (right axis)
-        item = self.plot.getPlotItem()
         self.scope = pg.ViewBox()
         item.showAxis("right")
+        item.getAxis("right").setWidth(RIGHT_AXIS_WIDTH)
         item.scene().addItem(self.scope)
         item.getAxis("right").linkToView(self.scope)
         self.scope.setXLink(item)
         item.vb.sigResized.connect(lambda: self.scope.setGeometry(item.vb.sceneBoundingRect()))
-        self.trace = pg.PlotDataItem(pen=pg.mkPen("#a0a0a0", width=1))
+        self.trace = pg.PlotDataItem(pen=pg.mkPen("#4a6fa5", width=1))
         self.trace.setDownsampling(auto=True, method="peak")
         self.trace.setClipToView(True)
         self.scope.addItem(self.trace)
         self._items: List[pg.GraphicsObject] = []
         self._traces: Dict[str, object] = {}
+        self._data = None
         _scene_click(self.plot, lambda x, y: self.on_pick and self.on_pick(x))
+        self.spacer = spacer()  # same right margin as the map below when its histogram is shown
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addLayout(bar)
-        layout.addWidget(self.plot)
+        layout.addLayout(_row(self.plot, self.spacer))
+
+    def _quantity_chosen(self, *_) -> None:
+        key = self.quantity.currentData()
+        if key and self.on_quantity is not None:
+            self.on_quantity(key, self.relative.isChecked())
 
     def clear(self) -> None:
+        self._remove_series()
+        self._traces = {}
+        self._data = None
+        self.band.hide()
+        for box in (self.channel, self.quantity):
+            box.blockSignals(True)
+            box.clear()
+            box.blockSignals(False)
+        self.trace.setData([], [])
+
+    def _remove_series(self) -> None:
         for item in self._items:
             self.plot.removeItem(item)
         self._items = []
-        self._traces = {}
-        self.channel.blockSignals(True)
-        self.channel.clear()
-        self.channel.blockSignals(False)
-        self.trace.setData([], [])
 
-    def show_pressure(self, data) -> None:
+    def show_evolution(self, data) -> None:
         previous = self.channel.currentText()
-        self.clear()
+        self._remove_series()
+        self._data = data
         self.plot.setLabel("bottom", data.x_label)
+        self.plot.setLabel("left", data.y_label)
         for series in data.series:
             color = phase_color(series.color)
-            bars = pg.ErrorBarItem(x=series.x, y=series.pressure, height=2 * series.error, beam=0,
-                                   pen=pg.mkPen(color, width=1))
-            points = pg.ScatterPlotItem(series.x, series.pressure, size=7, brush=pg.mkBrush(color),
+            bars = pg.ErrorBarItem(x=series.x, y=series.y, height=2 * series.error, beam=0, pen=pg.mkPen(color, width=1))
+            points = pg.ScatterPlotItem(series.x, series.y, size=7, brush=pg.mkBrush(color),
                                         pen=pg.mkPen("w", width=0.5), name=series.phase)
             self.plot.addItem(bars, ignoreBounds=True)  # a few huge error bars must not set the scale
             self.plot.addItem(points)
             self._items += [bars, points]
+        self.quantity.blockSignals(True)
+        self.quantity.clear()
+        for key, label in data.quantities:
+            self.quantity.addItem(label, key)
+        self.quantity.setCurrentIndex(max(self.quantity.findData(data.quantity), 0))
+        self.quantity.blockSignals(False)
+        self.relative.setEnabled(data.can_be_relative)  # the box keeps its state for the next quantity
+
         self._traces = {t.name: t for t in data.traces}
         names = [t.name for t in data.traces if not t.trigger] + [t.name for t in data.traces if t.trigger]
         self.channel.blockSignals(True)
+        self.channel.clear()
         self.channel.addItems([self.NO_TRACE] + names)
         self.channel.blockSignals(False)
         choice = previous if previous in self._traces else (names[0] if names else self.NO_TRACE)
         self.channel.setCurrentText(choice)
         self._show_trace(choice)
-        self.plot.enableAutoRange()
+        low, high = data.span
+        self.band.setRegion((low, high))
+        self.band.setVisible(len(data.x) > 1)
+        self._set_range()
+
+    def _set_range(self) -> None:
+        if self._data is None:
+            return
+        span = self._data.trace_span if self.span.currentData() == "trace" else None
+        low, high = span or self._data.span
+        pad = 0.03 * (high - low) if high > low else 0.5
+        self.plot.setXRange(low - pad, high + pad, padding=0)
+        self.plot.enableAutoRange(axis=pg.ViewBox.YAxis)
 
     def _show_trace(self, name: str) -> None:
         trace = self._traces.get(name)
@@ -179,70 +255,42 @@ class PressureView(QWidget):
         self.marker.setPos(x)
 
 
-class MapView(QWidget):
-    """Intensity (background subtracted) versus 2θ / Q / d and spectrum index; click to select."""
+class TimeMapView(QWidget):
+    """Integrated patterns side by side: time along x (shared with the evolution plot), 2θ / Q / d along y."""
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, link_to: Optional[pg.PlotWidget] = None, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self.on_pick: Optional[Callable[[int], None]] = None
-        self.plot = pg.PlotWidget()
-        self.plot.setLabel("left", "spectre")
-        self.image = pg.ImageItem(axisOrder="row-major")
-        self.image.setColorMap(pg.colormap.get("viridis"))
-        self.plot.addItem(self.image)
-        self.marker = pg.InfiniteLine(angle=0, movable=False, pen=pg.mkPen("w", width=1, style=Qt.PenStyle.DashLine))
+        self.on_pick: Optional[Callable[[float], None]] = None
+        self.panel = ImagePanel("map", scale="log")  # a gasket peak 100 times stronger hides the sample otherwise
+        self.panel.add_control(QLabel("Diffractogrammes intégrés —"))
+        self.plot, self.image = self.panel.plot, self.panel.image
+        item = self.plot.getPlotItem()
+        item.showAxis("right")  # empty, as wide as the oscilloscope axis above: the time axes line up
+        item.getAxis("right").setWidth(RIGHT_AXIS_WIDTH)
+        item.getAxis("right").setStyle(showValues=False)
+        if link_to is not None:
+            item.setXLink(link_to.getPlotItem())  # its x autorange is off: the evolution plot sets the range
+        self.marker = pg.InfiniteLine(angle=90, movable=False, pen=pg.mkPen("w", width=1, style=Qt.PenStyle.DashLine))
         self.plot.addItem(self.marker, ignoreBounds=True)
-        self.log = QCheckBox("échelle log")  # a gasket peak 100 times stronger hides the sample otherwise
-        self.log.setChecked(True)
-        self.log.toggled.connect(lambda checked: self._data is not None and self.show_map(self._data))
-        self._count = 0
-        self._data = None
-        _scene_click(self.plot, self._clicked)
-        bar = QHBoxLayout()
-        bar.addWidget(self.log)
-        bar.addStretch(1)
+        _scene_click(self.plot, lambda x, y: self.on_pick and self.on_pick(x))
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addLayout(bar)
-        layout.addWidget(self.plot)
-
-    def _clicked(self, x: float, y: float) -> None:
-        index = int(round(y))
-        if self.on_pick is not None and 0 <= index < self._count:
-            self.on_pick(index)
+        layout.addWidget(self.panel)
 
     def clear(self) -> None:
-        self.image.clear()
-        self._count = 0
-        self._data = None
+        self.panel.clear()
 
     def show_map(self, data) -> None:
-        self._data = data
-        image, levels = _levels(np.nan_to_num(data.image), self.log.isChecked())
-        self.image.setImage(image, levels=levels)
-        step = (data.x[-1] - data.x[0]) / max(len(data.x) - 1, 1)
-        self.image.setRect(QRectF(data.x[0] - step / 2, -0.5, data.x[-1] - data.x[0] + step, image.shape[0]))
-        self._count = image.shape[0]
+        x_step = (data.x[-1] - data.x[0]) / (len(data.x) - 1) if len(data.x) > 1 else 1.0
+        y_step = (data.y[-1] - data.y[0]) / max(len(data.y) - 1, 1)
+        rect = QRectF(data.x[0] - x_step / 2, data.y[0] - y_step / 2, len(data.x) * x_step, len(data.y) * y_step)
+        self.panel.set_image(data.image, rect)
         self.plot.setLabel("bottom", data.x_label)
-        self.plot.enableAutoRange()
+        self.plot.setLabel("left", data.y_label)
+        self.plot.enableAutoRange(axis=pg.ViewBox.YAxis)  # x follows the evolution plot
 
-    def set_marker(self, index: int) -> None:
-        self.marker.setPos(index)
-
-
-def _levels(image: np.ndarray, log: bool):
-    """Display copy of an image (log10 if asked) and robust levels (percentiles, NaN ignored)."""
-    image = np.asarray(image, dtype=float)
-    finite = image[np.isfinite(image)]
-    if log and finite.size:
-        positive = finite[finite > 0]
-        floor = max(float(np.percentile(positive, 5)), 1e-6) if positive.size else 1.0
-        image = np.log10(np.clip(image, floor, None))
-        finite = image[np.isfinite(image)]
-    levels = np.percentile(finite, [1, 99.8]) if finite.size else (0.0, 1.0)
-    if levels[1] <= levels[0]:
-        levels = (levels[0], levels[0] + 1)
-    return image, levels
+    def set_marker(self, x: float) -> None:
+        self.marker.setPos(x)
 
 
 class CakeView(QWidget):
@@ -256,49 +304,32 @@ class CakeView(QWidget):
         self.mode.addItem("cake (2θ × azimut)", "cake")
         self.mode.addItem("image brute", "image")
         self.mode.currentIndexChanged.connect(lambda i: self.on_mode and self.on_mode(self.mode.itemData(i)))
-        self.log = QCheckBox("échelle log")
-        self.log.setChecked(True)
-        self.log.toggled.connect(self._redraw)
         self.message = QLabel("")
         self.message.setStyleSheet("color: #8a5a00")
-        bar = QHBoxLayout()
-        for widget in (QLabel("Intégration :"), self.mode, self.log, self.message):
-            bar.addWidget(widget)
-        bar.addStretch(1)
-        self.plot = pg.PlotWidget()
-        self.image = pg.ImageItem(axisOrder="row-major")
-        self.image.setColorMap(pg.colormap.get("viridis"))
-        self.plot.addItem(self.image)
-        self._last = None
+        self.panel = ImagePanel("cake", scale="log", histogram=False)  # narrow: the histogram is optional
+        for widget in (QLabel("Intégration :"), self.mode):
+            self.panel.add_control(widget)
+        self.panel.bar.addWidget(self.message)
+        self.plot, self.image = self.panel.plot, self.panel.image
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addLayout(bar)
-        layout.addWidget(self.plot)
+        layout.addWidget(self.panel)
 
     def clear(self) -> None:
-        self.image.clear()
-        self._last = None
+        self.panel.clear()
         self.message.setText("")
 
     def show_message(self, text: str) -> None:
-        self.image.clear()
-        self._last = None
+        self.panel.clear()
         self.message.setText(text)
 
-    def _redraw(self) -> None:
-        if self._last is not None:
-            kind, data = self._last
-            self.show_cake(data) if kind == "cake" else self.show_image(data)
-
     def show_cake(self, data) -> None:
-        self._last = ("cake", data)
         self.message.setText("")
-        image, levels = _levels(data.image, self.log.isChecked())
-        self.image.setImage(np.nan_to_num(image, nan=levels[0]), levels=levels)
         step = (data.x[-1] - data.x[0]) / max(len(data.x) - 1, 1)
         az_step = (data.azimuth[-1] - data.azimuth[0]) / max(len(data.azimuth) - 1, 1)
-        self.image.setRect(QRectF(data.x[0] - step / 2, data.azimuth[0] - az_step / 2,
-                                  data.x[-1] - data.x[0] + step, data.azimuth[-1] - data.azimuth[0] + az_step))
+        self.panel.set_image(data.image, QRectF(data.x[0] - step / 2, data.azimuth[0] - az_step / 2,
+                                                data.x[-1] - data.x[0] + step,
+                                                data.azimuth[-1] - data.azimuth[0] + az_step))
         item = self.plot.getPlotItem()
         item.setLabel("bottom", data.x_label)
         item.setLabel("left", "azimut (°)")
@@ -309,11 +340,9 @@ class CakeView(QWidget):
         item.enableAutoRange(axis=pg.ViewBox.YAxis)
 
     def show_image(self, image) -> None:
-        self._last = ("image", image)
         self.message.setText("")
-        shown, levels = _levels(image, self.log.isChecked())
-        self.image.setImage(np.nan_to_num(shown, nan=levels[0]), levels=levels)
-        self.image.setRect(QRectF(0, 0, shown.shape[1], shown.shape[0]))
+        image = np.asarray(image, dtype=float)
+        self.panel.set_image(image, QRectF(0, 0, image.shape[1], image.shape[0]))
         item = self.plot.getPlotItem()
         item.setXLink(None)
         item.setLabel("bottom", "pixel")

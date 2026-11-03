@@ -14,7 +14,8 @@ from PySide6.QtWidgets import (
 )
 
 from trxrd.gui.presenters.calibration import CalibrationPresenter
-from trxrd.gui.views.plots import PALETTE, _levels, _scene_click
+from trxrd.gui.views.images import ImagePanel
+from trxrd.gui.views.plots import PALETTE, _scene_click
 
 IMAGE_FILTER = "Images (*.h5 *.hdf5 *.tif *.tiff *.edf *.cbf *.img);;Tous les fichiers (*)"
 FIXABLE = (("dist", "distance"), ("poni1", "poni 1"), ("poni2", "poni 2"), ("rot1", "rot1"), ("rot2", "rot2"),
@@ -38,14 +39,13 @@ class CalibrationDialog(QDialog):
         self.on_click = None  # set by the presenter
         self.presenter: Optional[CalibrationPresenter] = None
 
-        self.plot = pg.PlotWidget()
+        self.panel = ImagePanel("calibration", scale="log", settings=self.settings)
+        self.plot, self.image = self.panel.plot, self.panel.image
         self.plot.setAspectLocked(True)
         self.plot.invertY(True)
-        self.image = pg.ImageItem(axisOrder="row-major")
-        self.image.setColorMap(pg.colormap.get("viridis"))
         self.rings = pg.ImageItem(axisOrder="row-major")
         self.points = pg.ScatterPlotItem(size=5, pen=None)
-        for item in (self.image, self.rings, self.points):
+        for item in (self.rings, self.points):
             self.plot.addItem(item)
         _scene_click(self.plot, lambda x, y: self.on_click and self.on_click(y, x))  # (row, col) = (y, x)
 
@@ -111,7 +111,7 @@ class CalibrationDialog(QDialog):
         side_layout.addWidget(self.message)
         side_layout.addLayout(end)
         split = QSplitter(Qt.Orientation.Horizontal)
-        split.addWidget(self.plot)
+        split.addWidget(self.panel)
         split.addWidget(side)
         split.setSizes([950, 450])
         layout = QVBoxLayout(self)
@@ -168,8 +168,7 @@ class CalibrationDialog(QDialog):
     # ------------------------------------------------------------------ view interface of CalibrationPresenter
 
     def show_image(self, image: np.ndarray) -> None:
-        shown, levels = _levels(image, True)
-        self.image.setImage(np.nan_to_num(shown, nan=levels[0]), levels=levels)
+        self.panel.set_image(image)
         self.plot.enableAutoRange()
 
     def show_rings(self, overlay: np.ndarray) -> None:

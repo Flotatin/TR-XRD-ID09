@@ -138,11 +138,12 @@ trxrd/
 │   ├── cli.py                  ✅ trxrd build | auto | compare | convert | info
 │   └── gui/                    ✅ lecteur PySide6 + pyqtgraph (§9) : `trxrd-gui`
 │       ├── presenters/         display.py (données affichées), viewer.py, calibration.py (presenters), sans Qt
-│       ├── views/              plots.py (spectre, cake, P(t), carte), panels.py, new_run.py, calibration.py, main_window.py
+│       ├── views/              plots.py (spectre, cake, grandeurs(t), carte), images.py (échelle, niveaux, couleurs),
+│       │                       panels.py, new_run.py, calibration.py, main_window.py
 │       ├── actions.py          registre unique des QAction (menus, barre d'outils, raccourcis)
 │       ├── tasks.py            calculs longs dans un thread, résultat rendu au thread de l'interface
 │       └── app.py              assemblage : fenêtre + presenters + actions
-└── tests/                      170 tests ; data/ = scan TUTO, calibration, ancien fichier .CEDX d'exemple
+└── tests/                      177 tests ; data/ = scan TUTO, calibration, ancien fichier .CEDX d'exemple
 ```
 
 ## 5. Le format de fichier `trxrd-run` (HDF5)
@@ -505,8 +506,9 @@ Architecture **MVP** au-dessus de `services.Session` :
   `Session.read` charge un fichier sans toucher à la session, ce qui permet de le faire dans un thread ;
   `Session.attach` installe ensuite le run, depuis le thread de l'interface.
 - **Données affichées** (`gui/presenters/display.py`, sans Qt) : courbes du spectre, raies attendues de
-  chaque phase à sa pression, P(t), traces de l'oscilloscope, carte, lignes des tableaux. Tout est en 2θ,
-  Q ou d.
+  chaque phase à sa pression, P, V, a, c/a… de chaque phase en fonction du temps, traces de l'oscilloscope,
+  carte des diffractogrammes en fonction du temps, mise à l'échelle des images, lignes des tableaux. Tout est
+  en 2θ, Q ou d.
 - **Presenters** (`gui/presenters/viewer.py`, sans Qt) : un par vue. Ils écoutent la Session et les
   réglages d'affichage (`DisplaySettings` : l'unité de l'axe), remplissent la vue, et reçoivent les gestes
   de l'utilisateur par des fonctions de rappel (`view.on_pick`, `view.on_select`). Ils sont testés avec de
@@ -528,8 +530,8 @@ Architecture **MVP** au-dessus de `services.Session` :
   positions attendues à sa pression, de hauteur proportionnelle à l'intensité de la fiche (hkl au survol).
   Le zoom est gardé d'un spectre à l'autre ;
 - P(t) par phase avec barres d'erreur, et une voie de l'oscilloscope sur l'axe de droite (choix de la voie) ;
-- carte intensité (fond retiré) en fonction de l'axe et du spectre, en échelle log par défaut : un pic de
-  joint 100 fois plus fort cache sinon l'échantillon ;
+- carte intensité (fond retiré), en échelle log par défaut : un pic de joint 100 fois plus fort cache sinon
+  l'échantillon (P(t) et la carte forment depuis l'étape 2 le panneau dDAC, voir plus bas) ;
 - tableaux des phases (P, σP, V, maille, T, état) et des pics (hkl, 2θ, d, hauteur, largeur, profil) ;
 - axe 2θ / Q / d (Ctrl+1/2/3), réservé à 2θ si le run n'a pas d'énergie ;
 - un clic sur P(t) ou sur la carte sélectionne le spectre ;
@@ -589,6 +591,40 @@ Architecture **MVP** au-dessus de `services.Session` :
   Les inclinaisons diffèrent de celles de Dioptas dans une direction que ces données ne contraignent pas. La
   dispersion de 0,03° vient des grains du LaB6. `pyFAI.goniometer` n'est pas utilisé : Windows (contrôle
   d'application) bloque une bibliothèque de silx dont il dépend.
+
+**Étape 2, deuxième partie : panneau dDAC et images (novembre 2026)**. La fenêtre reprend la disposition de
+la v1 :
+- à gauche, la liste des spectres et, en onglets, les tableaux des phases et des pics ;
+- au centre, le spectre et son cake ;
+- à droite, le panneau dDAC de la v1 : une grandeur de chaque phase en fonction du temps, et en dessous la
+  carte des diffractogrammes intégrés (temps en x, 2θ / Q / d en y). Les deux graphes partagent l'axe du
+  temps, et un clic sur l'un ou l'autre sélectionne le spectre.
+
+La grandeur se choisit dans une liste : P, V, a, b, c, c/a, b/a, T. La liste ne garde que les grandeurs
+présentes dans le run. b, c et les rapports ne sont donnés que pour les systèmes où ils sont libres
+(`physics.lattice.free_lengths`, partagé avec `processing/cell.py`) : le c/a d'une phase cubique vaut 1 et
+n'est pas tracé. « ÷ fiche (X/X₀) » divise par la valeur de la fiche à pression ambiante (V₀ à la
+température de l'ajustement), comme la v1, ce qui permet de comparer des phases différentes sur un même
+axe. L'incertitude d'un rapport combine celles de ses deux termes, supposées indépendantes.
+
+La voie de l'oscilloscope (le piézo par défaut) est sur l'axe de droite. Avec « Plage : oscilloscope
+entier », on voit toute la rampe du piézo autour des spectres, dont la plage est marquée par une bande grise.
+La carte a une colonne par spectre quand les temps sont réguliers. Sinon (trous, spectres statiques), les
+colonnes sont régulières et chacune montre le spectre le plus proche (`display.time_columns`, 4 000 colonnes
+au plus). Sur Water01_scan0074 (1 600 spectres), la carte se calcule en 0,03 s.
+
+Les images (cake, carte, image du calibrant) ont toutes le même composant (`gui/views/images.py`), à la
+Dioptas :
+- un histogramme à côté de l'image, dont on tire les niveaux ;
+- l'échelle : log, linéaire ou racine ;
+- la carte des couleurs : viridis, inferno, magma, plasma, cividis, turbo, gris, gris inversé ;
+- « niveaux auto » (percentiles 1 et 99,8 %, recalculés à chaque image), décoché dès qu'on tire les niveaux,
+  qui sont alors gardés d'un spectre à l'autre ; « Auto » les recalcule.
+
+Ces choix sont gardés d'une session à l'autre, image par image. Les axes de gauche ont une largeur fixe et un
+graphe placé au-dessus d'une image dont l'histogramme est affiché reçoit la même marge à droite : le spectre
+reste aligné sur le cake, et la courbe sur la carte. Les tests de l'interface écrivent leurs réglages dans un
+`.ini` temporaire (`conftest.py`), jamais dans ceux de l'utilisateur.
 
 **Ensuite** :
 - étape 2 (suite) : lancer l'analyse automatique depuis l'interface, avec une barre de progression ;

@@ -13,8 +13,8 @@ from typing import List, Optional, Sequence
 
 from trxrd import __version__
 from trxrd.gui.presenters.viewer import (
-    CakePresenter, DisplaySettings, MainPresenter, MapPresenter, NavigatorPresenter, PressurePresenter, SpectrumPresenter,
-    TablesPresenter,
+    CakePresenter, DisplaySettings, EvolutionPresenter, MainPresenter, MapPresenter, NavigatorPresenter,
+    SpectrumPresenter, TablesPresenter,
 )
 from trxrd.gui.tasks import ThreadRunner
 from trxrd.gui.views.main_window import MainWindow, application
@@ -42,7 +42,7 @@ def create_viewer(session: Optional[Session] = None, runner=None) -> Viewer:
     presenters = [
         SpectrumPresenter(session, settings, window.spectrum),
         cake,
-        PressurePresenter(session, window.pressure),
+        EvolutionPresenter(session, window.evolution),
         MapPresenter(session, settings, window.map),
         TablesPresenter(session, window.phases, window.peaks),
         NavigatorPresenter(session, window.navigator),
@@ -70,6 +70,7 @@ def create_viewer(session: Optional[Session] = None, runner=None) -> Viewer:
     def toggle_cake() -> None:
         shown = window.actions.get("cake").isChecked()
         window.cake.setVisible(shown)
+        window.align_plots()
         cake.set_visible(shown)  # nothing is computed while it is hidden
 
     add("cake", VIEW, "&Intégration sous le spectre (cake)", toggle_cake, ["Ctrl+K"], checkable=True,

@@ -20,6 +20,17 @@ LIBRARY = ROOT / "resources" / "phases"
 OLD_PROGRAM = ROOT.parent / "src"  # old program, only present before the repository split
 
 
+@pytest.fixture(scope="session", autouse=True)
+def private_gui_settings(tmp_path_factory):
+    """The GUI tests never read nor write the user's settings: QSettings() goes to a temporary .ini."""
+    try:
+        from PySide6.QtCore import QSettings
+    except ImportError:
+        return
+    QSettings.setDefaultFormat(QSettings.Format.IniFormat)
+    QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, str(tmp_path_factory.mktemp("settings")))
+
+
 @pytest.fixture(scope="session")
 def tuto_scan():
     return DATA / "scan_jf1m_0000.h5"

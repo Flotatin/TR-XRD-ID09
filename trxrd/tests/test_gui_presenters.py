@@ -5,10 +5,11 @@ import pytest
 
 from trxrd.gui.presenters import display
 from trxrd.gui.presenters.viewer import (
-    DisplaySettings, MainPresenter, MapPresenter, NavigatorPresenter, PressurePresenter, SpectrumPresenter,
+    DisplaySettings, EvolutionPresenter, MainPresenter, MapPresenter, NavigatorPresenter, SpectrumPresenter,
     TablesPresenter,
 )
 from trxrd.io.h5store import save_run
+from trxrd.physics import eos
 from trxrd.services.session import Session
 
 
@@ -37,11 +38,11 @@ class Recorder:
 @pytest.fixture
 def viewer(tmp_path, sample_run):
     session, settings = Session(), DisplaySettings()
-    views = {k: Recorder() for k in ("spectrum", "pressure", "map", "phases", "peaks", "navigator")}
+    views = {k: Recorder() for k in ("spectrum", "evolution", "map", "phases", "peaks", "navigator")}
     window = Recorder(confirm_discard=False)
     presenters = [
         SpectrumPresenter(session, settings, views["spectrum"]),
-        PressurePresenter(session, views["pressure"]),
+        EvolutionPresenter(session, views["evolution"]),
         MapPresenter(session, settings, views["map"]),
         TablesPresenter(session, views["phases"], views["peaks"]),
         NavigatorPresenter(session, views["navigator"]),
@@ -64,14 +65,18 @@ def test_open_shows_every_panel(viewer, sample_run):
     np.testing.assert_allclose(curves.fit, sample_run.spectra[0].model + sample_run.spectra[0].baseline)
     assert [l.phase for l in curves.lines] == ["H2O_Ice_VII"] and "110" in curves.lines[0].labels
 
-    data = views["pressure"].last("show_pressure")[0]
-    assert data.x_label == "t (ms)" and [s.phase for s in data.series] == ["H2O_Ice_VII", "H2O_Ice_VI"]
-    np.testing.assert_allclose(data.series[0].pressure, [2.0, 3.0, 4.0])
+    data = views["evolution"].last("show_evolution")[0]
+    assert data.x_label == "t (ms)" and data.y_label == "P (GPa)"
+    assert [s.phase for s in data.series] == ["H2O_Ice_VII", "H2O_Ice_VI"]
+    np.testing.assert_allclose(data.series[0].y, [2.0, 3.0, 4.0])
     assert {t.name for t in data.traces} == {"Channel2", "Channel3"} and [t.trigger for t in data.traces] == [True, False]
-    assert views["pressure"].last("set_marker") == (0.0,)
+    assert data.span == (0.0, 4.0) and data.trace_span == (0.0, 1000.0)  # the whole oscilloscope record
+    assert views["evolution"].last("set_marker") == (0.0,)
 
-    image = views["map"].last("show_map")[0].image
-    assert image.shape == (5, 400)
+    patterns = views["map"].last("show_map")[0]
+    assert patterns.image.shape == (400, 5) and patterns.x_label == "t (ms)" and patterns.y_label == "2θ (°)"
+    np.testing.assert_allclose(patterns.x, [0, 1, 2, 3, 4])  # one column per spectrum, on the time axis
+    assert views["map"].last("set_marker") == (0.0,)
     assert views["navigator"].last("show_spectra")[1][2] == ("2", "2", "Ice VII 4.00, Ice VI 1.50")
     assert views["navigator"].last("set_current") == (0, 5)
     assert views["phases"].last("show_rows")[1][0][:3] == ("H2O_Ice_VII", "2.000", "0.050")
@@ -83,10 +88,10 @@ def test_navigation_from_every_view(viewer):
     main.open(str(path))
     views["navigator"].on_select(3)
     assert session.index == 3 and views["spectrum"].last("show_spectrum")[1] is False  # zoom kept
-    assert views["map"].last("set_marker") == (3,)
-    views["pressure"].on_pick(1.9)  # ms: nearest spectrum is #2 (t = 2 ms)
-    assert session.index == 2 and views["pressure"].last("set_marker") == (2.0,)
-    views["map"].on_pick(4)
+    assert views["map"].last("set_marker") == (3.0,)  # ms
+    views["evolution"].on_pick(1.9)  # ms: nearest spectrum is #2 (t = 2 ms)
+    assert session.index == 2 and views["evolution"].last("set_marker") == (2.0,)
+    views["map"].on_pick(3.8)
     main.step(+1)  # already the last one
     assert session.index == 4
     main.first()
@@ -106,7 +111,7 @@ def test_units(viewer, sample_run):
     assert window.last("set_units") == (display.UNITS, "q_A^-1")
     main.set_unit("d_A")
     data = views["map"].last("show_map")[0]
-    assert data.x_label == "d (Å)" and np.all(np.diff(data.x) > 0) and data.image.shape == (5, 400)
+    assert data.y_label == "d (Å)" and np.all(np.diff(data.y) > 0) and data.image.shape == (400, 5)
     # no energy: only 2θ
     session.run.calibration = None
     session.modified()
@@ -157,9 +162,10 @@ def test_legacy_file_opens_unsaved(viewer, tmp_path):
 def test_display_without_times_uses_the_index(sample_run):
     for spectrum in sample_run.spectra:
         spectrum.time = np.nan
-    data = display.pressure_data(sample_run)
+    data = display.evolution_data(sample_run)
     assert data.x_label == "spectre" and list(data.x) == [0, 1, 2, 3, 4] and data.traces == []
-    assert display.nearest_spectrum(data.x, 2.6) == 3
+    assert display.nearest_spectrum(data.x, 2.6) == 3 and data.trace_span is None
+    assert display.time_map(sample_run, "2th_deg").x_label == "spectre"
 
 
 def test_new_runs_from_raw_data(viewer, raw_root, tmp_path):
@@ -269,3 +275,78 @@ def test_cake_keeps_the_covered_azimuth_sector_in_one_piece():
     assert az[0] == pytest.approx(100.5) and az[-1] == pytest.approx(239.5) and np.allclose(np.diff(az), 1.0)
     full = np.ones((360, 4))
     assert display.compact_azimuth(azimuth, full)[1].shape == (360, 4)
+
+
+def test_quantities_versus_time(sample_run):
+    ice6 = sample_run.spectra[2].phase_fit("H2O_Ice_VI")
+    ice6.a, ice6.a_err, ice6.c, ice6.c_err = 6.0, 0.003, 5.4, 0.004  # tetragonal: a and c are free
+    keys = [key for key, _ in display.available_quantities(sample_run)]
+    assert keys == ["P", "V", "a", "c", "c/a"]  # ice VII is cubic: no b, c or c/a of its own
+
+    ratio = display.evolution_data(sample_run, "c/a")
+    assert [s.phase for s in ratio.series] == ["H2O_Ice_VI"] and ratio.y_label == "c/a"
+    assert ratio.series[0].y[0] == pytest.approx(0.9)
+    assert ratio.series[0].error[0] == pytest.approx(0.9 * np.hypot(0.003 / 6.0, 0.004 / 5.4))
+
+    card = sample_run.phases["H2O_Ice_VII"]
+    volume = display.evolution_data(sample_run, "V", relative=True)
+    assert volume.y_label == "V/V₀" and volume.relative and volume.can_be_relative
+    np.testing.assert_allclose(volume.series[0].y, np.array([36.0, 37.0, 38.0]) / card.v0_at(eos.T_REF))
+    np.testing.assert_allclose(volume.series[0].error, 0.1 / card.v0_at(eos.T_REF))
+    relative_a = display.evolution_data(sample_run, "a", relative=True)
+    assert relative_a.y_label == "a/a₀" and relative_a.series[0].y[0] == pytest.approx(3.3 / card.a)
+
+    pressure = display.evolution_data(sample_run, "P", relative=True)  # P has no card value
+    assert not pressure.relative and not pressure.can_be_relative and pressure.y_label == "P (GPa)"
+    assert display.evolution_data(sample_run, "b").quantity == "P"  # no b in this run: back to P
+    with pytest.raises(ValueError):
+        display.evolution_data(sample_run, "Z")
+
+
+def test_evolution_presenter_changes_the_quantity(viewer):
+    session, settings, views, window, main, path, presenters = viewer
+    main.open(str(path))
+    views["evolution"].on_quantity("V", True)
+    data = views["evolution"].last("show_evolution")[0]
+    assert data.quantity == "V" and data.y_label == "V/V₀" and [s.phase for s in data.series] == ["H2O_Ice_VII"]
+    session.select(1)
+    assert views["evolution"].last("set_marker") == (1.0,)
+    with pytest.raises(ValueError):
+        views["evolution"].on_quantity("Z", False)
+
+
+def test_map_columns_follow_the_time_axis(sample_run):
+    grid, columns = display.time_columns(np.array([0.0, 1.0, 2.0, 3.0]))
+    np.testing.assert_allclose(grid, [0, 1, 2, 3])
+    assert list(columns) == [0, 1, 2, 3]
+    grid, columns = display.time_columns(np.array([0.0, 1.0, 2.0, 10.0]))  # a gap: uniform columns, nearest spectrum
+    np.testing.assert_allclose(grid, np.arange(11.0))
+    assert list(columns) == [0, 1, 2, 2, 2, 2, 2, 3, 3, 3, 3]
+    grid, columns = display.time_columns(np.array([2.0, 0.0, 1.0]))  # not sorted
+    assert list(grid) == [0.0, 1.0, 2.0] and list(columns) == [1, 2, 0]
+    assert list(display.time_columns(np.array([5.0]))[1]) == [0]
+
+    sample_run.spectra[4].time = 10e-3  # s
+    data = display.time_map(sample_run, "2th_deg")
+    assert data.image.shape == (400, 11) and list(data.columns[-3:]) == [4, 4, 4]
+    np.testing.assert_allclose(data.image[:, 0], sample_run.spectra[0].corrected)
+
+
+def test_image_scales_and_levels():
+    image = np.array([[np.nan, -5.0, 1.0], [10.0, 100.0, 1000.0]])
+    np.testing.assert_array_equal(display.scaled_image(image, "linear"), image)
+    logged = display.scaled_image(image, "log")
+    assert np.isnan(logged[0, 0]) and logged[1, 2] == pytest.approx(3.0) and np.isfinite(logged[0, 1])
+    assert logged[0, 1] == logged[0, 2] == pytest.approx(np.log10(np.percentile([1, 10, 100, 1000], 5)))  # floor
+    rooted = display.scaled_image(image, "sqrt")
+    assert rooted[0, 1] == 0.0 and rooted[1, 1] == pytest.approx(10.0) and np.isnan(rooted[0, 0])
+    with pytest.raises(ValueError):
+        display.scaled_image(image, "cubic")
+
+    hot = np.zeros((100, 100))
+    hot[:, :50] = 1.0
+    hot[0, 0] = 1e6  # one hot pixel
+    low, high = display.robust_levels(hot)
+    assert low == 0.0 and high == 1.0
+    assert display.robust_levels(np.full((3, 3), 7.0)) == (7.0, 8.0)
+    assert display.robust_levels(np.full((3, 3), np.nan)) == (0.0, 1.0)

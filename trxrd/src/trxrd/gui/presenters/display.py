@@ -1,8 +1,10 @@
 """What the viewer shows, computed from the domain objects (no Qt, testable alone).
 
 Curves of the current spectrum (data, background, fit) and the expected
-lines of its phases, P(t) per phase, oscilloscope traces, intensity map and
-table rows. Every x value is in the display unit: 2θ (deg), Q (Å⁻¹) or d (Å).
+lines of its phases; P, V, a, c/a... of each phase versus time with the
+oscilloscope traces; map of the integrated patterns versus time; image
+scaling; table rows. Every 2θ value is shown in the display unit: 2θ (deg),
+Q (Å⁻¹) or d (Å).
 """
 
 from __future__ import annotations
@@ -13,8 +15,8 @@ from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
 
-from trxrd.domain import Run, Spectrum, energy_to_wavelength
-from trxrd.physics import eos
+from trxrd.domain import PhaseCard, PhaseFit, Run, Spectrum, energy_to_wavelength
+from trxrd.physics import eos, lattice
 from trxrd.physics.lattice import AXIS_LABELS, convert_two_theta
 
 UNITS = ("2th_deg", "q_A^-1", "d_A")
@@ -113,61 +115,176 @@ def spectrum_curves(run: Run, index: int, unit: str) -> SpectrumCurves:
     )
 
 
-# ---------------------------------------------------------------------------- P(t), oscilloscope
+# ---------------------------------------------------------------------------- quantities versus time, oscilloscope
+
+
+@dataclass(frozen=True)
+class Quantity:
+    key: str
+    label: str  # axis label
+    relative_label: Optional[str] = None  # divided by the value of the card (X/X₀); None: no reference
+
+
+QUANTITIES = {q.key: q for q in (
+    Quantity("P", "P (GPa)"),
+    Quantity("V", "V (Å³)", "V/V₀"),
+    Quantity("a", "a (Å)", "a/a₀"),
+    Quantity("b", "b (Å)", "b/b₀"),
+    Quantity("c", "c (Å)", "c/c₀"),
+    Quantity("c/a", "c/a", "(c/a)/(c/a)₀"),
+    Quantity("b/a", "b/a", "(b/a)/(b/a)₀"),
+    Quantity("T", "T (K)"),
+)}
+
+
+def _ratio(top: float, top_err: float, bottom: float, bottom_err: float) -> Tuple[float, float]:
+    if not (np.isfinite(top) and np.isfinite(bottom)) or bottom == 0:
+        return np.nan, np.nan
+    value = top / bottom
+    terms = [(e / v) ** 2 for e, v in ((top_err, top), (bottom_err, bottom)) if np.isfinite(e) and v]
+    return value, abs(value) * math.sqrt(sum(terms))  # errors taken as independent
+
+
+def quantity_value(fit: PhaseFit, card: Optional[PhaseCard], key: str) -> Tuple[float, float]:
+    """(value, 1σ error) of one quantity for one fitted phase; NaN when it does not apply.
+
+    b, c and the axial ratios only exist where the crystal system leaves them
+    free (b of a cubic phase is a, its c/a is 1: not shown).
+    """
+    free = lattice.free_lengths(card.symmetry) if card is not None else ("a", "b", "c")
+    lengths = {"a": (fit.a, fit.a_err), "b": (fit.b, fit.b_err), "c": (fit.c, fit.c_err)}
+    if key == "P":
+        return fit.pressure, fit.pressure_err
+    if key == "T":
+        return fit.temperature, fit.temperature_err
+    if key == "V":
+        return fit.volume, fit.volume_err
+    if key in lengths:
+        return lengths[key] if key in free else (np.nan, np.nan)
+    if key in ("c/a", "b/a"):
+        top = key[0]
+        return _ratio(*lengths[top], *lengths["a"]) if top in free else (np.nan, np.nan)
+    raise ValueError(f"unknown quantity {key!r}")
+
+
+def reference_value(card: Optional[PhaseCard], key: str, temperature: float = np.nan) -> float:
+    """Value of the card at ambient pressure (V₀ at the temperature of the fit), NaN if none."""
+    if card is None or QUANTITIES[key].relative_label is None:
+        return np.nan
+    if key == "V":
+        return card.v0_at(temperature if np.isfinite(temperature) else eos.T_REF)
+    if key in ("a", "b", "c"):
+        return float(getattr(card, key))
+    return float(getattr(card, key[0])) / card.a  # c/a, b/a
 
 
 @dataclass
 class Series:
     phase: str
     color: int
-    index: np.ndarray  # spectra where the phase was fitted
+    index: np.ndarray  # spectra where the phase has a value
     x: np.ndarray
-    pressure: np.ndarray
-    error: np.ndarray
+    y: np.ndarray
+    error: np.ndarray  # 1σ, 0 when unknown
 
 
 @dataclass
 class Trace:
     name: str
-    x: np.ndarray  # same axis as the pressures (ms)
+    x: np.ndarray  # same axis as the spectra (ms)
     y: np.ndarray
     trigger: bool
 
 
 @dataclass
-class PressureData:
+class EvolutionData:
+    """One quantity of every phase versus time, and the oscilloscope (dDAC view of the v1)."""
+
     x_label: str
+    y_label: str
     x: np.ndarray  # one value per spectrum: time (ms) or index
     series: List[Series]
     traces: List[Trace]
+    quantity: str  # key of QUANTITIES actually shown
+    relative: bool
+    quantities: List[Tuple[str, str]]  # (key, label) of the quantities this run has
+
+    @property
+    def can_be_relative(self) -> bool:
+        """The quantity has a card value to divide by (not P, not T)."""
+        return QUANTITIES[self.quantity].relative_label is not None
+
+    @property
+    def span(self) -> Tuple[float, float]:
+        """x range of the spectra."""
+        return (float(np.nanmin(self.x)), float(np.nanmax(self.x))) if len(self.x) else (0.0, 1.0)
+
+    @property
+    def trace_span(self) -> Optional[Tuple[float, float]]:
+        """x range of the whole oscilloscope record, None without one."""
+        if not self.traces:
+            return None
+        return (float(min(np.nanmin(t.x) for t in self.traces)), float(max(np.nanmax(t.x) for t in self.traces)))
 
 
 def spectrum_axis(run: Run) -> Tuple[np.ndarray, str, bool]:
-    """x of each spectrum on the P(t) axis: time in ms, or the index when times are missing."""
+    """x of each spectrum on the time axis: time in ms, or the index when times are missing."""
     times = run.times
     if len(times) and np.isfinite(times).all():
         return times * 1e3, "t (ms)", True
     return np.arange(len(run), dtype=float), "spectre", False
 
 
-def pressure_data(run: Run) -> PressureData:
+def available_quantities(run: Run) -> List[Tuple[str, str]]:
+    """Quantities with at least one value in the run (P always first)."""
+    found = {"P"}
+    for spectrum in run.spectra:
+        for fit in spectrum.phases:
+            card = run.phases.get(fit.phase)
+            found.update(key for key in QUANTITIES
+                         if key not in found and np.isfinite(quantity_value(fit, card, key)[0]))
+    return [(key, q.label) for key, q in QUANTITIES.items() if key in found]
+
+
+def evolution_data(run: Run, quantity: str = "P", relative: bool = False) -> EvolutionData:
+    """`quantity` of every phase per spectrum; relative: divided by the card value (V/V₀, a/a₀...).
+
+    A quantity the run does not have falls back to P.
+    """
+    if quantity not in QUANTITIES:
+        raise ValueError(f"unknown quantity {quantity!r}")
+    quantities = available_quantities(run)
+    if quantity not in dict(quantities):
+        quantity = "P"
+    info = QUANTITIES[quantity]
+    relative = bool(relative) and info.relative_label is not None
     x, label, timed = spectrum_axis(run)
-    order = phase_order(run)
     series = []
-    for k, phase in enumerate(order):
-        rows = [(i, f.pressure, f.pressure_err) for i, s in enumerate(run.spectra) for f in s.phases
-                if f.phase == phase and np.isfinite(f.pressure)]
+    for k, phase in enumerate(phase_order(run)):
+        card = run.phases.get(phase)
+        rows = []
+        for i, spectrum in enumerate(run.spectra):
+            fit = spectrum.phase_fit(phase)
+            if fit is None:
+                continue
+            value, error = quantity_value(fit, card, quantity)
+            if relative:
+                reference = reference_value(card, quantity, fit.temperature)
+                value, error = value / reference, error / reference
+            if np.isfinite(value):
+                rows.append((i, value, error))
         if rows:
             index = np.array([r[0] for r in rows])
-            err = np.array([r[2] for r in rows], dtype=float)
+            error = np.array([r[2] for r in rows], dtype=float)
             series.append(Series(phase, k, index, x[index], np.array([r[1] for r in rows], dtype=float),
-                                 np.where(np.isfinite(err), err, 0.0)))
+                                 np.where(np.isfinite(error), np.abs(error), 0.0)))
     traces = []
     if timed and run.oscilloscope is not None and len(run.oscilloscope.time):
         t = np.asarray(run.oscilloscope.time, dtype=float) * 1e3
         for name, values in run.oscilloscope.channels.items():
             traces.append(Trace(name, t, np.asarray(values, dtype=float), name == run.oscilloscope.trigger_channel))
-    return PressureData(label, x, series, traces)
+    y_label = info.relative_label if relative else info.label
+    return EvolutionData(label, y_label, x, series, traces, quantity, relative, quantities)
 
 
 def nearest_spectrum(x_of_spectra: np.ndarray, x: float) -> Optional[int]:
@@ -176,7 +293,7 @@ def nearest_spectrum(x_of_spectra: np.ndarray, x: float) -> Optional[int]:
     return int(np.nanargmin(np.abs(np.asarray(x_of_spectra) - x)))
 
 
-# ---------------------------------------------------------------------------- map
+# ---------------------------------------------------------------------------- maps
 
 
 @dataclass
@@ -197,6 +314,84 @@ def intensity_map(run: Run, unit: str) -> Optional[MapData]:
         rows.append(y if x.shape == reference.shape and np.allclose(x, reference) else np.interp(reference, x, y))
     grid, image = _resample(reference, np.vstack(rows), unit, run)  # Q and d are not uniform in 2θ
     return MapData(AXIS_LABELS[unit], grid, image)
+
+
+MAX_COLUMNS = 4000
+
+
+def time_columns(x: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    """Uniform grid over the spectra times and the spectrum shown in each column (the nearest one).
+
+    An image needs evenly spaced columns: when the spectra are not evenly
+    spaced (gaps, static spectra), each column shows the nearest spectrum.
+    """
+    x = np.asarray(x, dtype=float)
+    order = np.argsort(x, kind="stable")
+    ordered = x[order]
+    steps = np.diff(ordered)
+    positive = steps[steps > 0]
+    if len(x) < 2 or not positive.size:
+        return ordered, order
+    step = float(np.median(positive))
+    if np.allclose(steps, step, rtol=0.02, atol=0):
+        return ordered, order
+    count = min(int(round((ordered[-1] - ordered[0]) / step)) + 1, MAX_COLUMNS)
+    grid = np.linspace(ordered[0], ordered[-1], count)
+    nearest = np.searchsorted((ordered[1:] + ordered[:-1]) / 2, grid)
+    return grid, order[nearest]
+
+
+@dataclass
+class TimeMapData:
+    """Integrated patterns side by side: time (or index) along x, 2θ / Q / d along y (dDAC view of the v1)."""
+
+    x_label: str
+    x: np.ndarray  # uniform grid of the columns (ms or index)
+    columns: np.ndarray  # spectrum shown in each column
+    y_label: str
+    y: np.ndarray  # uniform grid in the display unit
+    image: np.ndarray  # [n_y, n_x], background subtracted when known
+
+
+def time_map(run: Optional[Run], unit: str) -> Optional[TimeMapData]:
+    patterns = intensity_map(run, unit) if run is not None else None
+    if patterns is None:
+        return None
+    x, label, _ = spectrum_axis(run)
+    grid, columns = time_columns(x)
+    return TimeMapData(label, grid, columns, patterns.x_label, patterns.x, patterns.image[columns].T)
+
+
+# ---------------------------------------------------------------------------- image display
+
+SCALES = ("linear", "log", "sqrt")
+
+
+def scaled_image(image, scale: str) -> np.ndarray:
+    """Display copy of an image: linear, log10 or square root (NaN kept: masked pixels, empty azimuths).
+
+    In log, values below a floor (5th percentile of the positive values) are
+    raised to it: background-subtracted maps have negative values.
+    """
+    image = np.asarray(image, dtype=float)
+    if scale == "linear":
+        return image
+    if scale == "log":
+        finite = image[np.isfinite(image)]
+        positive = finite[finite > 0]
+        floor = max(float(np.percentile(positive, 5)), 1e-6) if positive.size else 1.0
+        return np.log10(np.clip(image, floor, None))
+    if scale == "sqrt":
+        return np.sqrt(np.clip(image, 0.0, None))
+    raise ValueError(f"unknown scale {scale!r}")
+
+
+def robust_levels(image: np.ndarray, low: float = 1.0, high: float = 99.8) -> Tuple[float, float]:
+    """Colour levels from percentiles (NaN ignored): a few hot pixels must not darken the whole image."""
+    finite = np.asarray(image, dtype=float)
+    finite = finite[np.isfinite(finite)]
+    lo, hi = (float(v) for v in np.percentile(finite, [low, high])) if finite.size else (0.0, 1.0)
+    return (lo, hi) if hi > lo else (lo, lo + 1.0)
 
 
 # ---------------------------------------------------------------------------- cake

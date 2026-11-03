@@ -7,7 +7,7 @@ angles in degrees, wavelengths in metres.
 
 from __future__ import annotations
 
-from typing import NamedTuple, Sequence
+from typing import Dict, NamedTuple, Sequence, Tuple
 
 import numpy as np
 
@@ -40,6 +40,27 @@ def constrain(symmetry: str, cell: Cell) -> Cell:
     if "MONOCLINIC" in sym:
         return Cell(a, b, c, 90.0, be, 90.0)
     return cell
+
+
+# Independent cell lengths of each crystal system (the others follow from `constrain`).
+FREE_LENGTHS: Dict[str, Tuple[str, ...]] = {
+    "CUBIC": ("a",),
+    "TETRAGONAL": ("a", "c"),
+    "HEXAGONAL": ("a", "c"),
+    "RHOMBOHEDRAL": ("a",),
+    "ORTHORHOMBIC": ("a", "b", "c"),
+    "MONOCLINIC": ("a", "b", "c"),
+    "TRICLINIC": ("a", "b", "c"),
+}
+
+
+def free_lengths(symmetry: str) -> Tuple[str, ...]:
+    """Cell lengths that are independent in this crystal system: ("a",) for cubic, ("a", "c") for hexagonal..."""
+    sym = symmetry.upper()
+    for key, names in FREE_LENGTHS.items():
+        if key in sym:
+            return names
+    return ("a", "b", "c")
 
 
 def cell_volume(symmetry: str, cell: Cell) -> float:

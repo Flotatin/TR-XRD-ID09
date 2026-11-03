@@ -33,15 +33,15 @@ def test_window_opens_a_run_and_navigates(viewer):
     assert window.spectrum.fit.getData()[0] is not None
     assert len(window.spectrum._ticks) == 2  # ice VII: ticks + their tooltips
     assert window.navigator.table.rowCount() == 5 and window.phases.rowCount() == 1
-    assert window.peaks.rowCount() == 2 and window.map.image.image.shape == (5, 400)
-    assert window.pressure.channel.currentText() == "Channel3"  # the non-trigger channel first
+    assert window.peaks.rowCount() == 2 and window.map.image.image.shape == (400, 5)  # [2θ, time]
+    assert window.evolution.channel.currentText() == "Channel3"  # the non-trigger channel first
 
     window.actions.get("next").trigger()
     window.actions.get("next").trigger()
     assert viewer.session.index == 2 and window.navigator.slider.value() == 2
-    assert window.phases.rowCount() == 2 and window.pressure.marker.value() == pytest.approx(2.0)
+    assert window.phases.rowCount() == 2 and window.evolution.marker.value() == pytest.approx(2.0)
     window.navigator.slider.setValue(4)
-    assert viewer.session.index == 4 and window.map.marker.value() == 4
+    assert viewer.session.index == 4 and window.map.marker.value() == pytest.approx(4.0)  # ms
     window.actions.get("first").trigger()
     assert viewer.session.index == 0 and window.navigator.table.currentRow() == 0
 
@@ -127,3 +127,63 @@ def test_new_run_dialog_browses_raw_data(raw_root, tmp_path):
     assert request.two_theta_range == (8.0, 25.0) and [p.split("phases")[-1][1:] for p in request.phase_paths] == ["H2O", "Sn"]
     dialog.accept()
     assert NewRunDialog(raw_data, settings=settings).poni.text() == str(DATA / "calib_THT8_correct_samedi.poni")
+
+
+def test_image_panel_scale_colours_and_levels(tmp_path):
+    from PySide6.QtCore import QSettings
+    from trxrd.gui.views.images import ImagePanel
+    from trxrd.gui.views.main_window import application
+
+    application(["test"])
+    settings = QSettings(str(tmp_path / "s.ini"), QSettings.Format.IniFormat)
+    panel = ImagePanel("test", scale="log", settings=settings)
+    image = np.outer(np.arange(1, 11), np.ones(20)) ** 3  # 1 .. 1000
+    image[0, 0] = np.nan  # masked pixel
+    panel.set_image(image)
+    assert panel.auto.isChecked()  # setting the levels from the program is not a user choice
+    assert panel.levels[1] == pytest.approx(3.0, abs=0.01) and np.isfinite(panel.image.image).all()  # log10
+    panel.scale.setCurrentIndex(panel.scale.findData("linear"))
+    assert panel.levels[1] == pytest.approx(1000.0, rel=0.01)
+    panel.set_levels(10.0, 500.0)
+    assert not panel.auto.isChecked()
+    panel.set_image(image * 2)  # next spectrum: the levels chosen by the user stay
+    assert panel.levels == (10.0, 500.0) and tuple(panel.image.levels) == (10.0, 500.0)
+    panel.reset_levels()
+    assert panel.levels[1] == pytest.approx(2000.0, rel=0.01)
+    panel.colors.setCurrentIndex(panel.colors.findData("gray_r"))
+    lut = panel.image.lut(panel.image.image) if callable(panel.image.lut) else panel.image.lut
+    assert tuple(lut[0][:3]) == (255, 255, 255)  # reversed grey: low values in white
+    panel.show_histogram.setChecked(False)
+    assert not panel.histogram.isVisibleTo(panel)
+
+    again = ImagePanel("test", settings=settings)  # the choices are remembered
+    assert again.scale.currentData() == "linear" and again.colors.currentData() == "gray_r"
+    assert not again.show_histogram.isChecked()
+
+
+def test_evolution_view_and_aligned_plots(viewer):
+    window = viewer.window
+    viewer.main.open(str(viewer.path))
+    evolution = window.evolution
+    assert [evolution.quantity.itemData(k) for k in range(evolution.quantity.count())] == ["P", "V", "a"]
+    assert not evolution.relative.isEnabled()  # P has no card value
+    evolution.quantity.setCurrentIndex(evolution.quantity.findData("V"))
+    assert evolution.plot.getPlotItem().getAxis("left").labelText == "V (Å³)" and evolution.relative.isEnabled()
+    evolution.relative.setChecked(True)
+    assert evolution.plot.getPlotItem().getAxis("left").labelText == "V/V₀"
+    x_range = evolution.plot.getPlotItem().vb.viewRange()[0]
+    assert x_range[0] < 0.0 and 4.0 < x_range[1] < 5.0  # the spectra (0..4 ms)
+    assert window.map.plot.getPlotItem().vb.viewRange()[0] == pytest.approx(x_range)  # same time axis
+    evolution.span.setCurrentIndex(evolution.span.findData("trace"))
+    assert evolution.plot.getPlotItem().vb.viewRange()[0][1] > 1000.0  # the whole oscilloscope record (1 s)
+    window.map.on_pick(3.2)
+    assert viewer.session.index == 3
+
+    window.show()
+    window.map.panel.show_histogram.setChecked(True)
+    window.cake.panel.show_histogram.setChecked(True)
+    assert evolution.spacer.isVisible() and window.spectrum.spacer.isVisible()
+    window.map.panel.show_histogram.setChecked(False)
+    assert not evolution.spacer.isVisible()
+    window.actions.get("cake").trigger()  # cake hidden: no margin left under the spectrum
+    assert not window.cake.isVisible() and not window.spectrum.spacer.isVisible()

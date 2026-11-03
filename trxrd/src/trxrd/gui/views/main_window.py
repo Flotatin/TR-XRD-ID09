@@ -9,12 +9,12 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QCloseEvent, QGuiApplication
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QDialog, QFileDialog, QLabel, QMainWindow, QMessageBox, QProgressDialog, QSplitter,
-    QTabWidget, QVBoxLayout, QWidget,
+    QTabWidget, QVBoxLayout,
 )
 
 from trxrd.gui.actions import ActionRegistry
 from trxrd.gui.views.panels import Navigator, RowsTable
-from trxrd.gui.views.plots import CakeView, MapView, PressureView, SpectrumView
+from trxrd.gui.views.plots import CakeView, EvolutionView, SpectrumView, TimeMapView
 from trxrd.physics.lattice import AXIS_LABELS
 
 FILE_FILTER = "Runs (*.trxrd.h5 *.h5 *.CEDX *.CEDXUp *.cedx);;Tous les fichiers (*)"
@@ -24,7 +24,7 @@ SAVE_FILTER = "Run TR-XRD v2 (*.trxrd.h5)"
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.resize(1500, 900)
+        self.resize(1600, 950)
         self.on_close_request: Optional[Callable[[], bool]] = None  # set by the application
         self.on_unit: Optional[Callable[[str], None]] = None
         self.actions = ActionRegistry(self)
@@ -33,28 +33,36 @@ class MainWindow(QMainWindow):
         self.navigator = Navigator()
         self.spectrum = SpectrumView()
         self.cake = CakeView(link_to=self.spectrum.plot)  # under the spectrum, as in the v1
-        self.pressure = PressureView()
-        self.map = MapView()
+        self.evolution = EvolutionView()
+        self.map = TimeMapView(link_to=self.evolution.plot)  # same time axis, as in the dDAC view of the v1
         self.phases = RowsTable()
         self.peaks = RowsTable()
+        # a histogram beside an image narrows its plot: the plot stacked above gets the same margin
+        self.cake.panel.on_histogram = lambda shown: self.align_plots()
+        self.map.panel.on_histogram = lambda shown: self.align_plots()
 
-        tabs = QTabWidget()
-        tabs.addTab(self.pressure, "P(t)")
-        tabs.addTab(self.map, "Carte")
+        tables = QTabWidget()
+        tables.addTab(self.phases, "Phases du spectre")
+        tables.addTab(self.peaks, "Pics du spectre")
+        left = QSplitter(Qt.Orientation.Vertical)
+        left.addWidget(self.navigator)
+        left.addWidget(tables)
+        left.setSizes([560, 340])
         center = QSplitter(Qt.Orientation.Vertical)
         center.addWidget(self.spectrum)
         center.addWidget(self.cake)
-        center.addWidget(tabs)
-        center.setSizes([420, 260, 300])
-        right = QSplitter(Qt.Orientation.Vertical)
-        right.addWidget(_titled("Phases du spectre", self.phases))
-        right.addWidget(_titled("Pics du spectre", self.peaks))
+        center.setSizes([560, 340])
+        ddac = QSplitter(Qt.Orientation.Vertical)
+        ddac.addWidget(self.evolution)
+        ddac.addWidget(self.map)
+        ddac.setSizes([480, 420])
         main = QSplitter(Qt.Orientation.Horizontal)
-        main.addWidget(self.navigator)
+        main.addWidget(left)
         main.addWidget(center)
-        main.addWidget(right)
-        main.setSizes([300, 820, 380])
+        main.addWidget(ddac)
+        main.setSizes([330, 700, 570])
         self.setCentralWidget(main)
+        self.align_plots()
 
         self.units = QComboBox()
         self.units.currentIndexChanged.connect(self._unit_chosen)
@@ -75,6 +83,11 @@ class MainWindow(QMainWindow):
         bar.addSeparator()
         bar.addWidget(QLabel(" Axe : "))
         bar.addWidget(self.units)
+
+    def align_plots(self) -> None:
+        """Same right margin above and below: the spectrum over the cake, the evolution plot over the map."""
+        self.spectrum.spacer.setVisible(self.cake.isVisibleTo(self) and self.cake.panel.show_histogram.isChecked())
+        self.evolution.spacer.setVisible(self.map.panel.show_histogram.isChecked())
 
     def _unit_chosen(self, index: int) -> None:
         unit = self.units.itemData(index)
@@ -187,16 +200,6 @@ class MainWindow(QMainWindow):
             event.accept()
         else:
             event.ignore()
-
-
-def _titled(title: str, widget: QWidget) -> QWidget:
-    box = QWidget()
-    layout = QVBoxLayout(box)
-    layout.setContentsMargins(0, 0, 0, 0)
-    label = QLabel(f"<b>{title}</b>")
-    layout.addWidget(label)
-    layout.addWidget(widget)
-    return box
 
 
 def application(argv: Sequence[str]) -> QApplication:
