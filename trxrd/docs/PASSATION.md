@@ -49,6 +49,8 @@ Ne pas les remettre en cause sans lui en parler.
 | Transition Sn β ↔ γ | Hystérésis entre 8 et 12 GPa, pas au-delà : Sn β jusqu'à 12 GPa, Sn γ à partir de 8 GPa (fiches de la bibliothèque) ; pour les fichiers v1, la recherche prend la plage de la bibliothèque |
 | Interface | Commencer maintenant (novembre 2026), avec les briques existantes ; ajuster à l'usage |
 | Versions | v1 = `cedapp`, v2 = `trxrd` ; à afficher clairement (README racine, `trxrd --version`) |
+| dP/dt moyen sur un intervalle | Pas besoin d'enregistrer l'intervalle ni ses résultats dans le run (novembre 2026) : la copie dans le presse-papiers suffit |
+| Finitions de l'interface | Avancer d'abord sur les fonctions ; on reviendra peaufiner à la fin (novembre 2026) |
 
 ## 3. Ce qui est fait
 
@@ -62,13 +64,13 @@ Ne pas les remettre en cause sans lui en parler.
 | `8cc1c8c` | Validation sur un run réel (Water05) et cinq corrections qui en découlent ; nommage v1 / v2 |
 | `e135918` | Documentation : commit de référence de la v1 |
 | `68a1b7c` | Suivi des pics ; `trxrd compare` ; `CLAUDE.md` ; environnement virtuel séparé |
-| branche `gui-viewer` | Interface :<br>- étape 1, le lecteur : `trxrd-gui`, presenters sans Qt, registre d'actions, ouverture en arrière-plan (`Session.read` / `attach`) ;<br>- étape 2 : nouveaux runs depuis RAW_DATA, cake sous le spectre, calibration à la Dioptas validée sur le LaB6 réel ;<br>- étape 2 (suite) : panneau dDAC de la v1 (grandeur au choix P, V, a, b, c, c/a, b/a, T, ou X/X₀, avec le piézo ; dP/dt par échantillon, moyen sur un intervalle ; carte des diffractogrammes en fonction du temps), images à échelle, niveaux et couleurs réglables |
+| branche `gui-viewer` | Interface :<br>- étape 1, le lecteur : `trxrd-gui`, presenters sans Qt, registre d'actions, ouverture en arrière-plan (`Session.read` / `attach`) ;<br>- étape 2 : nouveaux runs depuis RAW_DATA, cake sous le spectre, calibration à la Dioptas validée sur le LaB6 réel ; aperçu du scan brut pour choisir la plage 2θ ;<br>- étape 2 (suite) : panneau dDAC de la v1 (grandeur au choix P, V, a, b, c, c/a, b/a, T, ou X/X₀, avec le piézo ; dP/dt par échantillon, moyen sur un intervalle ; carte des diffractogrammes en fonction du temps), images à échelle, niveaux et couleurs réglables |
 | branche `p2-validation-2026` | Validation sur les 143 runs de janvier 2026 (61 % → 81 % de spectres aux mêmes phases) : conversion des runs Jungfrau « continu », `Vmin` de la v1 non repris, coût d'apparition d'une famille nul, suivi interrompu par un pic fort inexpliqué, pics larges ignorés, tri des pics fixes, `--temperature`, familles sans casse, CLI sous Windows |
 
 ### 3.2 Par fonctionnalité
 
-Tout est testé : `python -m pytest trxrd` compte 188 tests. Les 7 comparaisons numériques avec la v1 sont
-ignorées quand la v1 n'est pas importable, par exemple dans `.venv-v2`, qui n'a pas PyQt5 : 181 tests
+Tout est testé : `python -m pytest trxrd` compte 199 tests. Les 7 comparaisons numériques avec la v1 sont
+ignorées quand la v1 n'est pas importable, par exemple dans `.venv-v2`, qui n'a pas PyQt5 : 192 tests
 passent alors.
 
 | Fonctionnalité | Où | État / preuve |
@@ -92,6 +94,7 @@ passent alors.
 | État de l'application pour l'interface | `services/session.py` | ✅ (sans Qt) |
 | Interface, étape 1 : le lecteur (`trxrd-gui`) | `gui/` | ✅ presenters testés avec de fausses vues, fenêtre testée hors écran ; essayée sur Water05 scan 9 et Water01_scan0074 (1 600 spectres) |
 | Parcours de RAW_DATA, nouveaux runs depuis l'interface | `services/raw_data.py`, `run_builder.build_and_save`, `gui/views/new_run.py` | ✅ 43 jeux de données de janvier 2026 lus en 0,7 s ; scan 9 de Water05 intégré en 2 s, temps identiques au `.CEDX` |
+| Aperçu d'un scan brut avant l'intégration : image ou cake (maximum du scan ou une image), diagramme et couverture en azimut sur tout le détecteur, plage 2θ à tirer | `services/images.ScanPreview`, `gui/presenters/preview.py`, `gui/views/preview.py` | ✅ Water05 scan 9 : pixels utilisables de 5,21 à 29,30° ; maximum de 32 images sur 1 600 en 2,4 s |
 | Cake / image brute sous le spectre | `services/images.py`, `CakePresenter` | ✅ image brute d'un `.CEDX` retrouvée par le nom du run ; 0,03 s par spectre |
 | Panneau dDAC : grandeur de chaque phase en fonction du temps (P, V, a, b, c, c/a, b/a, T, ou ÷ fiche), piézo, carte des diffractogrammes sur le même axe du temps | `gui/presenters/display.py`, `EvolutionPresenter`, `MapPresenter`, `gui/views/plots.py` | ✅ Water05 scan 9 ; carte de Water01_scan0074 (1 600 spectres) en 0,03 s |
 | dP/dt par échantillon ou par phase (droite glissante), dP/dt moyen sur un intervalle (pente et ΔP/Δt) | `processing/rates.py`, `services/rates.py`, `RatePresenter` | ✅ Water05 scan 9 : eau et Sn culminent vers −45 à −50 GPa/ms ; 6 ms pour 1 600 spectres |
@@ -228,6 +231,8 @@ Seul `trxrd/gui/` a le droit d'importer PySide6/pyqtgraph (règle vérifiée par
   ΔP/Δt de la pression lissée, à copier dans un tableur ;
 - [x] images (cake, carte, calibrant) : histogramme pour tirer les niveaux, échelle log / linéaire / racine,
   carte des couleurs, niveaux auto ou gardés d'un spectre à l'autre ; choix mémorisés ;
+- [x] aperçu du scan brut à la création d'un run (demandé par l'utilisateur) : image ou cake sur tout le
+  détecteur (maximum du scan ou une image), diagramme et couverture en azimut, plage 2θ tirée à la souris ;
 - [ ] lancer l'analyse automatique (`auto_analyse`) depuis l'interface : phases candidates, plage de P,
   zones exclues, pics fixes signalés, avec progression ;
 - [ ] onglet « masque » de la calibration : dessiner ou modifier un masque, comme dans Dioptas. Pour
@@ -238,8 +243,8 @@ Seul `trxrd/gui/` a le droit d'importer PySide6/pyqtgraph (règle vérifiée par
   montré par défaut, mais il faut le confirmer avec l'utilisateur. Le rôle de `ch2` est inconnu ;
 - des icônes pour la barre d'outils ;
 - le zoom du panneau dDAC, qui revient à la plage des spectres à chaque modification du run ;
-- dP/dt : l'intervalle n'est pas enregistré dans le run, et les résultats ne sont copiés que dans le
-  presse-papiers. À relier aux annotations de la v1 (P4) si l'utilisateur veut les garder dans le fichier ;
+- aperçu du scan brut, à peaufiner à la fin si besoin : raies attendues des phases sur le diagramme,
+  contour de la plage sur l'image ;
 - superposer plusieurs diffractogrammes (sélection de spectres, décalage vertical) : pas demandé, à proposer
   si la carte ne suffit pas.
 

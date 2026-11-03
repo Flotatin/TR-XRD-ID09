@@ -1,7 +1,9 @@
 """Dialog "new run from RAW_DATA": dataset, scans, calibration, phase cards, output folder.
 
 The dialog browses with the functions it is given (services.raw_data,
-passed by the presenter) and remembers its fields between sessions.
+passed by the presenter) and remembers its fields between sessions. The
+current scan is previewed over the whole detector (raw image or cake, and
+its pattern): the 2θ range of the integration is dragged there or typed.
 """
 
 from __future__ import annotations
@@ -16,7 +18,9 @@ from PySide6.QtWidgets import (
     QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
+from trxrd.gui.presenters.preview import PreviewPresenter
 from trxrd.gui.presenters.viewer import NewRunRequest
+from trxrd.gui.views.preview import ScanPreviewView
 
 SCAN_COLUMNS = ("Scan", "Images", "Oscillo", "Commande", "Début")
 
@@ -34,10 +38,11 @@ def _path_row(edit: QLineEdit, browse) -> QWidget:
 
 
 class NewRunDialog(QDialog):
-    def __init__(self, browse, parent: Optional[QWidget] = None, settings: Optional[QSettings] = None) -> None:
+    def __init__(self, browse, parent: Optional[QWidget] = None, settings: Optional[QSettings] = None,
+                 runner=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Nouveau run depuis RAW_DATA")
-        self.resize(1100, 720)
+        self.resize(1450, 900)
         self.browse = browse
         self.settings = settings or QSettings()
         self._datasets = []
@@ -58,15 +63,21 @@ class NewRunDialog(QDialog):
         self.table.verticalHeader().setVisible(False)
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.itemSelectionChanged.connect(self._update_ok)
+        self.table.currentCellChanged.connect(self._preview_scan)
         scans_box = QWidget()
         scans_layout = QVBoxLayout(scans_box)
         scans_layout.setContentsMargins(0, 0, 0, 0)
         scans_layout.addWidget(self.images_only)
         scans_layout.addWidget(self.table)
+        browser = QSplitter(Qt.Orientation.Vertical)
+        browser.addWidget(self.tree)
+        browser.addWidget(scans_box)
+        browser.setSizes([230, 370])
+        self.preview_view = ScanPreviewView(settings=self.settings)
         split = QSplitter(Qt.Orientation.Horizontal)
-        split.addWidget(self.tree)
-        split.addWidget(scans_box)
-        split.setSizes([300, 800])
+        split.addWidget(browser)
+        split.addWidget(self.preview_view)
+        split.setSizes([560, 890])
 
         self.poni = QLineEdit(self._get("poni", ""))
         self.mask = QLineEdit(self._get("mask", ""))
@@ -93,6 +104,7 @@ class NewRunDialog(QDialog):
         form.addRow("", self.calibrate)
 
         self.phases = QListWidget()
+        self.phases.setMaximumHeight(96)  # the room goes to the preview
         self.phases.addItems(self._phase_defaults())
         add, remove = QPushButton("Ajouter un dossier…"), QPushButton("Retirer")
         add.clicked.connect(self._add_phase_folder)
@@ -130,8 +142,21 @@ class NewRunDialog(QDialog):
         layout.addWidget(self.buttons)
         for edit in (self.poni, self.folder):
             edit.textChanged.connect(self._update_ok)
+
+        if runner is None:
+            from trxrd.gui.tasks import ThreadRunner
+
+            runner = ThreadRunner()
+        self.preview = PreviewPresenter(self.preview_view, runner, (self.tth_min.value(), self.tth_max.value()))
+        self.preview_view.on_range = self._range_dragged
+        for box in (self.tth_min, self.tth_max):
+            box.valueChanged.connect(self._range_typed)
+        for edit in (self.poni, self.mask):
+            edit.textChanged.connect(self._preview_calibration)
+        self._preview_calibration()
         self.load_datasets()
         self._update_ok()
+        self._preview_scan()
 
     # ------------------------------------------------------------------ settings
 
@@ -234,6 +259,27 @@ class NewRunDialog(QDialog):
         rows = sorted({index.row() for index in self.table.selectionModel().selectedRows()}) if self.table.selectionModel() else []
         return [self._scans[r].image_file for r in rows if self._scans[r].image_file is not None]
 
+    # ------------------------------------------------------------------ preview of the current scan
+
+    def _preview_scan(self, *_) -> None:
+        row = self.table.currentRow()
+        scan = self._scans[row].image_file if 0 <= row < len(self._scans) else None
+        self.preview.set_scan(scan)
+
+    def _preview_calibration(self, *_) -> None:
+        self.preview.set_calibration(self.poni.text(), self.mask.text())
+
+    def _range_dragged(self, low: float, high: float) -> None:
+        low, high = sorted((low, high))
+        for box, value in ((self.tth_min, low), (self.tth_max, high)):
+            box.blockSignals(True)
+            box.setValue(value)
+            box.blockSignals(False)
+        self.preview.set_range(low, high)  # the dragged values, not the rounded ones: the region does not jump
+
+    def _range_typed(self, *_) -> None:
+        self.preview.set_range(self.tth_min.value(), self.tth_max.value())
+
     def _update_ok(self) -> None:
         ready = bool(self.selected_scans()) and bool(self.poni.text()) and bool(self.folder.text())
         self.buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(ready)
@@ -253,3 +299,7 @@ class NewRunDialog(QDialog):
     def accept(self) -> None:
         self._save()
         super().accept()
+
+    def done(self, result: int) -> None:
+        self.preview.close()  # previews still computing are dropped
+        super().done(result)

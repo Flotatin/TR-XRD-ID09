@@ -551,6 +551,63 @@ def cake_data(cake, unit: str, run: Optional[Run]) -> CakeData:
     return CakeData(label, x, azimuth, image)
 
 
+# ---------------------------------------------------------------------------- preview of a raw scan (new run)
+
+
+@dataclass
+class PreviewData:
+    """A raw scan in the "new run" dialog, over the whole detector, to choose the 2θ range of the integration."""
+
+    image: np.ndarray  # [rows, columns] as integrated (flipped), masked pixels NaN
+    title: str  # which image: one frame or the maximum over the scan
+    frames: int
+    two_theta_map: Optional[np.ndarray] = None  # deg per pixel, NaN where masked; None without .poni
+    usable: Optional[Tuple[float, float]] = None  # 2θ range of the usable pixels
+    x: Optional[np.ndarray] = None  # 2θ (deg) of the pattern over the usable range
+    intensity: Optional[np.ndarray] = None
+    coverage: Optional[np.ndarray] = None  # deg of azimuth seen, per 2θ bin
+    cake: Optional[CakeData] = None
+    message: str = ""
+
+
+def preview_data(preview, image: np.ndarray, frame: Optional[int], mode: str = "image") -> PreviewData:
+    """preview: services.images.ScanPreview; image: its raw frame `frame`, or its maximum (frame None)."""
+    count = preview.frames
+    if frame is None:
+        title = f"maximum de {len(preview.maximum_frames())} images sur {count}"
+    else:
+        title = f"image n° {min(int(frame), count - 1)} (de 0 à {count - 1})"
+    data = PreviewData(preview.shown(image), title, count)
+    maps = preview.angle_maps(image.shape)
+    if maps is None:
+        data.message = "Choisir un fichier .poni pour voir le diagramme en 2θ et la plage intégrée."
+        return data
+    data.two_theta_map, data.usable = maps[0], preview.usable_range(image.shape)
+    pattern = preview.pattern(image)
+    data.x, data.intensity, data.coverage = pattern.two_theta, pattern.intensity, pattern.coverage
+    if mode == "cake":
+        data.cake = cake_data(preview.cake(image), "2th_deg", None)
+    return data
+
+
+def outside_range(two_theta_map: np.ndarray, low: float, high: float) -> np.ndarray:
+    """Usable pixels outside [low, high]: they are not integrated (masked pixels, NaN, are not counted)."""
+    return (two_theta_map < low) | (two_theta_map > high)
+
+
+def range_text(data: Optional[PreviewData], low: float, high: float) -> str:
+    if data is None or data.x is None:
+        return ""
+    parts = [f"Plage intégrée : {low:.2f} → {high:.2f}° ({high - low:.2f}°)"]
+    inside = (data.x >= low) & (data.x <= high) & (data.coverage > 0)
+    if inside.any():
+        seen = data.coverage[inside]
+        parts.append(f"anneaux vus sur {seen.min():.0f} à {seen.max():.0f}° d'azimut")
+    if low < data.usable[0] or high > data.usable[1]:
+        parts.append(f"au-delà des pixels utilisables ({data.usable[0]:.2f} → {data.usable[1]:.2f}°) : bords vides")
+    return " ; ".join(parts)
+
+
 # ---------------------------------------------------------------------------- tables
 
 SPECTRUM_COLUMNS = ("#", "t (ms)", "Phases")

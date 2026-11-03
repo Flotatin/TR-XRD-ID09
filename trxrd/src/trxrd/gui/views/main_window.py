@@ -158,7 +158,9 @@ class MainWindow(QMainWindow):
         from trxrd.gui.views.new_run import NewRunDialog
 
         dialog = NewRunDialog(browse, self)
-        return dialog.request() if dialog.exec() == QDialog.DialogCode.Accepted else None
+        request = dialog.request() if dialog.exec() == QDialog.DialogCode.Accepted else None
+        dialog.deleteLater()  # its images are not kept until the window closes
+        return request
 
     def start_progress(self, text: str, on_cancel: Callable[[], None]) -> None:
         self._progress = QProgressDialog(text, "Arrêter", 0, 1000, self)

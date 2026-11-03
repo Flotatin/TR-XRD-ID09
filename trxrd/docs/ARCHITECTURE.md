@@ -132,20 +132,21 @@ trxrd/
 │   │   ├── identification.py   ✅ analyse automatique : détection → phases → ajustement → P, suivi des pics
 │   │   ├── validation.py       ✅ comparaison avec une analyse de référence (`trxrd compare`)
 │   │   ├── raw_data.py         ✅ parcours de RAW_DATA (jeux de données, scans du fichier maître), scan brut d'un run
-│   │   ├── images.py           ✅ image brute et cake (2θ × azimut) d'un spectre
+│   │   ├── images.py           ✅ image brute et cake (2θ × azimut) d'un spectre ; aperçu d'un scan brut
 │   │   ├── calibration.py      ✅ calibration pas à pas (image, clics, affinement, .poni)
 │   │   ├── rates.py            ✅ dP/dt par échantillon ou par phase, dP/dt moyen sur un intervalle
 │   │   └── session.py          ✅ état de l'application pour le GUI (run courant, sélection, événements)
 │   ├── notebook.py             ✅ XRDRun : lecture seule pour notebooks
 │   ├── cli.py                  ✅ trxrd build | auto | compare | convert | info
 │   └── gui/                    ✅ lecteur PySide6 + pyqtgraph (§9) : `trxrd-gui`
-│       ├── presenters/         display.py (données affichées), viewer.py, calibration.py (presenters), sans Qt
+│       ├── presenters/         display.py (données affichées), viewer.py, preview.py, calibration.py
+│       │                       (presenters), sans Qt
 │       ├── views/              plots.py (spectre, cake, grandeurs(t), carte), images.py (échelle, niveaux, couleurs),
-│       │                       panels.py, new_run.py, calibration.py, main_window.py
+│       │                       panels.py, new_run.py, preview.py, calibration.py, main_window.py
 │       ├── actions.py          registre unique des QAction (menus, barre d'outils, raccourcis)
 │       ├── tasks.py            calculs longs dans un thread, résultat rendu au thread de l'interface
 │       └── app.py              assemblage : fenêtre + presenters + actions
-└── tests/                      188 tests ; data/ = scan TUTO, calibration, ancien fichier .CEDX d'exemple
+└── tests/                      199 tests ; data/ = scan TUTO, calibration, ancien fichier .CEDX d'exemple
 ```
 
 ## 5. Le format de fichier `trxrd-run` (HDF5)
@@ -550,6 +551,21 @@ Architecture **MVP** au-dessus de `services.Session` :
 
   L'intégration tourne dans un thread, avec une barre de progression et un bouton « Arrêter ». Le dernier
   run est ouvert ensuite. Les champs sont gardés d'une session à l'autre.
+- **Aperçu du scan avant l'intégration**, demandé par l'utilisateur pour choisir la plage 2θ
+  (`services/images.ScanPreview`, `gui/presenters/preview.py`, `gui/views/preview.py`). À droite du dialogue,
+  le scan courant est montré sur tout le détecteur :
+  - l'image brute ou son cake. Par défaut, c'est le maximum pixel par pixel sur le scan (32 images au plus,
+    également espacées) : on y voit toutes les raies, à toutes les pressions de la compression. On peut
+    aussi choisir une seule image ;
+  - le diagramme intégré sur tous les pixels utilisables ;
+  - en pointillés, le nombre de degrés d'azimut vus pour chaque 2θ. Aux bords du détecteur, cette
+    couverture tombe, et le diagramme devient bruité ;
+  - la plage 2θ, en vert. On la tire sur le diagramme ou sur le cake, on la saisit, ou on prend « Tout le
+    détecteur ». Sur l'image brute, les pixels hors de la plage sont voilés.
+
+  Sur Water05 scan 9 (`calib_ddac2_correct.poni`), les pixels utilisables vont de 5,21 à 29,30°. Les
+  anneaux entre 8 et 25° sont vus sur 59 à 139° d'azimut. Le maximum de 32 images sur 1 600 (Water01
+  scan 74) prend 2,4 s, en arrière-plan ; seule la dernière demande est affichée.
 - **Oscilloscope** : `ch5` est le trigger (`Channel2` dans la v1), `ch6` est probablement la consigne du
   piézo (0-7,4 V, `Channel3`). `ch2` est lue quand elle existe. Toutes les voies ont la même base de temps :
   `ch6_time` est décalé de 19 ns, pour un pas de 160 ns.

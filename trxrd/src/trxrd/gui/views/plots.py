@@ -45,11 +45,12 @@ def _row(plot: QWidget, margin: QWidget) -> QHBoxLayout:
     return row
 
 
-class _Interval:
-    """Movable time interval drawn on a plot (mean dP/dt). Reports the user's drags, not the program's moves."""
+class MovableRegion:
+    """Interval on a plot that the user drags (mean dP/dt, 2θ range). Reports the user's drags, not the program's moves."""
 
-    def __init__(self, plot: pg.PlotWidget, on_change: Callable[[float, float], None]) -> None:
-        self.region = pg.LinearRegionItem(brush=pg.mkBrush(255, 170, 0, 45), pen=pg.mkPen("#c07000", width=1.5))
+    def __init__(self, plot: pg.PlotWidget, on_change: Callable[[float, float], None],
+                 brush=(255, 170, 0, 45), pen: str = "#c07000") -> None:
+        self.region = pg.LinearRegionItem(brush=pg.mkBrush(*brush), pen=pg.mkPen(pen, width=1.5))
         self.region.setZValue(-10)
         self.region.hide()
         plot.addItem(self.region, ignoreBounds=True)
@@ -202,7 +203,7 @@ class EvolutionView(QWidget):
         self._segments: List[pg.GraphicsObject] = []
         self._traces: Dict[str, object] = {}
         self._data = None
-        self.interval = _Interval(self.plot, lambda start, stop: self.on_interval and self.on_interval(start, stop))
+        self.interval = MovableRegion(self.plot, lambda start, stop: self.on_interval and self.on_interval(start, stop))
         _scene_click(self.plot, lambda x, y: self.on_pick and self.on_pick(x))
         self.spacer = spacer()  # same right margin as the map below when its histogram is shown
         layout = QVBoxLayout(self)
@@ -364,7 +365,7 @@ class RateView(QWidget):
             item.setXLink(link_to.getPlotItem())
         self.marker = pg.InfiniteLine(angle=90, movable=False, pen=pg.mkPen("#808080", style=Qt.PenStyle.DotLine))
         self.plot.addItem(self.marker, ignoreBounds=True)
-        self.interval = _Interval(self.plot, lambda start, stop: self.on_interval and self.on_interval(start, stop))
+        self.interval = MovableRegion(self.plot, lambda start, stop: self.on_interval and self.on_interval(start, stop))
         self._items: List[pg.GraphicsObject] = []
         self._means: List[pg.GraphicsObject] = []
         self._table = ""

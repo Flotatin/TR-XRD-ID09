@@ -110,7 +110,7 @@ def test_new_run_dialog_browses_raw_data(raw_root, tmp_path):
     application(["test"])
     settings = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
     settings.setValue("new_run/raw_root", str(raw_root))
-    dialog = NewRunDialog(raw_data, settings=settings)
+    dialog = NewRunDialog(raw_data, settings=settings, runner=ImmediateRunner())
     assert dialog.tree.topLevelItemCount() == 1 and "1 jeux" in dialog.message.text()
     dialog.tree.setCurrentItem(dialog.tree.topLevelItem(0).child(0))
     assert dialog.table.rowCount() == 1 and dialog.table.item(0, 3).text() == "timescan 0.1 1"
@@ -126,7 +126,46 @@ def test_new_run_dialog_browses_raw_data(raw_root, tmp_path):
     assert request.scans == [raw_root / "water02" / "water02_0001" / "scan0003" / "scan_jf1m_0000.h5"]
     assert request.two_theta_range == (8.0, 25.0) and [p.split("phases")[-1][1:] for p in request.phase_paths] == ["H2O", "Sn"]
     dialog.accept()
-    assert NewRunDialog(raw_data, settings=settings).poni.text() == str(DATA / "calib_THT8_correct_samedi.poni")
+    assert NewRunDialog(raw_data, settings=settings, runner=ImmediateRunner()).poni.text() ==         str(DATA / "calib_THT8_correct_samedi.poni")
+
+
+def test_new_run_dialog_previews_the_scan_and_its_two_theta_range(raw_root, tmp_path):
+    pytest.importorskip("pyFAI")
+    from PySide6.QtCore import QSettings
+    from conftest import DATA
+    from trxrd.gui.views.main_window import application
+    from trxrd.gui.views.new_run import NewRunDialog
+    from trxrd.services import raw_data
+
+    application(["test"])
+    settings = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
+    for key, value in (("raw_root", raw_root), ("poni", DATA / "calib_THT8_correct_samedi.poni"),
+                       ("mask", DATA / "scan_jf1m_0000.mask")):
+        settings.setValue(f"new_run/{key}", str(value))
+    dialog = NewRunDialog(raw_data, settings=settings, runner=ImmediateRunner())
+    view = dialog.preview_view
+    assert "Choisir un scan" in view.text.text()
+    dialog.tree.setCurrentItem(dialog.tree.topLevelItem(0).child(0))
+    dialog.table.selectRow(0)
+    assert view.title.text() == "maximum de 3 images sur 3" and view.curve.xData is not None
+    assert view.range.region.getRegion() == (8.0, 25.0) and view.shade.image is not None
+
+    view.range.region.setRegion((10.0, 20.0))  # as the user's drag does
+    assert (dialog.tth_min.value(), dialog.tth_max.value()) == (10.0, 20.0)
+    assert dialog.request().two_theta_range == (10.0, 20.0) and "10.00 → 20.00°" in view.text.text()
+    dialog.tth_max.setValue(22.5)  # typed
+    assert view.range.region.getRegion() == (10.0, 22.5)
+    view.whole.click()
+    low, high = dialog.preview.data.usable
+    assert dialog.tth_min.value() == pytest.approx(low) and dialog.tth_max.value() == pytest.approx(high)
+
+    view.mode.setCurrentIndex(1)
+    assert dialog.preview.data.cake is not None and view.cake_range.region.isVisible() and not view.shade.isVisible()
+    view.which.setCurrentIndex(1)
+    view.frame.setValue(2)
+    assert view.title.text() == "image n° 2 (de 0 à 2)"
+    dialog.reject()
+    assert dialog.preview.closed
 
 
 def test_image_panel_scale_colours_and_levels(tmp_path):

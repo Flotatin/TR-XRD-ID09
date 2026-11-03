@@ -411,3 +411,59 @@ def test_dpdt_presenter_and_shared_interval(tmp_path, sample_run):
         settings.update(colour="red")
     settings.update(half_window=0)
     assert settings.half_window == 1
+
+
+def test_raw_scan_preview_before_integration(tmp_path):
+    pytest.importorskip("pyFAI")
+    from conftest import DATA
+    from trxrd.gui.presenters.preview import NO_SCAN, PreviewPresenter
+
+    view = Recorder()
+    presenter = PreviewPresenter(view, two_theta_range=(25.0, 8.0))
+    assert view.last("show_message") == (NO_SCAN,) and presenter.range == (8.0, 25.0)
+    presenter.set_calibration(str(tmp_path / "being typed"), None)  # not a file yet: nothing to do
+    presenter.set_scan(DATA / "scan_jf1m_0000.h5")
+    data = view.last("show_preview")[0]
+    assert data.title == "maximum de 16 images sur 16" and data.x is None and ".poni" in data.message
+    assert view.last("show_range") == (8.0, 25.0, None, "")
+    assert [args for name, args in view.calls if name == "set_busy"][-1] == (None,)
+
+    presenter.set_calibration(DATA / "calib_THT8_correct_samedi.poni", DATA / "scan_jf1m_0000.mask")
+    data = view.last("show_preview")[0]
+    low, high, outside, text = view.last("show_range")
+    assert data.x is not None and outside.shape == data.image.shape and "8.00 → 25.00°" in text
+    presenter.set_range(20.0, 12.0)  # dragged, or typed in the dialog
+    assert view.last("show_range")[:2] == (12.0, 20.0) and view.count("show_preview") == 2  # nothing recomputed
+
+    presenter.set_mode("cake")
+    assert view.last("show_preview")[0].cake is not None and view.last("show_range")[2] is None  # no shading on a cake
+    presenter.set_frame(2)
+    assert view.last("show_preview")[0].title == "image n° 2 (de 0 à 15)"
+    with pytest.raises(ValueError):
+        presenter.set_mode("map")
+
+    presenter.set_calibration(tmp_path / "missing.poni", None)
+    presenter.set_frame(None)
+    assert view.last("show_preview")[0].x is None  # back to the images only
+    (tmp_path / "broken.poni").write_text("not a calibration")
+    presenter.set_calibration(tmp_path / "broken.poni", None)
+    assert "ValueError" in view.last("show_message")[0]
+    presenter.set_scan(None)
+    assert view.last("show_message") == (NO_SCAN,)
+
+
+def test_raw_scan_preview_newest_request_wins_and_closing_drops_results():
+    from conftest import DATA
+    from trxrd.gui.presenters.preview import PreviewPresenter
+
+    view, runner = Recorder(), DeferredRunner()
+    presenter = PreviewPresenter(view, runner)
+    presenter.set_scan(DATA / "scan_jf1m_0000.h5")
+    presenter.set_frame(1)
+    runner.finish(1)  # frame 1 comes back first
+    runner.finish(0)  # then the stale maximum
+    assert view.count("show_preview") == 1 and view.last("show_preview")[0].title.startswith("image n° 1")
+    presenter.set_frame(2)
+    presenter.close()  # the dialog is closed before the result
+    runner.finish(2)
+    assert view.count("show_preview") == 1

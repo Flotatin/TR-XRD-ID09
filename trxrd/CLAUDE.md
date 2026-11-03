@@ -74,6 +74,7 @@ values). Never commit the user's data (raw scans, .CEDX) to the repository.
 | GUI state (Qt-free) | `services/session.py` |
 | GUI (`trxrd-gui`): display data and presenters without Qt, passive views, actions, threads | `gui/presenters/`, `gui/views/`, `gui/actions.py`, `gui/tasks.py`, `gui/app.py` |
 | Raw data browsing, raw image and cake of a spectrum | `services/raw_data.py`, `services/images.py` |
+| Preview of a raw scan before integration (whole detector, 2θ range) | `services/images.ScanPreview`, `gui/presenters/preview.py`, `gui/views/preview.py` |
 | GUI image display (histogram, log/linear/sqrt, colour map) | `gui/views/images.py` (`ImagePanel`) |
 | Quantities versus time (P, V, a, c/a, X/X0), map of the patterns versus time | `gui/presenters/display.py` (`evolution_data`, `time_map`) |
 | dP/dt per sample (family) or phase, mean dP/dt over an interval (slope and ΔP/Δt) | `processing/rates.py`, `services/rates.py` |
