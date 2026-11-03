@@ -62,8 +62,18 @@ def test_open_shows_every_panel(viewer, sample_run):
 
     curves, reset = views["spectrum"].last("show_spectrum")
     assert reset and curves.x_label == "2θ (°)" and curves.title.startswith("Spectre 0 / 4")
-    np.testing.assert_allclose(curves.fit, sample_run.spectra[0].model + sample_run.spectra[0].baseline)
+    first = sample_run.spectra[0]
+    from scipy.signal import savgol_filter
+    assert not curves.raw and curves.data_label == "filtré − fond" and curves.baseline is None
+    np.testing.assert_allclose(curves.intensity, savgol_filter(first.intensity, 9, 2) - first.baseline)  # by default
+    np.testing.assert_allclose(curves.fit, first.model)
     assert [l.phase for l in curves.lines] == ["H2O_Ice_VII"] and "110" in curves.lines[0].labels
+    settings.set_raw(True)  # on demand: the raw signal with its background
+    curves, reset = views["spectrum"].last("show_spectrum")
+    assert reset and curves.raw and curves.data_label == "brut"
+    np.testing.assert_allclose(curves.intensity, first.intensity)
+    np.testing.assert_allclose(curves.fit, first.model + first.baseline)
+    settings.set_raw(False)
 
     data = views["evolution"].last("show_evolution")[0]
     assert data.x_label == "t (ms)" and data.y_label == "P (GPa)"
@@ -78,7 +88,7 @@ def test_open_shows_every_panel(viewer, sample_run):
     np.testing.assert_allclose(patterns.x, [0, 1, 2, 3, 4])  # one column per spectrum, on the time axis
     assert views["map"].last("set_marker") == (0.0,)
     assert views["navigator"].last("show_spectra")[1][2] == ("2", "2", "Ice VII 4.00, Ice VI 1.50")
-    assert views["navigator"].last("set_current") == (0, 5)
+    assert views["navigator"].last("set_current") == (0, 5, [])
     assert views["phases"].last("show_rows")[1][0][:3] == ("H2O_Ice_VII", "2.000", "0.050")
     assert [r[1] for r in views["peaks"].last("show_rows")[1]] == ["110", "200"]
 
@@ -183,7 +193,7 @@ def test_new_runs_from_raw_data(viewer, raw_root, tmp_path):
     assert progress[-1] == (2000, 2000) and window.count("end_progress") == 1
     assert session.run.name == "water02_0001_scan0003" and len(session.run) == 3 and not session.dirty
     assert session.path == tmp_path / "analyse" / "water02_0001_scan0003.trxrd.h5"
-    assert window.last("show_info")[0] == "Runs créés" and views["navigator"].last("set_current") == (0, 3)
+    assert window.last("show_info")[0] == "Runs créés" and views["navigator"].last("set_current") == (0, 3, [])
 
 
 def test_new_run_cancelled_or_failing(viewer, raw_root, tmp_path):
@@ -531,3 +541,68 @@ def test_analysis_needs_a_run_with_its_energy(sample_run):
     assert parse_zones("") == [] and zones_text([(18.479, 18.679), (20.1, 20.3)]) == "18.479:18.679; 20.1:20.3"
     with pytest.raises(ValueError, match="18.5"):
         parse_zones("18.5")
+
+
+def test_processing_of_the_current_spectrum_then_propagated(compression_run):
+    from trxrd.domain import Processing
+    from trxrd.gui.presenters.treatment import ProcessingPresenter
+
+    session, view = Session(), Recorder()
+    presenter = ProcessingPresenter(session, view)
+    presenter.change(Processing())  # no run: nothing
+    assert view.count("show_processing") == 0
+    session.attach(compression_run, None)
+    assert view.last("show_processing") == (Processing(), 0, 6)
+    changes = []
+    session.subscribe("data_changed", lambda *_: changes.append(1))
+
+    presenter.change(Processing(2, "svg", (11, 3)))  # case by case: the current spectrum at once
+    assert session.run.spectra[0].processing == Processing(2, "svg", (11, 3)) and session.dirty and changes == [1]
+    assert session.run.spectra[1].processing == Processing()
+    presenter.change(Processing(2, "svg", (10, 3)))
+    assert "impair" in view.last("show_message")[0] and changes == [1]  # refused, nothing changed
+
+    presenter.propagate("selection")
+    assert "Aucun spectre" in view.last("show_message")[0]
+    session.set_selection([3, 4])
+    assert view.last("show_processing")[1] == 2  # the button counts the selection
+    presenter.propagate("selection")
+    chosen = Processing(2, "svg", (11, 3))
+    assert [s.processing == chosen for s in session.run.spectra] == [True, False, False, True, True, False]
+    assert view.last("show_message")[0] == "Traitement du spectre 0 appliqué à 2 spectre(s)."
+    presenter.propagate("all")
+    assert all(s.processing == Processing(2, "svg", (11, 3)) for s in session.run.spectra)
+    with pytest.raises(ValueError):
+        presenter.propagate("some")
+
+
+def test_detection_presenter_shows_the_peaks_and_keeps_its_settings(compression_run):
+    from synthetic import GASKET
+    from trxrd.gui.presenters.treatment import DetectionPresenter
+    from trxrd.services import analysis
+
+    session, settings, view, spectrum = Session(), DisplaySettings(), Recorder(), Recorder()
+    presenter = DetectionPresenter(session, settings, view, spectrum)
+    compression_run.ui_state[analysis.UI_KEY] = analysis.AnalysisSettings(exclude=[(GASKET - 0.1, GASKET + 0.1)]).to_dict()
+    session.attach(compression_run, None)
+    columns, rows, summary = view.last("show_detection")
+    marks = spectrum.last("show_detection")[0]
+    assert columns[0] == "2θ (°)" and len(rows) == len(marks.x) == len(presenter.detection.peaks) >= 3
+    assert [r[4] for r in rows if abs(float(r[0]) - GASKET) < 0.05] == ["zone exclue : pic libre"]
+    assert summary.endswith("(1 en zone exclue)") and marks.kinds.count("excluded") == 1
+    assert marks.zones == [(GASKET - 0.1, GASKET + 0.1)] and marks.threshold_x.size == marks.threshold_y.size
+    assert view.last("show_options")[0].min_snr == 5.0
+
+    first = len(rows)
+    presenter.set_options(min_snr=50.0)  # kept in the run: the next automatic analysis uses it
+    assert analysis.saved_settings(session.run).min_snr == 50.0 and session.dirty
+    assert len(view.last("show_detection")[1]) < first
+    with pytest.raises(ValueError):
+        presenter.set_options(pmax=3)
+
+    settings.set_raw(True)  # the marks follow the signal shown
+    raw_tops = spectrum.last("show_detection")[0].y
+    settings.set_raw(False)
+    assert np.all(raw_tops > spectrum.last("show_detection")[0].y)  # + background
+    presenter.set_visible(False)
+    assert spectrum.last("show_detection") == (None,) and view.count("show_detection") >= 3

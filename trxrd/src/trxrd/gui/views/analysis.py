@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from typing import List, Optional
 
 from PySide6.QtCore import Qt
@@ -13,7 +14,6 @@ from PySide6.QtWidgets import (
 
 from trxrd.gui.presenters.analysis import AnalysisChoices, AnalysisRequest, parse_zones, phase_label, zones_text
 from trxrd.physics.eos import T_REF
-from trxrd.services.analysis import AnalysisSettings
 
 
 def _spin(low: float, high: float, value: float, decimals: int = 2, suffix: str = "", step: float = 1.0):
@@ -204,7 +204,8 @@ class AnalysisDialog(QDialog):
         if not phases:
             raise ValueError("Cocher au moins une phase candidate.")
         every = len(phases) == self.phases.count()
-        settings = AnalysisSettings(
+        settings = dataclasses.replace(  # the settings the dialog does not show (detection tab) are kept
+            self.choices.settings,
             phases=None if every else phases,
             library=list(self._library),
             pressure_range=tuple(sorted((self.pmin.value(), self.pmax.value()))),

@@ -39,7 +39,8 @@ PyQt5 and PySide6 in one environment breaks Qt.
 - Peak profiles (`physics/profiles.py`): `f(x, center, height, width, *shape)`, center = maximum.
   Default model Pearson IV (asymmetric synchrotron / dynamic peaks).
 - Fits use raw intensity minus background (never the smoothed signal), in local windows around the
-  peaks; unassigned peaks are fitted as free peaks.
+  peaks; unassigned peaks are fitted as free peaks. Peaks are detected on the filtered signal of the
+  spectrum minus background (what the GUI shows by default), the noise on the raw signal.
 - The `.trxrd.h5` format is versioned (`io/h5store.py`, `FORMAT_VERSION`): compatible additions bump
   the minor version, update `docs/ARCHITECTURE.md` §5 and the round-trip tests.
 
@@ -72,6 +73,7 @@ values). Never commit the user's data (raw scans, .CEDX) to the repository.
 | Peak fit, cell, pressure | `processing/peakfit.py`, `processing/cell.py`, `services/fitting.py` |
 | Automatic analysis with peak tracking | `services/identification.py` |
 | Analysis as the user asks for it (settings kept in the run, work on a copy, static peaks), GUI and CLI | `services/analysis.py`, `gui/presenters/analysis.py` |
+| Treatment of the spectra (background, filter; one, all, selection), detection as the analysis sees it | `services/treatment.py`, `gui/presenters/treatment.py` |
 | GUI state (Qt-free) | `services/session.py` |
 | GUI (`trxrd-gui`): display data and presenters without Qt, passive views, actions, threads | `gui/presenters/`, `gui/views/`, `gui/actions.py`, `gui/tasks.py`, `gui/app.py` |
 | Raw data browsing, raw image and cake of a spectrum | `services/raw_data.py`, `services/images.py` |

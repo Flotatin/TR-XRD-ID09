@@ -48,6 +48,13 @@ class AnalysisSettings:
     tolerance: float = 0.1  # 2θ matching tolerance (deg)
     max_phases: int = 3
     min_snr: float = 5.0  # detection threshold (local noise sigmas)
+    max_fwhm: float = 1.5  # deg: wider bumps are not detected (background, amorphous)
+    noise_window: float = 1.5  # deg, window of the local noise and level of the detection
+    shoulders: bool = True  # detect shoulders (peaks without their own maximum)
+    # maxima searched on the filtered signal of the spectrum (what is shown) rather than on a Savitzky-Golay
+    # filter of 7 points: 805 instead of 797 spectra with the phases of the manual analysis on 29 runs of
+    # January 2026 (docs/ARCHITECTURE.md §6.5)
+    spectrum_filter: bool = True
     max_step: Optional[float] = None  # largest pressure change between two spectra (GPa)
     max_spread: float = 1.5  # soft limit on the pressure difference between phases (GPa)
     exclude: List[Zone] = field(default_factory=list)  # 2θ zones of no phase (gasket, diamond...)
@@ -57,7 +64,8 @@ class AnalysisSettings:
     def options(self) -> AutoOptions:
         temperature = self.temperature or T_REF  # search and fit at the same T
         return AutoOptions(
-            detection=DetectionOptions(min_snr=self.min_snr),
+            detection=DetectionOptions(min_snr=self.min_snr, max_fwhm=self.max_fwhm, noise_window=self.noise_window,
+                                       shoulders=self.shoulders, spectrum_filter=self.spectrum_filter),
             fit=FitOptions(temperature=temperature),
             search=SearchOptions(
                 pressure_range=tuple(self.pressure_range), tolerance=self.tolerance, max_phases=self.max_phases,

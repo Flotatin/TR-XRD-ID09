@@ -28,9 +28,16 @@ def test_window_opens_a_run_and_navigates(viewer):
     window = viewer.window
     viewer.main.open(str(viewer.path))
     assert window.windowTitle() == "TR-XRD v2 2.0.0a1 — water02_0001_scan0027"
+    first = viewer.session.run.spectra[0]
     x, y = window.spectrum.data.getData()
-    assert len(x) == 400 and np.allclose(y, viewer.session.run.spectra[0].intensity)
+    from scipy.signal import savgol_filter
+    assert len(x) == 400 and np.allclose(y, savgol_filter(first.intensity, 9, 2) - first.baseline)  # filtered - background
     assert window.spectrum.fit.getData()[0] is not None
+    window.actions.get("raw").trigger()  # Ctrl+B: the raw signal, with its background
+    assert np.allclose(window.spectrum.data.getData()[1], first.intensity)
+    assert np.allclose(window.spectrum.baseline.getData()[1], first.baseline)
+    assert [label.text for sample, label in window.spectrum.legend.items][0] == "brut"
+    window.actions.get("raw").trigger()
     assert len(window.spectrum._ticks) == 2  # ice VII: ticks + their tooltips
     assert window.navigator.table.rowCount() == 5 and window.phases.rowCount() == 1
     assert window.peaks.rowCount() == 2 and window.map.image.image.shape == (400, 5)  # [2θ, time]
@@ -258,7 +265,8 @@ def test_analysis_dialog(viewer):
     from trxrd.services import analysis
     from trxrd.services.analysis import AnalysisSettings
 
-    settings = AnalysisSettings(phases=["H2O_Ice_VI"], pressure_range=(0.5, 12.0), exclude=[(18.48, 18.68)])
+    settings = AnalysisSettings(phases=["H2O_Ice_VI"], pressure_range=(0.5, 12.0), exclude=[(18.48, 18.68)],
+                                max_fwhm=0.8, noise_window=2.5, shoulders=False, spectrum_filter=False)
     choices = AnalysisChoices([("H2O_Ice_VI", "H2O_Ice_VI", True), ("H2O_Ice_VII", "H2O_Ice_VII", False)],
                               settings, count=6, current=2, analysed=3, two_theta=(8.0, 25.0))
     dialog = AnalysisDialog(choices, analysis.library_phases)
@@ -267,6 +275,8 @@ def test_analysis_dialog(viewer):
     assert request.indices == list(range(6)) and request.settings.phases == ["H2O_Ice_VI"]
     assert request.settings.exclude == [(18.48, 18.68)] and request.settings.window is None
     assert request.settings.temperature == eos.T_REF and request.settings.max_step is None
+    kept = request.settings  # set in the Détection tab, not shown here: kept
+    assert (kept.max_fwhm, kept.noise_window, kept.shoulders, kept.spectrum_filter) == (0.8, 2.5, False, False)
     dialog.current.setChecked(True)
     assert dialog.request().indices == [2]
     dialog.first.setValue(1)
@@ -306,3 +316,54 @@ def test_automatic_analysis_action(viewer, compression_run):
     assert asked[0].count == 6 and all(s.phases for s in viewer.session.run.spectra)
     assert window.windowTitle().endswith("*") and window.statusBar().currentMessage().startswith("Analyse automatique")
     assert window.phases.rowCount() >= 1  # the views show the new fits
+
+
+def test_treatment_tab_and_selection_of_spectra(viewer, compression_run):
+    from PySide6.QtCore import QItemSelection, QItemSelectionModel
+    from trxrd.domain import Processing
+
+    window, session = viewer.window, viewer.session
+    session.attach(compression_run, None)
+    panel = window.processing
+    assert panel.isEnabled() and panel.filter.currentData() == "svg" and (panel.p1.value(), panel.p2.value()) == (9, 2)
+    panel.p1.setValue(15)  # applied to the current spectrum at once
+    assert session.run.spectra[0].processing == Processing(1, "svg", (15.0, 2.0)) and window.windowTitle().endswith("*")
+    assert session.run.spectra[1].processing == Processing()
+    panel.p1.setValue(16)
+    assert "impair" in panel.message.text() and session.run.spectra[0].processing.filter_params == (15.0, 2.0)
+    panel.filter.setCurrentIndex(panel.filter.findData("fft"))
+    assert panel.p1_label.text().startswith("Coupure basse") and session.run.spectra[0].processing.filter_type == "fft"
+    panel.filter.setCurrentIndex(panel.filter.findData("svg"))
+    panel.p1.setValue(15)
+
+    table = window.navigator.table  # Shift + click from spectrum 2 to spectrum 4
+    rows = QItemSelection(table.model().index(2, 0), table.model().index(4, table.columnCount() - 1))
+    table.selectionModel().select(rows, QItemSelectionModel.SelectionFlag.ClearAndSelect)
+    assert session.selection == [2, 3, 4] and session.index == 2 and panel.selected.text().endswith("(3)")
+    panel.p1.setValue(13)  # the current spectrum (2)...
+    panel.selected.click()  # ...then the selection
+    assert [s.processing.filter_params for s in session.run.spectra] == [(15.0, 2.0), (9, 2), (13.0, 2.0),
+                                                                          (13.0, 2.0), (13.0, 2.0), (9, 2)]
+    assert panel.message.text() == "Traitement du spectre 2 appliqué à 3 spectre(s)."
+    session.select(4)  # inside the selection: it stays
+    assert window.navigator.selected_rows() == [2, 3, 4] and session.selection == [2, 3, 4]
+    window.actions.get("next").trigger()  # outside: the current spectrum alone
+    assert session.index == 5 and window.navigator.selected_rows() == [5] and session.selection == [5]
+    panel.all.click()
+    assert all(s.processing == Processing(1, "svg", (9, 2)) for s in session.run.spectra)  # that of spectrum 5
+
+
+def test_detection_tab_draws_the_peaks(viewer, compression_run):
+    window = viewer.window
+    viewer.session.attach(compression_run, None)
+    tab = window.detection
+    count = tab.table.rowCount()
+    assert count >= 3 and len(window.spectrum.detected.data) == count and "pour la recherche" in tab.summary.text()
+    assert window.spectrum.threshold.getData()[0] is not None
+    tab.min_snr.setValue(60.0)
+    assert 0 < tab.table.rowCount() < count and window.windowTitle().endswith("*")
+    tab.visible.setChecked(False)
+    assert len(window.spectrum.detected.data) == 0 and tab.table.rowCount() > 0  # the table stays
+    tab.visible.setChecked(True)
+    window.actions.get("raw").trigger()
+    assert len(window.spectrum.detected.data) == tab.table.rowCount()

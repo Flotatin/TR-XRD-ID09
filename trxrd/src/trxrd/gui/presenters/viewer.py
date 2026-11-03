@@ -6,7 +6,7 @@ passive view. A view reports the user's gestures through callbacks that its
 presenter sets (`view.on_pick`, `view.on_select`); it never changes the data.
 
 Views expected (duck typing):
-- spectrum: show_spectrum(SpectrumCurves, reset: bool), clear()
+- spectrum: show_spectrum(SpectrumCurves, reset: bool), show_detection(DetectionMarks or None), clear()
 - evolution: show_evolution(EvolutionData), set_marker(x), clear(), show_interval(region, segments),
   on_pick(x), on_quantity(key, relative), on_interval(start, stop)
 - rates: show_rates(RateData), show_interval(IntervalData or None), set_marker(x), clear(),
@@ -14,7 +14,8 @@ Views expected (duck typing):
 - map: show_map(TimeMapData), set_marker(x), clear(), on_pick(x)
 - cake: show_cake(CakeData), show_image(array), show_message(text), clear(), on_mode(mode)
 - table: show_rows(columns, rows)
-- navigator: show_spectra(columns, rows), set_current(index, count), on_select(index)
+- navigator: show_spectra(columns, rows), set_current(index, count, selection), on_select(index),
+  on_selection(indices)
 - window: set_title, set_status, set_units(available, current), set_busy(text or None),
   ask_open_path() / ask_save_path(suggested) -> path or None, confirm_discard() -> bool,
   show_error(title, text), show_info(title, text), ask_new_run(browse) -> NewRunRequest or None,
@@ -71,22 +72,31 @@ class NewRunRequest:
 
 
 class DisplaySettings:
-    """GUI-only state shared by the presenters: the x axis unit."""
+    """GUI-only state shared by the presenters: the x axis unit, raw or filtered - background spectrum."""
 
     def __init__(self, unit: str = "2th_deg") -> None:
         self.unit = unit
+        self.raw = False  # spectrum shown raw with its background (default: filtered - background)
         self._listeners: List[Callable[["DisplaySettings"], None]] = []
 
     def subscribe(self, listener: Callable[["DisplaySettings"], None]) -> None:
         self._listeners.append(listener)
+
+    def _notify(self) -> None:
+        for listener in list(self._listeners):
+            listener(self)
 
     def set_unit(self, unit: str) -> None:
         if unit not in display.UNITS:
             raise ValueError(f"unknown unit {unit!r}")
         if unit != self.unit:
             self.unit = unit
-            for listener in list(self._listeners):
-                listener(self)
+            self._notify()
+
+    def set_raw(self, raw: bool) -> None:
+        if bool(raw) != self.raw:
+            self.raw = bool(raw)
+            self._notify()
 
     def unit_for(self, run) -> str:
         """The chosen unit, or 2θ when the run has no energy (no Q, no d)."""
@@ -141,7 +151,7 @@ class SpectrumPresenter:
         if run is None or not run.spectra:
             self.view.clear()
             return
-        curves = display.spectrum_curves(run, self.session.index, self.settings.unit_for(run))
+        curves = display.spectrum_curves(run, self.session.index, self.settings.unit_for(run), self.settings.raw)
         self.view.show_spectrum(curves, self._reset)
         self._reset = False
 
@@ -382,11 +392,12 @@ class TablesPresenter:
 
 
 class NavigatorPresenter:
-    """List of the spectra and slider."""
+    """List of the spectra and slider; several spectra can be chosen together (the selection)."""
 
     def __init__(self, session: Session, view) -> None:
         self.session, self.view = session, view
         view.on_select = session.select
+        view.on_selection = session.set_selection
         session.subscribe(Event.RUN_CHANGED, self.refresh)
         session.subscribe(Event.DATA_CHANGED, self.refresh)
         session.subscribe(Event.SPECTRUM_CHANGED, self.current)
@@ -398,7 +409,7 @@ class NavigatorPresenter:
 
     def current(self, *_) -> None:
         run = self.session.run
-        self.view.set_current(self.session.index, len(run) if run is not None else 0)
+        self.view.set_current(self.session.index, len(run) if run is not None else 0, self.session.selection)
 
 
 class MainPresenter:

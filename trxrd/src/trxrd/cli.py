@@ -86,6 +86,7 @@ def _settings(args: argparse.Namespace, temperature: Optional[float] = None):
         exclude=[tuple(float(v) for v in zone.split(":")) for zone in args.exclude or []],
         window=(args.tth_min, args.tth_max) if args.tth_min is not None and args.tth_max is not None else None,
         track=not args.no_track,
+        spectrum_filter=not args.no_spectrum_filter,
     )
 
 
@@ -216,6 +217,8 @@ def build_parser() -> argparse.ArgumentParser:
                              help="soft limit on the pressure difference between phases (GPa)")
         command.add_argument("--exclude", nargs="*", help="2θ zones to ignore, e.g. 18.35:18.85 (gasket, diamond...)")
         command.add_argument("--no-track", action="store_true", help="run the phase search on every spectrum")
+        command.add_argument("--no-spectrum-filter", action="store_true",
+                             help="detect the peaks on a 7-point Savitzky-Golay filter, not on the filter of each spectrum")
         command.add_argument("--tth-min", type=float)
         command.add_argument("--tth-max", type=float)
         command.add_argument("--temperature", type=float,

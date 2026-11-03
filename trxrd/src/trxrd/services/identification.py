@@ -60,14 +60,22 @@ def analysis_window(run: Run, options: AutoOptions) -> Tuple[float, float]:
     return float(np.nanmin(x)), float(np.nanmax(x))
 
 
-def detect(run: Run, index: int, window: Tuple[float, float], options: Optional[DetectionOptions] = None) -> List[DetectedPeak]:
-    """Peaks of spectrum `index` inside `window` (raw intensity minus background)."""
-    spectrum = run.spectra[index]
-    if spectrum.baseline is None:
-        background.apply(spectrum)
+def detection_signals(spectrum: Spectrum, window: Tuple[float, float], options: DetectionOptions):
+    """(2θ, raw - background, smoothed or None, noise gain or None) inside `window`, as detect_peaks takes them."""
+    filtered, raw = background.corrected(spectrum)
     x = np.asarray(spectrum.two_theta, dtype=float)
     inside = (x >= window[0]) & (x <= window[1])
-    return detect_peaks(x[inside], (spectrum.intensity - spectrum.baseline)[inside], options)
+    if options.spectrum_filter:
+        return x[inside], raw[inside], filtered[inside], background.noise_gain(x, spectrum.processing)
+    return x[inside], raw[inside], None, None
+
+
+def detect(run: Run, index: int, window: Tuple[float, float], options: Optional[DetectionOptions] = None) -> List[DetectedPeak]:
+    """Peaks of spectrum `index` inside `window`: raw intensity minus background for the noise, maxima on the
+    signal filtered as set for the spectrum (`options.spectrum_filter`) or on a short Savitzky-Golay filter."""
+    options = options or DetectionOptions()
+    x, y, smoothed, gain = detection_signals(run.spectra[index], window, options)
+    return detect_peaks(x, y, options, smoothed, gain)
 
 
 def apply_solution(

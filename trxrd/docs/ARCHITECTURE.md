@@ -136,18 +136,21 @@ trxrd/
 │   │   ├── images.py           ✅ image brute et cake (2θ × azimut) d'un spectre ; aperçu d'un scan brut
 │   │   ├── calibration.py      ✅ calibration pas à pas (image, clics, affinement, .poni)
 │   │   ├── rates.py            ✅ dP/dt par échantillon ou par phase, dP/dt moyen sur un intervalle
+│   │   ├── treatment.py        ✅ traitement des spectres (fond, filtre), détection telle que l'analyse la voit
 │   │   └── session.py          ✅ état de l'application pour le GUI (run courant, sélection, événements)
 │   ├── notebook.py             ✅ XRDRun : lecture seule pour notebooks
 │   ├── cli.py                  ✅ trxrd build | auto | compare | convert | info
 │   └── gui/                    ✅ lecteur PySide6 + pyqtgraph (§9) : `trxrd-gui`
-│       ├── presenters/         display.py (données affichées), viewer.py, preview.py, analysis.py, calibration.py
+│       ├── presenters/         display.py (données affichées), viewer.py, preview.py, analysis.py, treatment.py,
+│       │                       calibration.py
 │       │                       (presenters), sans Qt
 │       ├── views/              plots.py (spectre, cake, grandeurs(t), carte), images.py (échelle, niveaux, couleurs),
-│       │                       panels.py, new_run.py, preview.py, analysis.py, calibration.py, main_window.py
+│       │                       panels.py, new_run.py, preview.py, analysis.py, treatment.py, calibration.py,
+│       │                       main_window.py
 │       ├── actions.py          registre unique des QAction (menus, barre d'outils, raccourcis)
 │       ├── tasks.py            calculs longs dans un thread, résultat rendu au thread de l'interface
 │       └── app.py              assemblage : fenêtre + presenters + actions
-└── tests/                      211 tests ; data/ = scan TUTO, calibration, ancien fichier .CEDX d'exemple
+└── tests/                      224 tests ; data/ = scan TUTO, calibration, ancien fichier .CEDX d'exemple
 ```
 
 ## 5. Le format de fichier `trxrd-run` (HDF5)
@@ -270,6 +273,16 @@ n'est pas détecté, aucune recherche ne peut le retrouver.
 - Les **épaulements**, ces pics sans maximum propre qu'on observe quand deux phases se chevauchent, sont
   cherchés sur la dérivée seconde.
 - Les 0,25° aux bords du diagramme sont ignorés : filtres et fond n'y sont pas fiables.
+- **Signal où l'on cherche les maxima** : depuis novembre 2026, à la demande de l'utilisateur, c'est le
+  signal **filtré par le filtre du spectre** (onglet Traitement), moins le fond, celui que l'interface
+  montre. Avant, c'était un Savitzky-Golay de 7 points, quel que soit le filtre choisi. Le bruit reste
+  mesuré sur le signal brut moins le fond ; son effet sur le signal filtré est la norme de la réponse
+  impulsionnelle du filtre (`background.noise_gain`), qui vaut pour Savitzky-Golay comme pour la FFT.
+  L'ajustement, lui, reste fait sur le signal brut (§5 de PASSATION, point 1). Mesure sur 29 runs de
+  janvier 2026 (1 053 spectres, mêmes réglages des deux côtés, sans zone exclue) : 805 spectres aux phases
+  de l'analyse manuelle au lieu de 797. Water05_scan0014 gagne 4 spectres, Water01_scan0057 3, et
+  Water08_scan0028 en perd 2. Water05 scan 9 reste à 15/16, et Sn y passe de 0,165 à 0,161 GPa. L'ancien
+  comportement : `AnalysisSettings(spectrum_filter=False)`, ou `trxrd auto --no-spectrum-filter`.
 - **Pics fixes** (`find_static_peaks`) : un pic présent au même 2θ (±0,1°) dans au moins 80 % des spectres
   d'une série est signalé par `trxrd auto`, avec la zone `--exclude` à utiliser (joint, diamant...). Ce
   n'est qu'une suggestion, jamais appliquée seule : dans un run statique, tous les pics sont fixes.
@@ -709,6 +722,42 @@ l'analyse avance à environ 18 spectres par seconde, et l'arrêt garde les spect
 Remarque : la courbe « ajustement » enregistrée (`Spectrum.model`) ne contient que les pics des phases. Les
 pics libres (zones exclues, pics inexpliqués) sont ajustés, mais ni tracés ni gardés. À revoir avec
 l'ajustement interactif (étape 3).
+
+**Traitement des spectres et contrôle de la détection** (demandés par l'utilisateur après un essai raté
+sur D2O_03_0001_scan0006 ; `services/treatment.py`, `gui/presenters/treatment.py`, `gui/views/treatment.py`) :
+- **Affichage** : le spectre est montré **filtré, fond soustrait**, le signal où l'on cherche les pics. Le
+  signal brut avec son fond s'affiche à la demande (Affichage > Signal brut, Ctrl+B). La courbe ajustée
+  suit : le modèle seul, ou le modèle plus le fond.
+- **Onglet Traitement** : lissage du fond SNIP et filtre (Savitzky-Golay, FFT ou aucun) du spectre courant.
+  Un changement s'applique tout de suite à ce spectre (au cas par cas). On le propage ensuite à tous les
+  spectres, ou à la sélection de la liste (Maj + clic, Ctrl + clic). Les paramètres impossibles (fenêtre
+  paire, ordre trop grand...) sont refusés avec un message, et le spectre ne change pas. Les ajustements
+  déjà faits sont gardés, mais ils l'ont été avec l'ancien fond : il faut les refaire. Appliquer un
+  traitement aux 1 600 spectres de Water01_scan0074 prend 3,2 s ; ce calcul bloque encore l'interface.
+- **Onglet Détection** : les pics que l'analyse automatique détecte dans le spectre courant, avec ses
+  réglages (seuil, largeur max, fenêtre du bruit, épaulements, signal filtré). Ces réglages sont gardés dans
+  le run avec ceux de l'analyse (Ctrl+R), et le dialogue de l'analyse les conserve. Sur le spectre :
+  - triangles verts : les pics que la recherche utilise ;
+  - orange : trop larges (> 0,5°), ignorés ;
+  - gris : dans une zone exclue, ajustés comme pics libres ;
+  - triangle vide : épaulement ;
+  - pointillés : le seuil (niveau local + seuil × bruit) ;
+  - bandes grises : les zones exclues.
+
+  Le tableau donne 2θ, SNR, hauteur, largeur et la raison d'un rejet.
+- **Sélection** : la liste des spectres accepte une sélection multiple (`Session.selection`), qui servira
+  aussi à l'ajustement interactif.
+
+Ce qu'on a appris sur D2O_03_0001_scan0006 :
+- **La calibration était fausse.** Le `.poni` fait ce jour-là avec l'outil de la v2 (`test.poni`) donne
+  166,6 mm, contre 162,2 mm pour celui de Dioptas utilisé par la v1 (`calib_ddac2_correct_vendredi`). La
+  glace VII sortait alors 2,3 GPa trop bas, et la glace Ih décompressée à −0,55 GPa (a = 4,63 Å) au lieu de
+  −0,07 GPa. Avec le `.poni` de Dioptas, la v2 retrouve 13 spectres sur 16, à 0,02 GPa près.
+- **Spectre 0** : la raie (200) de la glace VII, vers 23,3°, mesure 0,55° de largeur. Elle est donc ignorée
+  par la recherche, qui ne garde que le pic (110) (SNR 217) et deux petits pics de bruit. La solution qui
+  laisse la raie (110) inexpliquée (glace VII à 0,01 GPa) coûte 2,18, contre 2,23 pour la bonne (5,91 GPa).
+  En effet, le poids d'un pic sature à SNR = 10 : un pic de SNR 217 ne compte pas plus qu'un pic de SNR 10.
+  À reprendre (PASSATION, P5).
 
 **Ensuite** :
 - étape 3 : ajustement interactif (pics, phases, zones), gestion des phases, puis le reste

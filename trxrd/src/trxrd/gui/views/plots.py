@@ -19,6 +19,8 @@ pg.setConfigOptions(antialias=True, background="w", foreground="k")
 # one colour per phase, in the order of display.phase_order (colour-blind friendly)
 PALETTE = ("#1f77b4", "#d62728", "#2ca02c", "#9467bd", "#ff7f0e", "#8c564b", "#e377c2", "#17becf", "#bcbd22", "#7f7f7f")
 RIGHT_AXIS_WIDTH = 56  # oscilloscope axis of the evolution plot; the map below keeps the same margin
+# detected peaks: used by the phase search, too broad (ignored), in an excluded zone (free peak)
+DETECTION_COLORS = {"used": "#2ca02c", "broad": "#ff7f0e", "excluded": "#7f7f7f"}
 
 
 def phase_color(index: int) -> str:
@@ -82,13 +84,20 @@ class SpectrumView(QWidget):
         super().__init__(parent)
         self.plot = pg.PlotWidget()
         self.plot.getAxis("left").setWidth(AXIS_WIDTH)  # aligned with the cake below
-        self.plot.addLegend(offset=(-10, 10))
+        self.legend = self.plot.addLegend(offset=(-10, 10))
         self.plot.setLabel("left", "Intensité")
         self.plot.showGrid(x=True, y=True, alpha=0.15)
-        self.data = self.plot.plot(pen=pg.mkPen("#404040", width=1), name="données")
+        self.data = self.plot.plot(pen=pg.mkPen("#404040", width=1), name="filtré − fond")
         self.baseline = self.plot.plot(pen=pg.mkPen("#1f77b4", width=1, style=Qt.PenStyle.DashLine), name="fond")
         self.fit = self.plot.plot(pen=pg.mkPen("#d62728", width=1.5), name="ajustement")
         self._ticks: List[pg.GraphicsObject] = []
+        # detected peaks (Détection tab): markers, threshold, excluded zones; not in the legend
+        self.threshold = pg.PlotDataItem(pen=pg.mkPen("#8a8a8a", width=1, style=Qt.PenStyle.DotLine))
+        self.detected = pg.ScatterPlotItem(hoverable=True, tip=lambda x, y, data: data)
+        self.detected.setZValue(10)
+        for item in (self.threshold, self.detected):
+            self.plot.addItem(item)
+        self._zones: List[pg.GraphicsObject] = []
         self.spacer = spacer()  # shown with the histogram of the cake, so that both x axes line up
         self.spacer.hide()
         layout = QVBoxLayout(self)
@@ -99,7 +108,36 @@ class SpectrumView(QWidget):
         for curve in (self.data, self.baseline, self.fit):
             curve.setData([], [])
         self._clear_ticks()
+        self.show_detection(None)
         self.plot.setTitle("")
+
+    def _set_data_label(self, text: str) -> None:
+        for sample, label in self.legend.items:
+            if sample.item is self.data and label.text != text:
+                label.setText(text)
+
+    def show_detection(self, marks) -> None:
+        """Detected peaks (display.DetectionMarks), or None to hide them."""
+        for item in self._zones:
+            self.plot.removeItem(item)
+        self._zones = []
+        if marks is None:
+            self.detected.setData([])
+            self.threshold.setData([], [])
+            return
+        spots = []
+        for x, y, kind, shoulder, tip in zip(marks.x, marks.y, marks.kinds, marks.shoulder, marks.tips):
+            color = DETECTION_COLORS[kind]
+            spots.append({"pos": (x, y), "symbol": "t", "size": 11, "data": tip, "pen": pg.mkPen(color, width=1.5),
+                          "brush": pg.mkBrush(None) if shoulder else pg.mkBrush(color)})
+        self.detected.setData(spots)
+        self.threshold.setData(marks.threshold_x, marks.threshold_y)
+        for low, high in marks.zones:
+            zone = pg.LinearRegionItem((low, high), movable=False, brush=pg.mkBrush(128, 128, 128, 40),
+                                       pen=pg.mkPen(None))
+            zone.setZValue(-20)
+            self.plot.addItem(zone, ignoreBounds=True)
+            self._zones.append(zone)
 
     def _clear_ticks(self) -> None:
         for item in self._ticks:
@@ -109,6 +147,7 @@ class SpectrumView(QWidget):
     def show_spectrum(self, curves, reset: bool) -> None:
         self.plot.setTitle(curves.title)
         self.plot.setLabel("bottom", curves.x_label)
+        self._set_data_label(curves.data_label)
         self.data.setData(curves.x, curves.intensity)
         for item, y in ((self.baseline, curves.baseline), (self.fit, curves.fit)):
             item.setData(curves.x, y) if y is not None else item.setData([], [])

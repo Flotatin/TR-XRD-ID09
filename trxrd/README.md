@@ -18,7 +18,7 @@ Un environnement virtuel dédié, séparé de celui de la v1 : PyQt5 (v1) et PyS
 python -m venv .venv-v2
 .venv-v2\Scripts\activate                    # Windows ; Linux/macOS : source .venv-v2/bin/activate
 pip install -e "./trxrd[notebook,gui,dev]"  # depuis la racine du dépôt
-python -m pytest trxrd                      # 211 tests
+python -m pytest trxrd                      # 224 tests
 ```
 
 ## Interface graphique
@@ -47,6 +47,9 @@ L'interface sait aussi :
   2θ sur l'aperçu du scan brut (image ou cake sur tout le détecteur) ;
 - lancer l'analyse automatique (Ctrl+R) : phases candidates, plage de P, zones exclues (gardées dans le
   run) ; les pics fixes (joint, diamant) sont proposés comme zones à exclure ;
+- régler le traitement des spectres (fond, filtre), au cas par cas ou pour tous / une sélection, et
+  vérifier la détection des pics (onglets Traitement et Détection) ; le spectre est montré filtré, fond
+  soustrait, et brut sur demande (Ctrl+B) ;
 - afficher sous le spectre le cake ou l'image brute du spectre courant (Ctrl+K) ;
 - calibrer le détecteur sur une image de LaB6 ou de CeO2, à la Dioptas (Ctrl+L).
 

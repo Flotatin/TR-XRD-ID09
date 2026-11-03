@@ -21,6 +21,7 @@ Listener = Callable[["Session"], None]
 class Event:
     RUN_CHANGED = "run_changed"  # another run loaded / created / closed
     SPECTRUM_CHANGED = "spectrum_changed"  # selection moved to another spectrum
+    SELECTION_CHANGED = "selection_changed"  # spectra chosen together (navigator), for actions on a selection
     DATA_CHANGED = "data_changed"  # current run modified (fit, note...)
     SAVED = "saved"
 
@@ -30,6 +31,7 @@ class Session:
         self.run: Optional[Run] = None
         self.path: Optional[Path] = None
         self.index = 0
+        self.selection: List[int] = []  # spectra chosen together; the current one may be outside
         self.dirty = False
         self._listeners: DefaultDict[str, List[Listener]] = defaultdict(list)
 
@@ -82,6 +84,7 @@ class Session:
 
     def _set_run(self, run: Optional[Run], path: Optional[Path], dirty: bool) -> None:
         self.run, self.path, self.index, self.dirty = run, path, 0, dirty
+        self.selection = []
         self._emit(Event.RUN_CHANGED)
         self._emit(Event.SPECTRUM_CHANGED)
 
@@ -100,6 +103,14 @@ class Session:
         if index != self.index:
             self.index = index
             self._emit(Event.SPECTRUM_CHANGED)
+
+    def set_selection(self, indices) -> None:
+        """Spectra chosen together (sorted, without duplicates, inside the run)."""
+        count = len(self.run.spectra) if self.run is not None else 0
+        selection = sorted({int(i) for i in indices if 0 <= int(i) < count})
+        if selection != self.selection:
+            self.selection = selection
+            self._emit(Event.SELECTION_CHANGED)
 
     def modified(self) -> None:
         """To be called by services after they changed the current run."""

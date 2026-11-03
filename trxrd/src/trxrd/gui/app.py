@@ -13,6 +13,7 @@ from typing import List, Optional, Sequence
 
 from trxrd import __version__
 from trxrd.gui.presenters.analysis import AnalysisPresenter
+from trxrd.gui.presenters.treatment import DetectionPresenter, ProcessingPresenter
 from trxrd.gui.presenters.viewer import (
     CakePresenter, DisplaySettings, EvolutionPresenter, MainPresenter, MapPresenter, NavigatorPresenter,
     RatePresenter, RateSettings, SpectrumPresenter, TablesPresenter,
@@ -50,6 +51,8 @@ def create_viewer(session: Optional[Session] = None, runner=None) -> Viewer:
         MapPresenter(session, settings, window.map),
         TablesPresenter(session, window.phases, window.peaks),
         NavigatorPresenter(session, window.navigator),
+        ProcessingPresenter(session, window.processing),
+        DetectionPresenter(session, settings, window.detection, window.spectrum),
     ]
     main = MainPresenter(session, settings, window, runner, version=__version__)
     analysis = AnalysisPresenter(session, window, runner)
@@ -78,6 +81,9 @@ def create_viewer(session: Optional[Session] = None, runner=None) -> Viewer:
         window.align_plots()
         cake.set_visible(shown)  # nothing is computed while it is hidden
 
+    add("raw", VIEW, "Signal &brut (avec le fond)", lambda: settings.set_raw(window.actions.get("raw").isChecked()),
+        ["Ctrl+B"], checkable=True,
+        tip="Par défaut le spectre est montré filtré, fond soustrait : c'est sur ce signal qu'on cherche les pics")
     add("cake", VIEW, "&Intégration sous le spectre (cake)", toggle_cake, ["Ctrl+K"], checkable=True,
         tip="Cake (2θ × azimut) ou image brute du spectre courant, calculé depuis les images de RAW_DATA")
     window.actions.get("cake").setChecked(True)
@@ -86,7 +92,7 @@ def create_viewer(session: Optional[Session] = None, runner=None) -> Viewer:
     add("calibration", TOOLS, "&Calibration du détecteur…", window.show_calibration, ["Ctrl+L"],
         "Calibrer la géométrie sur une image de LaB6 / CeO2 et enregistrer le .poni")
     add("shortcuts", HELP, "&Raccourcis clavier", window.show_shortcuts, ["F1"])
-    window.build_menus(toolbar=("new_run", "open", "save", "|", "previous", "next", "|", "auto"))
+    window.build_menus(toolbar=("new_run", "open", "save", "|", "previous", "next", "|", "raw", "auto"))
     main.update()  # the unit actions exist now
     return Viewer(session, settings, window, main, analysis, presenters)
 

@@ -51,6 +51,7 @@ Ne pas les remettre en cause sans lui en parler.
 | Versions | v1 = `cedapp`, v2 = `trxrd` ; à afficher clairement (README racine, `trxrd --version`) |
 | dP/dt moyen sur un intervalle | Pas besoin d'enregistrer l'intervalle ni ses résultats dans le run (novembre 2026) : la copie dans le presse-papiers suffit |
 | Finitions de l'interface | Avancer d'abord sur les fonctions ; on reviendra peaufiner à la fin (novembre 2026) |
+| Affichage du spectre et détection | Montrer par défaut le signal filtré, fond soustrait, le brut seulement sur demande ; chercher les pics sur ce signal filtré (novembre 2026). L'ajustement reste sur le brut moins le fond (§5, point 1) |
 
 ## 3. Ce qui est fait
 
@@ -64,13 +65,13 @@ Ne pas les remettre en cause sans lui en parler.
 | `8cc1c8c` | Validation sur un run réel (Water05) et cinq corrections qui en découlent ; nommage v1 / v2 |
 | `e135918` | Documentation : commit de référence de la v1 |
 | `68a1b7c` | Suivi des pics ; `trxrd compare` ; `CLAUDE.md` ; environnement virtuel séparé |
-| branche `gui-viewer` | Interface :<br>- étape 1, le lecteur : `trxrd-gui`, presenters sans Qt, registre d'actions, ouverture en arrière-plan (`Session.read` / `attach`) ;<br>- étape 2 : nouveaux runs depuis RAW_DATA, cake sous le spectre, calibration à la Dioptas validée sur le LaB6 réel ; aperçu du scan brut pour choisir la plage 2θ ; analyse automatique depuis l'interface (Ctrl+R) ;<br>- étape 2 (suite) : panneau dDAC de la v1 (grandeur au choix P, V, a, b, c, c/a, b/a, T, ou X/X₀, avec le piézo ; dP/dt par échantillon, moyen sur un intervalle ; carte des diffractogrammes en fonction du temps), images à échelle, niveaux et couleurs réglables |
+| branche `gui-viewer` | Interface :<br>- étape 1, le lecteur : `trxrd-gui`, presenters sans Qt, registre d'actions, ouverture en arrière-plan (`Session.read` / `attach`) ;<br>- étape 2 : nouveaux runs depuis RAW_DATA, cake sous le spectre, calibration à la Dioptas validée sur le LaB6 réel ; aperçu du scan brut pour choisir la plage 2θ ; analyse automatique depuis l'interface (Ctrl+R) ; spectre affiché filtré, fond soustrait, onglets Traitement et Détection, sélection de spectres ;<br>- étape 2 (suite) : panneau dDAC de la v1 (grandeur au choix P, V, a, b, c, c/a, b/a, T, ou X/X₀, avec le piézo ; dP/dt par échantillon, moyen sur un intervalle ; carte des diffractogrammes en fonction du temps), images à échelle, niveaux et couleurs réglables |
 | branche `p2-validation-2026` | Validation sur les 143 runs de janvier 2026 (61 % → 81 % de spectres aux mêmes phases) : conversion des runs Jungfrau « continu », `Vmin` de la v1 non repris, coût d'apparition d'une famille nul, suivi interrompu par un pic fort inexpliqué, pics larges ignorés, tri des pics fixes, `--temperature`, familles sans casse, CLI sous Windows |
 
 ### 3.2 Par fonctionnalité
 
-Tout est testé : `python -m pytest trxrd` compte 211 tests. Les 7 comparaisons numériques avec la v1 sont
-ignorées quand la v1 n'est pas importable, par exemple dans `.venv-v2`, qui n'a pas PyQt5 : 204 tests
+Tout est testé : `python -m pytest trxrd` compte 224 tests. Les 7 comparaisons numériques avec la v1 sont
+ignorées quand la v1 n'est pas importable, par exemple dans `.venv-v2`, qui n'a pas PyQt5 : 217 tests
 passent alors.
 
 | Fonctionnalité | Où | État / preuve |
@@ -96,6 +97,7 @@ passent alors.
 | Interface, étape 1 : le lecteur (`trxrd-gui`) | `gui/` | ✅ presenters testés avec de fausses vues, fenêtre testée hors écran ; essayée sur Water05 scan 9 et Water01_scan0074 (1 600 spectres) |
 | Parcours de RAW_DATA, nouveaux runs depuis l'interface | `services/raw_data.py`, `run_builder.build_and_save`, `gui/views/new_run.py` | ✅ 43 jeux de données de janvier 2026 lus en 0,7 s ; scan 9 de Water05 intégré en 2 s, temps identiques au `.CEDX` |
 | Aperçu d'un scan brut avant l'intégration : image ou cake (maximum du scan ou une image), diagramme et couverture en azimut sur tout le détecteur, plage 2θ à tirer | `services/images.ScanPreview`, `gui/presenters/preview.py`, `gui/views/preview.py` | ✅ Water05 scan 9 : pixels utilisables de 5,21 à 29,30° ; maximum de 32 images sur 1 600 en 2,4 s |
+| Traitement des spectres (fond SNIP, filtre) au cas par cas ou propagé à tous / à la sélection ; spectre affiché filtré, fond soustrait (brut sur demande) ; contrôle de la détection (pics, seuil, raisons des rejets) avec les réglages de l'analyse | `services/treatment.py`, `gui/presenters/treatment.py`, `gui/views/treatment.py` | ✅ détection sur le signal filtré du spectre : 805/1 053 spectres contre 797 sur 29 runs ; Water05 inchangé ; 35 ms par spectre sur Water01_scan0074 |
 | Cake / image brute sous le spectre | `services/images.py`, `CakePresenter` | ✅ image brute d'un `.CEDX` retrouvée par le nom du run ; 0,03 s par spectre |
 | Panneau dDAC : grandeur de chaque phase en fonction du temps (P, V, a, b, c, c/a, b/a, T, ou ÷ fiche), piézo, carte des diffractogrammes sur le même axe du temps | `gui/presenters/display.py`, `EvolutionPresenter`, `MapPresenter`, `gui/views/plots.py` | ✅ Water05 scan 9 ; carte de Water01_scan0074 (1 600 spectres) en 0,03 s |
 | dP/dt par échantillon ou par phase (droite glissante), dP/dt moyen sur un intervalle (pente et ΔP/Δt) | `processing/rates.py`, `services/rates.py`, `RatePresenter` | ✅ Water05 scan 9 : eau et Sn culminent vers −45 à −50 GPa/ms ; 6 ms pour 1 600 spectres |
@@ -234,6 +236,13 @@ Seul `trxrd/gui/` a le droit d'importer PySide6/pyqtgraph (règle vérifiée par
   carte des couleurs, niveaux auto ou gardés d'un spectre à l'autre ; choix mémorisés ;
 - [x] aperçu du scan brut à la création d'un run (demandé par l'utilisateur) : image ou cake sur tout le
   détecteur (maximum du scan ou une image), diagramme et couverture en azimut, plage 2θ tirée à la souris ;
+- [x] spectre affiché filtré, fond soustrait (brut sur demande, Ctrl+B) ; onglet Traitement (fond, filtre,
+  au cas par cas puis propagé à tous ou à la sélection) ; onglet Détection (pics détectés, seuil, raisons
+  des rejets, réglages de l'analyse) ; sélection de plusieurs spectres dans la liste ;
+- [ ] **outil de calibration à vérifier** : le `.poni` fait par l'utilisateur pour D2O_03 (`F:\ESRF\TEST\test.poni`)
+  est faux de 4,4 mm sur la distance (glace Ih décompressée à −0,55 GPa). Savoir sur quelle image et avec
+  quels anneaux il a été fait ; ajouter une vérification (glace Ih ou calibrant intégré, écart des raies) ;
+- [ ] traitement de tous les spectres dans un thread (3,2 s pour 1 600 spectres, l'interface est bloquée) ;
 - [x] lancer l'analyse automatique depuis l'interface (Ctrl+R) : phases candidates, spectres, plage de P,
   zones exclues (gardées dans le run), pics fixes proposés puis exclus en relançant, avec progression et arrêt ;
 - [ ] onglet « masque » de la calibration : dessiner ou modifier un masque, comme dans Dioptas. Pour
@@ -321,6 +330,10 @@ On reconstruit le run avec `trxrd build`, puis on compare les résidus des deux 
 
 - [x] **Suivi** : il s'interrompt maintenant dès qu'un pic de SNR ≥ 10 reste inexpliqué. Une recherche
       forcée tous les N spectres a été mesurée : elle n'apporte rien.
+- [ ] **Poids des pics forts dans la recherche** : le poids d'un pic sature à SNR = 10. Sur
+      D2O_03_0001_scan0006 #0, une solution qui laisse inexpliqué le pic (110) de la glace VII (SNR 217) bat la
+      bonne de peu (2,18 contre 2,23), car la raie (200), large de 0,55°, est ignorée (> 0,5°). À examiner
+      avec l'onglet Détection ; le poids logarithmique, déjà mesuré (P2), n'a pas été retenu.
 - [ ] **Point de départ du suivi** : un premier spectre à un seul pic mal indexé se propage (Ga02 : KCl B2 à
       5,8 GPa au lieu de B1 à 1 GPa). Piste : partir du spectre le mieux déterminé, ou analyser dans les deux
       sens.

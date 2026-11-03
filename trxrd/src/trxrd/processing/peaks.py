@@ -43,6 +43,9 @@ class DetectionOptions:
     max_peaks: Optional[int] = None  # keep the strongest ones
     windows: Optional[Sequence[Tuple[float, float]]] = None  # 2θ zones where peaks are kept
     exclude: Optional[Sequence[Tuple[float, float]]] = None  # 2θ zones ignored (gasket, diamond, detector gaps...)
+    # search the maxima on the signal filtered as set for the spectrum (what the user sees), instead of
+    # a Savitzky-Golay filter of smooth_points points (services.identification.detect)
+    spectrum_filter: bool = False
 
 
 def _odd(n: float, minimum: int = 3) -> int:
@@ -81,21 +84,57 @@ def _refine(x: np.ndarray, y: np.ndarray, index: int) -> float:
     return float(np.interp(index + shift, np.arange(len(x)), x))
 
 
-def detect_peaks(x: np.ndarray, y: np.ndarray, options: Optional[DetectionOptions] = None) -> List[DetectedPeak]:
-    """Peaks of y(x); y must already be background-corrected (not smoothed)."""
+@dataclass
+class Levels:
+    """What the detection compares: the smoothed signal, its local level and the threshold above that level."""
+
+    smoothed: np.ndarray  # background-corrected signal, smoothed
+    noise: np.ndarray  # local noise of the raw corrected signal
+    smooth_noise: np.ndarray  # local noise of the smoothed signal
+    level: np.ndarray  # residual background left by the baseline (running median of the smoothed signal)
+    threshold: np.ndarray  # min_snr * smooth_noise: a peak must rise that much above `level`
+
+
+def detection_levels(x: np.ndarray, y: np.ndarray, options: Optional[DetectionOptions] = None,
+                     smoothed: Optional[np.ndarray] = None, noise_gain: Optional[float] = None) -> Levels:
+    """Noise, smoothed signal, level and threshold of y(x) (background-corrected, not smoothed).
+
+    `smoothed`: y already filtered (the filter of the spectrum, the signal the
+    user looks at), with `noise_gain` the factor by which that filter scales
+    white noise (background.noise_gain). Default: a Savitzky-Golay filter of
+    `options.smooth_points` points.
+    """
+    options = options or DetectionOptions()
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    step = float(np.median(np.diff(x)))
+    noise = local_noise(y, step, options.noise_window)
+    if smoothed is None:
+        smooth_window = _odd(options.smooth_points, 5)
+        smoothed = savgol_filter(y, smooth_window, 3)
+        noise_gain = float(np.sqrt(np.sum(savgol_coeffs(smooth_window, 3) ** 2)))
+    smoothed = np.asarray(smoothed, dtype=float)
+    smooth_noise = noise * (1.0 if noise_gain is None else noise_gain)
+    level = median_filter(smoothed, size=_odd(options.noise_window / step), mode="nearest")
+    return Levels(smoothed, noise, smooth_noise, level, options.min_snr * smooth_noise)
+
+
+def detect_peaks(x: np.ndarray, y: np.ndarray, options: Optional[DetectionOptions] = None,
+                 smoothed: Optional[np.ndarray] = None, noise_gain: Optional[float] = None) -> List[DetectedPeak]:
+    """Peaks of y(x); y must already be background-corrected (not smoothed).
+
+    The maxima are searched on `smoothed` (see detection_levels), the noise is
+    measured on y.
+    """
     options = options or DetectionOptions()
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
     if x.size < 2 * options.smooth_points:
         return []
     step = float(np.median(np.diff(x)))
-    noise = local_noise(y, step, options.noise_window)
-    smooth_window = _odd(options.smooth_points, 5)
-    smoothed = savgol_filter(y, smooth_window, 3)
-    smooth_noise = noise * np.sqrt(np.sum(savgol_coeffs(smooth_window, 3) ** 2))
-    # residual background left by the baseline: running median of the signal
-    level = median_filter(smoothed, size=_odd(options.noise_window / step), mode="nearest")
-    threshold = options.min_snr * smooth_noise
+    levels = detection_levels(x, y, options, smoothed, noise_gain)
+    noise, smoothed, smooth_noise = levels.noise, levels.smoothed, levels.smooth_noise
+    level, threshold = levels.level, levels.threshold
 
     # A noise maximum easily reaches a large prominence over a long distance, but
     # rarely a large height above the local level: the height is the criterion,

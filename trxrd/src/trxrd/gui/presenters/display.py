@@ -1,7 +1,8 @@
 """What the viewer shows, computed from the domain objects (no Qt, testable alone).
 
-Curves of the current spectrum (data, background, fit) and the expected
-lines of its phases; P, V, a, c/a... of each phase versus time with the
+Curves of the current spectrum (filtered signal minus background, or the
+raw signal with its background; fit) and the expected lines of its phases;
+the detected peaks and the detection threshold; P, V, a, c/a... of each phase versus time with the
 oscilloscope traces; dP/dt and its mean over an interval; map of the
 integrated patterns versus time; image scaling; table rows. Every 2θ value
 is shown in the display unit: 2θ (deg), Q (Å⁻¹) or d (Å).
@@ -18,7 +19,7 @@ import numpy as np
 from trxrd.domain import PhaseCard, PhaseFit, Run, Spectrum, energy_to_wavelength
 from trxrd.physics import eos, lattice
 from trxrd.physics.lattice import AXIS_LABELS, convert_two_theta
-from trxrd.services import rates
+from trxrd.services import rates, treatment
 
 UNITS = ("2th_deg", "q_A^-1", "d_A")
 
@@ -68,10 +69,12 @@ class SpectrumCurves:
     title: str
     x_label: str
     x: np.ndarray
-    intensity: np.ndarray
-    baseline: Optional[np.ndarray] = None
-    fit: Optional[np.ndarray] = None  # baseline + fitted model
+    intensity: np.ndarray  # filtered - background, or raw (raw=True)
+    baseline: Optional[np.ndarray] = None  # only with the raw signal
+    fit: Optional[np.ndarray] = None  # fitted model (+ background with the raw signal)
     lines: List[Lines] = field(default_factory=list)
+    raw: bool = False
+    data_label: str = "filtré − fond"
 
 
 def expected_lines(run: Run, spectrum: Spectrum, unit: str, min_intensity: float = 1.0) -> List[Lines]:
@@ -98,22 +101,97 @@ def expected_lines(run: Run, spectrum: Spectrum, unit: str, min_intensity: float
     return out
 
 
-def spectrum_curves(run: Run, index: int, unit: str) -> SpectrumCurves:
+def spectrum_curves(run: Run, index: int, unit: str, raw: bool = False) -> SpectrumCurves:
+    """By default the filtered signal minus the background (where the peaks are searched); `raw`: the raw
+    intensity with its background."""
     spectrum = run.spectra[index]
-    baseline = None if spectrum.baseline is None else np.asarray(spectrum.baseline, dtype=float)
-    fit = None
-    if spectrum.model is not None:
-        fit = np.asarray(spectrum.model, dtype=float) + (baseline if baseline is not None else 0.0)
+    model = None if spectrum.model is None else np.asarray(spectrum.model, dtype=float)
     time = f"  t = {spectrum.time * 1e3:.4g} ms" if np.isfinite(spectrum.time) else ""
-    return SpectrumCurves(
+    curves = SpectrumCurves(
         title=f"Spectre {index} / {len(run) - 1}{time}",
         x_label=AXIS_LABELS[unit],
         x=to_unit(spectrum.two_theta, unit, run),
         intensity=np.asarray(spectrum.intensity, dtype=float),
-        baseline=baseline,
-        fit=fit,
         lines=expected_lines(run, spectrum, unit),
+        raw=raw,
     )
+    if raw:
+        curves.data_label = "brut"
+        curves.baseline = None if spectrum.baseline is None else np.asarray(spectrum.baseline, dtype=float)
+        if model is not None:
+            curves.fit = model + (curves.baseline if curves.baseline is not None else 0.0)
+    else:
+        curves.intensity = treatment.corrected(spectrum)[0]
+        curves.fit = model
+    return curves
+
+
+# ---------------------------------------------------------------------------- peak detection (to check it)
+
+
+DETECTION_COLUMNS = ("2θ (°)", "SNR", "Hauteur", "FWHM (°)", "Remarque")
+DETECTION_KINDS = ("used", "broad", "excluded")  # for the phase search; too broad: ignored; in an excluded zone
+
+
+@dataclass
+class DetectionMarks:
+    x: np.ndarray  # display unit
+    y: np.ndarray  # top of each peak on the displayed signal
+    kinds: List[str]  # DETECTION_KINDS
+    shoulder: List[bool]
+    tips: List[str]
+    threshold_x: np.ndarray
+    threshold_y: np.ndarray  # a peak must rise above this curve
+    zones: List[Tuple[float, float]]  # excluded zones, display unit
+    summary: str
+
+
+def _kind(detection, k: int) -> str:
+    return "excluded" if detection.excluded[k] else "broad" if detection.broad[k] else "used"
+
+
+def _remark(detection, k: int) -> str:
+    peak = detection.peaks[k]
+    notes = ["épaulement"] if peak.shoulder else []
+    if detection.excluded[k]:
+        notes.append("zone exclue : pic libre")
+    elif detection.broad[k]:
+        notes.append(f"large (> {detection.broad_fwhm:g}°) : ignoré")
+    return ", ".join(notes)
+
+
+def detection_summary(detection) -> str:
+    peaks = len(detection.peaks)
+    broad = sum(b and not e for b, e in zip(detection.broad, detection.excluded))
+    text = f"{peaks} pic(s) détecté(s), {detection.used} pour la recherche des phases"
+    details = [f"{broad} large(s)"] if broad else []
+    if any(detection.excluded):
+        details.append(f"{sum(detection.excluded)} en zone exclue")
+    return f"{text} ({', '.join(details)})" if details else text
+
+
+def detection_marks(run: Run, detection, unit: str, raw: bool = False) -> DetectionMarks:
+    """detection: services.treatment.Detection, drawn on the signal shown (raw or filtered - background)."""
+    positions = np.array([p.position for p in detection.peaks], dtype=float)
+    offset = detection.baseline if raw else np.zeros_like(detection.x)
+    tops = np.interp(positions, detection.x, detection.smoothed + offset) if positions.size else positions
+    zones = [tuple(sorted(to_unit(np.array(zone, dtype=float), unit, run))) for zone in detection.exclude]
+    tips = []
+    for k, peak in enumerate(detection.peaks):
+        fwhm = f"{peak.fwhm:.3f}°" if np.isfinite(peak.fwhm) else "—"
+        remark = _remark(detection, k)
+        tips.append(f"2θ = {peak.position:.3f}°  SNR = {peak.snr:.0f}  FWHM = {fwhm}" + (f"\n{remark}" if remark else ""))
+    return DetectionMarks(
+        x=to_unit(positions, unit, run), y=tops, kinds=[_kind(detection, k) for k in range(len(detection.peaks))],
+        shoulder=[p.shoulder for p in detection.peaks], tips=tips,
+        threshold_x=to_unit(detection.x, unit, run), threshold_y=detection.threshold + offset,
+        zones=zones, summary=detection_summary(detection),
+    )
+
+
+def detection_rows(detection) -> List[Tuple[str, ...]]:
+    return [(f"{p.position:.3f}", f"{p.snr:.0f}", f"{p.height:.4g}", f"{p.fwhm:.3f}" if np.isfinite(p.fwhm) else "",
+             _remark(detection, k)) for k, p in enumerate(detection.peaks)]
 
 
 # ---------------------------------------------------------------------------- quantities versus time, oscilloscope
