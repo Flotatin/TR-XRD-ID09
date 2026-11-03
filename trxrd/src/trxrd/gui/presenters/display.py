@@ -2,9 +2,9 @@
 
 Curves of the current spectrum (data, background, fit) and the expected
 lines of its phases; P, V, a, c/a... of each phase versus time with the
-oscilloscope traces; map of the integrated patterns versus time; image
-scaling; table rows. Every 2θ value is shown in the display unit: 2θ (deg),
-Q (Å⁻¹) or d (Å).
+oscilloscope traces; dP/dt and its mean over an interval; map of the
+integrated patterns versus time; image scaling; table rows. Every 2θ value
+is shown in the display unit: 2θ (deg), Q (Å⁻¹) or d (Å).
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ import numpy as np
 from trxrd.domain import PhaseCard, PhaseFit, Run, Spectrum, energy_to_wavelength
 from trxrd.physics import eos, lattice
 from trxrd.physics.lattice import AXIS_LABELS, convert_two_theta
+from trxrd.services import rates
 
 UNITS = ("2th_deg", "q_A^-1", "d_A")
 
@@ -291,6 +292,108 @@ def nearest_spectrum(x_of_spectra: np.ndarray, x: float) -> Optional[int]:
     if not len(x_of_spectra) or not np.isfinite(x):
         return None
     return int(np.nanargmin(np.abs(np.asarray(x_of_spectra) - x)))
+
+
+# ---------------------------------------------------------------------------- dP/dt
+
+RATE_LABEL = "dP/dt (GPa/ms)"
+
+
+@dataclass
+class RateSeries:
+    name: str  # sample ("H2O") or phase
+    phases: List[str]
+    color: int  # colour of its first phase
+    x: np.ndarray  # ms
+    y: np.ndarray  # GPa/ms
+    error: np.ndarray  # 1σ, 0 when unknown
+
+
+@dataclass
+class RateData:
+    x_label: str
+    y_label: str
+    series: List[RateSeries]
+    message: str = ""  # why nothing is shown
+    by: str = "family"  # "family" (one curve per sample) or "phase"
+    half_window: int = 2
+
+
+def _color_of(run: Run, phases: Sequence[str]) -> int:
+    order = phase_order(run)
+    return order.index(phases[0]) if phases and phases[0] in order else len(order)
+
+
+def has_time_base(run: Optional[Run]) -> bool:
+    return run is not None and len(run) > 0 and bool(np.isfinite(run.times).all())
+
+
+def rate_data(run: Run, half_window: int = 2, by: str = "family") -> RateData:
+    """dP/dt of every sample (or phase): straight line over ±half_window spectra."""
+    if not has_time_base(run):
+        return RateData("spectre", RATE_LABEL, [], "dP/dt : ce run n'a pas de base de temps.", by, half_window)
+    series = []
+    for curve in rates.dpdt(run, half_window, by):
+        keep = np.isfinite(curve.rate)
+        if keep.any():
+            series.append(RateSeries(curve.name, curve.phases, _color_of(run, curve.phases), curve.time[keep],
+                                     curve.rate[keep], np.where(np.isfinite(curve.rate_err[keep]), curve.rate_err[keep], 0.0)))
+    message = "" if series else "dP/dt : pas assez de pressions ajustées (3 spectres au moins par courbe)."
+    return RateData("t (ms)", RATE_LABEL, series, message, by, half_window)
+
+
+def with_error(value: float, error: float) -> str:
+    """'-25.31 ± 0.42': the value rounded to two significant digits of its error."""
+    if not np.isfinite(value):
+        return "—"
+    if not (np.isfinite(error) and error > 0):
+        return f"{value:.4g}"
+    digits = max(0, 1 - int(math.floor(math.log10(error))))
+    return f"{value:.{digits}f} ± {error:.{digits}f}"
+
+
+def _short_phases(phases: Sequence[str]) -> str:
+    return ", ".join(p.split("_", 1)[1] if "_" in p else p for p in phases)
+
+
+@dataclass
+class IntervalData:
+    """Mean dP/dt of every curve over the chosen interval (ms)."""
+
+    start: float
+    stop: float
+    means: List[rates.MeanRate]
+    colors: List[int]
+
+    @property
+    def lines(self) -> List[str]:
+        """One line of text per curve."""
+        out = []
+        for r in self.means:
+            phases = f" ({_short_phases(r.phases)})" if len(r.phases) > 1 or r.phases[0] != r.name else ""
+            secant = f"{r.secant:.4g}" if np.isfinite(r.secant) else "—"
+            out.append(f"{r.name}{phases} : pente {with_error(r.rate, r.rate_err)} GPa/ms ; ΔP/Δt = {secant} GPa/ms "
+                       f"(ΔP = {r.delta_p:+.3f} GPa en {r.delta_t:.4g} ms, {r.n} spectres)")
+        return out
+
+    @property
+    def segments(self) -> List[Tuple[float, float, float, float, int]]:
+        """(t start, t stop, P start, P stop, colour) of the straight line of each curve, for the P(t) plot."""
+        return [(r.start, r.stop, r.p_start, r.p_stop, color) for r, color in zip(self.means, self.colors)]
+
+    @property
+    def table(self) -> str:
+        return rates.rates_table(self.means)
+
+
+def interval_data(run: Optional[Run], interval: Optional[Tuple[float, float]], by: str = "family",
+                  half_window: int = 2) -> Optional[IntervalData]:
+    """Mean dP/dt over the interval: slope of the straight line, and ΔP/Δt of the smoothed pressure."""
+    if interval is None or not has_time_base(run):
+        return None
+    start, stop = sorted(interval)
+    found = rates.mean_dpdt(run, start, stop, by, half_window)
+    return IntervalData(start, stop, found, [_color_of(run, r.phases) for r in found])
 
 
 # ---------------------------------------------------------------------------- maps

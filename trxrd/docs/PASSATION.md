@@ -62,13 +62,13 @@ Ne pas les remettre en cause sans lui en parler.
 | `8cc1c8c` | Validation sur un run réel (Water05) et cinq corrections qui en découlent ; nommage v1 / v2 |
 | `e135918` | Documentation : commit de référence de la v1 |
 | `68a1b7c` | Suivi des pics ; `trxrd compare` ; `CLAUDE.md` ; environnement virtuel séparé |
-| branche `gui-viewer` | Interface :<br>- étape 1, le lecteur : `trxrd-gui`, presenters sans Qt, registre d'actions, ouverture en arrière-plan (`Session.read` / `attach`) ;<br>- étape 2 : nouveaux runs depuis RAW_DATA, cake sous le spectre, calibration à la Dioptas validée sur le LaB6 réel ;<br>- étape 2 (suite) : panneau dDAC de la v1 (grandeur au choix P, V, a, b, c, c/a, b/a, T, ou X/X₀, avec le piézo ; carte des diffractogrammes en fonction du temps), images à échelle, niveaux et couleurs réglables |
+| branche `gui-viewer` | Interface :<br>- étape 1, le lecteur : `trxrd-gui`, presenters sans Qt, registre d'actions, ouverture en arrière-plan (`Session.read` / `attach`) ;<br>- étape 2 : nouveaux runs depuis RAW_DATA, cake sous le spectre, calibration à la Dioptas validée sur le LaB6 réel ;<br>- étape 2 (suite) : panneau dDAC de la v1 (grandeur au choix P, V, a, b, c, c/a, b/a, T, ou X/X₀, avec le piézo ; dP/dt par échantillon, moyen sur un intervalle ; carte des diffractogrammes en fonction du temps), images à échelle, niveaux et couleurs réglables |
 | branche `p2-validation-2026` | Validation sur les 143 runs de janvier 2026 (61 % → 81 % de spectres aux mêmes phases) : conversion des runs Jungfrau « continu », `Vmin` de la v1 non repris, coût d'apparition d'une famille nul, suivi interrompu par un pic fort inexpliqué, pics larges ignorés, tri des pics fixes, `--temperature`, familles sans casse, CLI sous Windows |
 
 ### 3.2 Par fonctionnalité
 
-Tout est testé : `python -m pytest trxrd` compte 177 tests. Les 7 comparaisons numériques avec la v1 sont
-ignorées quand la v1 n'est pas importable, par exemple dans `.venv-v2`, qui n'a pas PyQt5 : 170 tests
+Tout est testé : `python -m pytest trxrd` compte 188 tests. Les 7 comparaisons numériques avec la v1 sont
+ignorées quand la v1 n'est pas importable, par exemple dans `.venv-v2`, qui n'a pas PyQt5 : 181 tests
 passent alors.
 
 | Fonctionnalité | Où | État / preuve |
@@ -94,6 +94,7 @@ passent alors.
 | Parcours de RAW_DATA, nouveaux runs depuis l'interface | `services/raw_data.py`, `run_builder.build_and_save`, `gui/views/new_run.py` | ✅ 43 jeux de données de janvier 2026 lus en 0,7 s ; scan 9 de Water05 intégré en 2 s, temps identiques au `.CEDX` |
 | Cake / image brute sous le spectre | `services/images.py`, `CakePresenter` | ✅ image brute d'un `.CEDX` retrouvée par le nom du run ; 0,03 s par spectre |
 | Panneau dDAC : grandeur de chaque phase en fonction du temps (P, V, a, b, c, c/a, b/a, T, ou ÷ fiche), piézo, carte des diffractogrammes sur le même axe du temps | `gui/presenters/display.py`, `EvolutionPresenter`, `MapPresenter`, `gui/views/plots.py` | ✅ Water05 scan 9 ; carte de Water01_scan0074 (1 600 spectres) en 0,03 s |
+| dP/dt par échantillon ou par phase (droite glissante), dP/dt moyen sur un intervalle (pente et ΔP/Δt) | `processing/rates.py`, `services/rates.py`, `RatePresenter` | ✅ Water05 scan 9 : eau et Sn culminent vers −45 à −50 GPa/ms ; 6 ms pour 1 600 spectres |
 | Images : histogramme, échelle log / linéaire / racine, couleurs, niveaux gardés d'un spectre à l'autre | `gui/views/images.py` | ✅ cake, carte et image du calibrant |
 | Calibration du détecteur (LaB6 / CeO2) | `processing/geometry.py`, `services/calibration.py`, `gui/views/calibration.py` | ✅ synthétique : géométrie retrouvée à 0,01° ; LaB6 réel : distance à 0,3 mm de Dioptas, pics à ≤ 0,035° |
 | Comparaison avec une analyse de référence | `services/validation.py` | ✅ |
@@ -190,6 +191,9 @@ run par run, avec une passe sans exclusion puis une passe avec les zones fixes r
 21. **Windows bloque `silx.image.marchingsquares`** (contrôle d'application), donc `pyFAI.goniometer` :
     ne pas en dépendre. `pyFAI.geometryRefinement`, `calibrant` et `massif` restent utilisables.
     `twoThetaArray` et `chiArray` sont dépréciés : utiliser `center_array(unit=...)`.
+22. **dP/dt moyen : la pente d'une droite n'est pas ΔP/Δt** quand P(t) est courbe. Sur tout Water05 scan 9,
+    elles valent −29 et −24 GPa/ms. On affiche les deux. La moyenne de toutes les phases, comme dans la v1,
+    mélange l'échantillon et le marqueur : on calcule une courbe par échantillon (famille de phases).
 
 ## 6. Reste à faire (par priorité)
 
@@ -217,8 +221,11 @@ Seul `trxrd/gui/` a le droit d'importer PySide6/pyqtgraph (règle vérifiée par
   LaB6 / CeO2, départ `.poni` ou estimation, clic sur deux anneaux, calibration, `.poni` enregistré ;
 - [x] panneau dDAC, comme dans la v1 : à droite, une grandeur de chaque phase en fonction du temps (P, V, a,
   b, c, c/a, b/a, T ; « ÷ fiche » pour X/X₀) avec une voie de l'oscilloscope (le piézo) et la plage de
-  l'oscilloscope entier ; en dessous, la carte des diffractogrammes intégrés (temps en x, 2θ / Q / d en y),
-  sur le même axe du temps ;
+  l'oscilloscope entier ; en dessous, dP/dt, puis la carte des diffractogrammes intégrés (temps en x,
+  2θ / Q / d en y), sur le même axe du temps ;
+- [x] dP/dt (demandé par l'utilisateur) : par échantillon (glaces VII, VI, Ih ensemble) ou par phase, pente
+  d'une droite glissante sur ±k spectres ; dP/dt moyen sur un intervalle déplaçable : pente de la droite et
+  ΔP/Δt de la pression lissée, à copier dans un tableur ;
 - [x] images (cake, carte, calibrant) : histogramme pour tirer les niveaux, échelle log / linéaire / racine,
   carte des couleurs, niveaux auto ou gardés d'un spectre à l'autre ; choix mémorisés ;
 - [ ] lancer l'analyse automatique (`auto_analyse`) depuis l'interface : phases candidates, plage de P,
@@ -231,8 +238,8 @@ Seul `trxrd/gui/` a le droit d'importer PySide6/pyqtgraph (règle vérifiée par
   montré par défaut, mais il faut le confirmer avec l'utilisateur. Le rôle de `ch2` est inconnu ;
 - des icônes pour la barre d'outils ;
 - le zoom du panneau dDAC, qui revient à la plage des spectres à chaque modification du run ;
-- **dP/dt** : la v1 l'affichait sous P(t), avec un nombre de points glissants et un lissage par spline
-  (`UnivariateSpline`). Pas encore repris : à proposer à l'utilisateur ;
+- dP/dt : l'intervalle n'est pas enregistré dans le run, et les résultats ne sont copiés que dans le
+  presse-papiers. À relier aux annotations de la v1 (P4) si l'utilisateur veut les garder dans le fichier ;
 - superposer plusieurs diffractogrammes (sélection de spectres, décalage vertical) : pas demandé, à proposer
   si la carte ne suffit pas.
 

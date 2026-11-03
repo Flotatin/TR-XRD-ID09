@@ -14,7 +14,7 @@ from typing import List, Optional, Sequence
 from trxrd import __version__
 from trxrd.gui.presenters.viewer import (
     CakePresenter, DisplaySettings, EvolutionPresenter, MainPresenter, MapPresenter, NavigatorPresenter,
-    SpectrumPresenter, TablesPresenter,
+    RatePresenter, RateSettings, SpectrumPresenter, TablesPresenter,
 )
 from trxrd.gui.tasks import ThreadRunner
 from trxrd.gui.views.main_window import MainWindow, application
@@ -39,10 +39,12 @@ def create_viewer(session: Optional[Session] = None, runner=None) -> Viewer:
     window = MainWindow()
     runner = runner or ThreadRunner()
     cake = CakePresenter(session, settings, window.cake, runner)
+    rate_settings = RateSettings()  # dP/dt: shared by the evolution and dP/dt plots (interval of the mean)
     presenters = [
         SpectrumPresenter(session, settings, window.spectrum),
         cake,
-        EvolutionPresenter(session, window.evolution),
+        EvolutionPresenter(session, window.evolution, rate_settings),
+        RatePresenter(session, window.dpdt, rate_settings),
         MapPresenter(session, settings, window.map),
         TablesPresenter(session, window.phases, window.peaks),
         NavigatorPresenter(session, window.navigator),

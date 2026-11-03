@@ -76,6 +76,7 @@ values). Never commit the user's data (raw scans, .CEDX) to the repository.
 | Raw data browsing, raw image and cake of a spectrum | `services/raw_data.py`, `services/images.py` |
 | GUI image display (histogram, log/linear/sqrt, colour map) | `gui/views/images.py` (`ImagePanel`) |
 | Quantities versus time (P, V, a, c/a, X/X0), map of the patterns versus time | `gui/presenters/display.py` (`evolution_data`, `time_map`) |
+| dP/dt per sample (family) or phase, mean dP/dt over an interval (slope and ΔP/Δt) | `processing/rates.py`, `services/rates.py` |
 | Detector calibration (LaB6/CeO2, no pyFAI.goniometer: silx DLL blocked on Windows) | `processing/geometry.py`, `services/calibration.py` |
 
 ## Next steps

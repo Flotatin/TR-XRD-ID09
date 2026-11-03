@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
 
 from trxrd.gui.actions import ActionRegistry
 from trxrd.gui.views.panels import Navigator, RowsTable
-from trxrd.gui.views.plots import CakeView, EvolutionView, SpectrumView, TimeMapView
+from trxrd.gui.views.plots import CakeView, EvolutionView, RateView, SpectrumView, TimeMapView
 from trxrd.physics.lattice import AXIS_LABELS
 
 FILE_FILTER = "Runs (*.trxrd.h5 *.h5 *.CEDX *.CEDXUp *.cedx);;Tous les fichiers (*)"
@@ -34,7 +34,8 @@ class MainWindow(QMainWindow):
         self.spectrum = SpectrumView()
         self.cake = CakeView(link_to=self.spectrum.plot)  # under the spectrum, as in the v1
         self.evolution = EvolutionView()
-        self.map = TimeMapView(link_to=self.evolution.plot)  # same time axis, as in the dDAC view of the v1
+        self.dpdt = RateView(link_to=self.evolution.plot)  # same time axis, as in the dDAC view of the v1
+        self.map = TimeMapView(link_to=self.evolution.plot)
         self.phases = RowsTable()
         self.peaks = RowsTable()
         # a histogram beside an image narrows its plot: the plot stacked above gets the same margin
@@ -54,8 +55,9 @@ class MainWindow(QMainWindow):
         center.setSizes([560, 340])
         ddac = QSplitter(Qt.Orientation.Vertical)
         ddac.addWidget(self.evolution)
+        ddac.addWidget(self.dpdt)
         ddac.addWidget(self.map)
-        ddac.setSizes([480, 420])
+        ddac.setSizes([360, 250, 290])
         main = QSplitter(Qt.Orientation.Horizontal)
         main.addWidget(left)
         main.addWidget(center)
@@ -85,9 +87,10 @@ class MainWindow(QMainWindow):
         bar.addWidget(self.units)
 
     def align_plots(self) -> None:
-        """Same right margin above and below: the spectrum over the cake, the evolution plot over the map."""
+        """Same right margin above and below: the spectrum over the cake, the dDAC plots over the map."""
         self.spectrum.spacer.setVisible(self.cake.isVisibleTo(self) and self.cake.panel.show_histogram.isChecked())
-        self.evolution.spacer.setVisible(self.map.panel.show_histogram.isChecked())
+        for plot in (self.evolution, self.dpdt):
+            plot.spacer.setVisible(self.map.panel.show_histogram.isChecked())
 
     def _unit_chosen(self, index: int) -> None:
         unit = self.units.itemData(index)

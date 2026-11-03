@@ -124,7 +124,8 @@ trxrd/
 │   │   ├── cell.py             ✅ affinement de maille → V → P, avec incertitudes
 │   │   ├── peaks.py            ✅ détection des pics (bruit local, épaulements)
 │   │   ├── phase_search.py     ✅ quelles phases, à quelles pressions (recherche déterministe)
-│   │   └── geometry.py         ✅ calibration du détecteur sur LaB6 / CeO2 (suivi d'anneau, affinement pyFAI)
+│   │   ├── geometry.py         ✅ calibration du détecteur sur LaB6 / CeO2 (suivi d'anneau, affinement pyFAI)
+│   │   └── rates.py            ✅ pente locale (droite glissante) et pente sur un intervalle
 │   ├── services/
 │   │   ├── run_builder.py      ✅ scan brut → Run (intégration, fond, oscilloscope, base de temps)
 │   │   ├── fitting.py          ✅ ajuster un spectre ou une série (en suivant l'évolution)
@@ -133,6 +134,7 @@ trxrd/
 │   │   ├── raw_data.py         ✅ parcours de RAW_DATA (jeux de données, scans du fichier maître), scan brut d'un run
 │   │   ├── images.py           ✅ image brute et cake (2θ × azimut) d'un spectre
 │   │   ├── calibration.py      ✅ calibration pas à pas (image, clics, affinement, .poni)
+│   │   ├── rates.py            ✅ dP/dt par échantillon ou par phase, dP/dt moyen sur un intervalle
 │   │   └── session.py          ✅ état de l'application pour le GUI (run courant, sélection, événements)
 │   ├── notebook.py             ✅ XRDRun : lecture seule pour notebooks
 │   ├── cli.py                  ✅ trxrd build | auto | compare | convert | info
@@ -143,7 +145,7 @@ trxrd/
 │       ├── actions.py          registre unique des QAction (menus, barre d'outils, raccourcis)
 │       ├── tasks.py            calculs longs dans un thread, résultat rendu au thread de l'interface
 │       └── app.py              assemblage : fenêtre + presenters + actions
-└── tests/                      177 tests ; data/ = scan TUTO, calibration, ancien fichier .CEDX d'exemple
+└── tests/                      188 tests ; data/ = scan TUTO, calibration, ancien fichier .CEDX d'exemple
 ```
 
 ## 5. Le format de fichier `trxrd-run` (HDF5)
@@ -596,9 +598,9 @@ Architecture **MVP** au-dessus de `services.Session` :
 la v1 :
 - à gauche, la liste des spectres et, en onglets, les tableaux des phases et des pics ;
 - au centre, le spectre et son cake ;
-- à droite, le panneau dDAC de la v1 : une grandeur de chaque phase en fonction du temps, et en dessous la
-  carte des diffractogrammes intégrés (temps en x, 2θ / Q / d en y). Les deux graphes partagent l'axe du
-  temps, et un clic sur l'un ou l'autre sélectionne le spectre.
+- à droite, le panneau dDAC de la v1, de haut en bas : une grandeur de chaque phase en fonction du temps,
+  dP/dt, et la carte des diffractogrammes intégrés (temps en x, 2θ / Q / d en y). Les trois graphes
+  partagent l'axe du temps, et un clic sur l'un d'eux sélectionne le spectre.
 
 La grandeur se choisit dans une liste : P, V, a, b, c, c/a, b/a, T. La liste ne garde que les grandeurs
 présentes dans le run. b, c et les rapports ne sont donnés que pour les systèmes où ils sont libres
@@ -625,6 +627,35 @@ Ces choix sont gardés d'une session à l'autre, image par image. Les axes de ga
 graphe placé au-dessus d'une image dont l'histogramme est affiché reçoit la même marge à droite : le spectre
 reste aligné sur le cake, et la courbe sur la carte. Les tests de l'interface écrivent leurs réglages dans un
 `.ini` temporaire (`conftest.py`), jamais dans ceux de l'utilisateur.
+
+**dP/dt** (`processing/rates.py`, `services/rates.py`, graphe sous la grandeur, comme dans la v1) :
+- **Courbes par échantillon** (par défaut) : les phases d'une même substance (glaces VII, VI, Ih) forment
+  une seule courbe de pression, continue à travers les transitions. Quand deux de ces phases coexistent dans
+  un spectre, on prend la moyenne de leurs pressions. Le marqueur (Sn β puis Sn γ) forme une autre courbe.
+  « Par phase » donne une courbe par phase. La v1 faisait la moyenne de toutes les phases : l'échantillon et
+  le marqueur ne sont pas à la même pression, et cette moyenne sautait à chaque apparition ou disparition
+  d'une phase.
+- **dP/dt local** : pente d'une droite ajustée par moindres carrés sur le spectre et ses ±k voisins
+  (« lissage », k = 2 par défaut, comme les « points glissants » de la v1). Son erreur vient de la
+  dispersion des points autour de la droite. La différence de deux spectres voisins, elle, reporte tout le
+  bruit des deux spectres sur dP/dt. Les erreurs annoncées de P ne servent pas de poids, car elles sont
+  souvent trop petites (`docs/PASSATION.md` §5, point 1). Le calcul passe par des sommes cumulées : 6 ms pour
+  1 600 spectres.
+- **dP/dt moyen sur un intervalle** (« Moyenne sur un intervalle ») : on déplace un intervalle, sur le graphe
+  de la grandeur ou sur celui de dP/dt, et le calcul suit en direct. Deux valeurs par courbe :
+  - la **pente** de la droite ajustée sur tous les spectres de l'intervalle, avec son erreur, tracée en
+    pointillés sur P(t) ;
+  - **ΔP/Δt** entre le premier et le dernier spectre de l'intervalle, sur la pression lissée par la droite
+    glissante.
+
+  Les deux concordent quand P(t) est droite sur l'intervalle. Sur un P(t) courbe, la pente n'est plus le
+  taux moyen : sur tout Water05 scan 9, la pente vaut −29 ± 2 GPa/ms et ΔP/Δt −24 GPa/ms (6,2 GPa en
+  0,257 ms). Sur la partie droite (4,60–4,72 ms), on a −30,8 ± 3,8 et −30,8 GPa/ms. « Copier » met le
+  tableau dans le presse-papiers, pour un tableur.
+
+En notebook : `from trxrd.services import rates`, puis `rates.dpdt(run)` ou
+`rates.mean_dpdt(run, t1_ms, t2_ms)`, avec `run = XRDRun(fichier).to_run()`. Le lecteur `XRDRun` reste
+limité à `io`, `domain` et `physics` (`tests/test_architecture.py`).
 
 **Ensuite** :
 - étape 2 (suite) : lancer l'analyse automatique depuis l'interface, avec une barre de progression ;

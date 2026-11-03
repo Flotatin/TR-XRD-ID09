@@ -350,3 +350,64 @@ def test_image_scales_and_levels():
     assert low == 0.0 and high == 1.0
     assert display.robust_levels(np.full((3, 3), 7.0)) == (7.0, 8.0)
     assert display.robust_levels(np.full((3, 3), np.nan)) == (0.0, 1.0)
+
+
+def test_dpdt_display(sample_run):
+    data = display.rate_data(sample_run, half_window=1)
+    assert data.y_label == "dP/dt (GPa/ms)" and [s.name for s in data.series] == ["H2O"] and data.message == ""
+    assert data.series[0].color == 0 and data.series[0].y[0] == pytest.approx(0.375)  # colour of ice VII
+    assert len(display.rate_data(sample_run, 1, by="phase").series) == 1  # ice VI: a single spectrum
+    found = display.interval_data(sample_run, (2.0, 0.0), by="phase")
+    assert (found.start, found.stop) == (0.0, 2.0) and found.segments == [(0.0, 2.0, 2.0, 4.0, 0)]
+    assert found.lines == ["H2O_Ice_VII : pente 1 GPa/ms ; ΔP/Δt = 1 GPa/ms (ΔP = +2.000 GPa en 2 ms, 3 spectres)"]  # exact line
+    assert found.table.splitlines()[1].startswith("H2O_Ice_VII\t")
+    assert display.interval_data(sample_run, (0.0, 2.0)).lines == [
+        "H2O (Ice_VII, Ice_VI) : pente 0.38 ± 0.36 GPa/ms ; ΔP/Δt = 0.375 GPa/ms (ΔP = +0.750 GPa en 2 ms, 3 spectres)"]
+    assert display.interval_data(sample_run, None) is None
+    assert display.with_error(-25.3127, 0.4231) == "-25.31 ± 0.42" and display.with_error(-25.3, 3.2) == "-25.3 ± 3.2"
+    assert display.with_error(2.0, np.nan) == "2" and display.with_error(np.nan, 1.0) == "—"
+    for spectrum in sample_run.spectra:
+        spectrum.time = np.nan
+    assert "base de temps" in display.rate_data(sample_run).message
+    assert display.interval_data(sample_run, (0.0, 1.0)) is None
+
+
+def test_dpdt_presenter_and_shared_interval(tmp_path, sample_run):
+    from trxrd.gui.presenters.viewer import RatePresenter, RateSettings
+
+    session, settings = Session(), RateSettings()
+    evolution, rates_view = Recorder(), Recorder()
+    EvolutionPresenter(session, evolution, settings)
+    RatePresenter(session, rates_view, settings)
+    session.open(save_run(sample_run, tmp_path / "run.trxrd.h5"))
+    data = rates_view.last("show_rates")[0]
+    assert data.by == "family" and data.half_window == 2 and [s.name for s in data.series] == ["H2O"]
+    assert rates_view.last("show_interval") == (None,) and evolution.last("show_interval") == (None, [])
+
+    rates_view.on_interval_toggle(True)  # the whole range of the spectra
+    assert settings.interval == (0.0, 4.0)
+    found = rates_view.last("show_interval")[0]
+    assert (found.start, found.stop) == (0.0, 4.0) and [m.name for m in found.means] == ["H2O"]
+    region, segments = evolution.last("show_interval")
+    assert region == (0.0, 4.0) and len(segments) == 1  # the straight line over P(t)
+    evolution.on_interval(2.0, 0.5)  # dragged on the evolution plot
+    assert settings.interval == (0.5, 2.0) and rates_view.last("show_interval")[0].start == 0.5
+    evolution.on_quantity("V", False)
+    assert evolution.last("show_interval") == ((0.5, 2.0), [])  # no P line over V(t)
+
+    count = rates_view.count("show_rates")
+    rates_view.on_options("phase", 3)
+    data = rates_view.last("show_rates")[0]
+    assert rates_view.count("show_rates") == count + 1 and data.by == "phase" and data.half_window == 3
+    rates_view.on_pick(3.1)
+    assert session.index == 3 and rates_view.last("set_marker") == (3.0,)
+
+    session.open(save_run(sample_run, tmp_path / "other.trxrd.h5"))  # a new run: no interval
+    assert settings.interval is None and rates_view.last("show_interval") == (None,)
+    rates_view.on_interval_toggle(False)
+    with pytest.raises(ValueError):
+        settings.update(by="sample")
+    with pytest.raises(ValueError):
+        settings.update(colour="red")
+    settings.update(half_window=0)
+    assert settings.half_window == 1

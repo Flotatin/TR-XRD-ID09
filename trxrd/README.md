@@ -18,7 +18,7 @@ Un environnement virtuel dédié, séparé de celui de la v1 : PyQt5 (v1) et PyS
 python -m venv .venv-v2
 .venv-v2\Scripts\activate                    # Windows ; Linux/macOS : source .venv-v2/bin/activate
 pip install -e "./trxrd[notebook,gui,dev]"  # depuis la racine du dépôt
-python -m pytest trxrd                      # 177 tests
+python -m pytest trxrd                      # 188 tests
 ```
 
 ## Interface graphique
@@ -32,8 +32,10 @@ Le lecteur ouvre un `.trxrd.h5` ou un ancien `.CEDX`, et affiche :
 - à gauche, la liste des spectres et les tableaux des phases et des pics ;
 - au centre, le spectre courant, avec son fond, son ajustement et les raies attendues de chaque phase, et
   dessous son cake ou son image brute ;
-- à droite, comme le panneau dDAC de la v1 : P, V, a, b, c, c/a… (ou X/X₀) de chaque phase en fonction du
-  temps, avec le piézo, et en dessous la carte des diffractogrammes intégrés sur le même axe du temps.
+- à droite, comme le panneau dDAC de la v1, sur le même axe du temps :
+  - P, V, a, b, c, c/a… (ou X/X₀) de chaque phase en fonction du temps, avec le piézo ;
+  - dP/dt de chaque échantillon, et le dP/dt moyen sur un intervalle qu'on déplace ;
+  - la carte des diffractogrammes intégrés.
 
 Les images ont un histogramme pour régler les niveaux, une échelle log / linéaire / racine et un choix de
 couleurs.

@@ -7,7 +7,10 @@ presenter sets (`view.on_pick`, `view.on_select`); it never changes the data.
 
 Views expected (duck typing):
 - spectrum: show_spectrum(SpectrumCurves, reset: bool), clear()
-- evolution: show_evolution(EvolutionData), set_marker(x), clear(), on_pick(x), on_quantity(key, relative)
+- evolution: show_evolution(EvolutionData), set_marker(x), clear(), show_interval(region, segments),
+  on_pick(x), on_quantity(key, relative), on_interval(start, stop)
+- rates: show_rates(RateData), show_interval(IntervalData or None), set_marker(x), clear(),
+  on_pick(x), on_options(by, half_window), on_interval(start, stop), on_interval_toggle(on)
 - map: show_map(TimeMapData), set_marker(x), clear(), on_pick(x)
 - cake: show_cake(CakeData), show_image(array), show_message(text), clear(), on_mode(mode)
 - table: show_rows(columns, rows)
@@ -25,7 +28,7 @@ from pathlib import Path
 from typing import Callable, List, Optional, Tuple
 
 from trxrd.gui.presenters import display
-from trxrd.services import raw_data
+from trxrd.services import rates, raw_data
 from trxrd.services.images import FrameSource
 from trxrd.services.run_builder import build_and_save
 from trxrd.services.session import Event, Session
@@ -90,6 +93,37 @@ class DisplaySettings:
         return self.unit if self.unit in display.available_units(run) else "2th_deg"
 
 
+class RateSettings:
+    """dP/dt settings shared by the dDAC plots: curves per sample or per phase, smoothing, interval (ms)."""
+
+    def __init__(self) -> None:
+        self.by = "family"
+        self.half_window = 2  # spectra on each side of the sliding straight line
+        self.interval: Optional[Tuple[float, float]] = None  # mean dP/dt over this time range; None: off
+        self._listeners: List[Callable[["RateSettings"], None]] = []
+
+    def subscribe(self, listener: Callable[["RateSettings"], None]) -> None:
+        self._listeners.append(listener)
+
+    def update(self, **changes) -> None:
+        """Change `by`, `half_window` and/or `interval` (None turns it off); listeners hear of real changes."""
+        unknown = set(changes) - {"by", "half_window", "interval"}
+        if unknown:
+            raise ValueError(f"unknown settings {sorted(unknown)}")
+        if "by" in changes and changes["by"] not in rates.GROUPINGS:
+            raise ValueError(f"unknown grouping {changes['by']!r}")
+        if "half_window" in changes:
+            changes["half_window"] = max(int(changes["half_window"]), 1)
+        if changes.get("interval") is not None:
+            changes["interval"] = tuple(sorted(float(t) for t in changes["interval"]))
+        changed = {k: v for k, v in changes.items() if getattr(self, k) != v}
+        for key, value in changed.items():
+            setattr(self, key, value)
+        if changed:
+            for listener in list(self._listeners):
+                listener(self)
+
+
 class SpectrumPresenter:
     def __init__(self, session: Session, settings: DisplaySettings, view) -> None:
         self.session, self.settings, self.view = session, settings, view
@@ -115,15 +149,19 @@ class SpectrumPresenter:
 class EvolutionPresenter:
     """P, V, a, c/a... of every phase versus time, with an oscilloscope channel (dDAC view of the v1)."""
 
-    def __init__(self, session: Session, view) -> None:
+    def __init__(self, session: Session, view, rate_settings: Optional[RateSettings] = None) -> None:
         self.session, self.view = session, view
+        self.rates = rate_settings or RateSettings()
         self.quantity, self.relative = "P", False
         self._x = []
+        self._shows_pressure = False  # the straight lines of the mean dP/dt only go over P itself
         view.on_pick = self.pick
         view.on_quantity = self.set_quantity
+        view.on_interval = lambda start, stop: self.rates.update(interval=(start, stop))
         session.subscribe(Event.RUN_CHANGED, self.refresh)
         session.subscribe(Event.DATA_CHANGED, self.refresh)
         session.subscribe(Event.SPECTRUM_CHANGED, self.marker)
+        self.rates.subscribe(self.interval)
 
     def set_quantity(self, quantity: str, relative: bool = False) -> None:
         """Show `quantity` (key of display.QUANTITIES), divided by the card value when `relative`."""
@@ -140,8 +178,80 @@ class EvolutionPresenter:
             return
         data = display.evolution_data(run, self.quantity, self.relative)
         self._x = data.x
+        self._shows_pressure = data.quantity == "P" and not data.relative
         self.view.show_evolution(data)
         self.marker()
+        self.interval()
+
+    def interval(self, *_) -> None:
+        """The interval of the mean dP/dt, and its straight lines when P itself is shown."""
+        if self.session.run is None:
+            return
+        found = display.interval_data(self.session.run, self.rates.interval, self.rates.by, self.rates.half_window)
+        segments = found.segments if found is not None and self._shows_pressure else []
+        self.view.show_interval(self.rates.interval if found is not None else None, segments)
+
+    def marker(self, *_) -> None:
+        if len(self._x):
+            self.view.set_marker(float(self._x[self.session.index]))
+
+    def pick(self, x: float) -> None:
+        index = display.nearest_spectrum(self._x, x)
+        if index is not None:
+            self.session.select(index)
+
+
+class RatePresenter:
+    """dP/dt of every sample (or phase) versus time, and its mean over an interval chosen on the plots."""
+
+    def __init__(self, session: Session, view, rate_settings: Optional[RateSettings] = None) -> None:
+        self.session, self.view = session, view
+        self.rates = rate_settings or RateSettings()
+        self._x = []
+        view.on_pick = self.pick
+        view.on_options = lambda by, half_window: self.rates.update(by=by, half_window=half_window)
+        view.on_interval = lambda start, stop: self.rates.update(interval=(start, stop))
+        view.on_interval_toggle = self.toggle_interval
+        session.subscribe(Event.RUN_CHANGED, self._new_run)
+        session.subscribe(Event.DATA_CHANGED, self.refresh)
+        session.subscribe(Event.SPECTRUM_CHANGED, self.marker)
+        self.rates.subscribe(self._settings_changed)
+        self._options = (self.rates.by, self.rates.half_window)
+
+    def _new_run(self, *_) -> None:
+        self.rates.update(interval=None)  # the times of the previous run mean nothing here
+        self.refresh()
+
+    def _settings_changed(self, settings: RateSettings) -> None:
+        if (settings.by, settings.half_window) != self._options:
+            self.refresh()
+        else:
+            self.interval()
+
+    def toggle_interval(self, on: bool) -> None:
+        """On: the interval starts over the whole range of the spectra; off: no mean dP/dt."""
+        run = self.session.run
+        if on and display.has_time_base(run):
+            times = run.times * 1e3
+            self.rates.update(interval=(float(times.min()), float(times.max())))
+        else:
+            self.rates.update(interval=None)
+
+    def refresh(self, *_) -> None:
+        run = self.session.run
+        self._options = (self.rates.by, self.rates.half_window)
+        if run is None or not run.spectra:
+            self._x = []
+            self.view.clear()
+            return
+        self._x = display.spectrum_axis(run)[0]
+        self.view.show_rates(display.rate_data(run, self.rates.half_window, self.rates.by))
+        self.marker()
+        self.interval()
+
+    def interval(self, *_) -> None:
+        self.view.show_interval(
+            display.interval_data(self.session.run, self.rates.interval, self.rates.by, self.rates.half_window))
 
     def marker(self, *_) -> None:
         if len(self._x):

@@ -187,3 +187,25 @@ def test_evolution_view_and_aligned_plots(viewer):
     assert not evolution.spacer.isVisible()
     window.actions.get("cake").trigger()  # cake hidden: no margin left under the spectrum
     assert not window.cake.isVisible() and not window.spectrum.spacer.isVisible()
+
+
+def test_dpdt_view_with_its_interval(viewer):
+    from PySide6.QtGui import QGuiApplication
+
+    window = viewer.window
+    viewer.main.open(str(viewer.path))
+    dpdt = window.dpdt
+    assert dpdt.by.currentData() == "family" and dpdt.window.value() == 2 and len(dpdt._items) == 2  # bars + curve
+    assert not dpdt.interval.region.isVisible() and not dpdt.copy.isEnabled()
+    dpdt.toggle.setChecked(True)
+    assert dpdt.interval.region.getRegion() == pytest.approx((0.0, 4.0))
+    assert window.evolution.interval.region.getRegion() == pytest.approx((0.0, 4.0))  # the same interval above
+    assert "H2O (Ice_VII, Ice_VI) : pente" in dpdt.result.text() and len(window.evolution._segments) == 1
+    window.evolution.interval.region.setRegion((0.5, 2.5))  # dragged on the evolution plot
+    assert dpdt.interval.region.getRegion() == pytest.approx((0.5, 2.5)) and "de 0.5 à 2.5 ms" in dpdt.result.text()
+    dpdt.copy.click()
+    assert QGuiApplication.clipboard().text().startswith("courbe\t")
+    dpdt.by.setCurrentIndex(dpdt.by.findData("phase"))
+    assert "H2O_Ice_VII :" in dpdt.result.text()
+    dpdt.toggle.setChecked(False)
+    assert not dpdt.interval.region.isVisible() and dpdt.result.text() == "" and not window.evolution._segments
