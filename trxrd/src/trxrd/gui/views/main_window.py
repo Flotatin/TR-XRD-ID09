@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
 
 from trxrd.gui.actions import ActionRegistry
 from trxrd.gui.views.editing import PeaksPanel, PhasesPanel
-from trxrd.gui.views.panels import Navigator, RowsTable
+from trxrd.gui.views.panels import Navigator, RowsTable, SpectraList
 from trxrd.gui.views.plots import CakeView, EvolutionView, RateView, SpectrumView, TimeMapView
 from trxrd.gui.views.treatment import DetectionPanel, ProcessingPanel
 from trxrd.gui.views.zones import ZonesPanel
@@ -34,6 +34,7 @@ class MainWindow(QMainWindow):
         self._folder = ""
 
         self.navigator = Navigator()
+        self.spectra = SpectraList()
         self.spectrum = SpectrumView()
         self.cake = CakeView(link_to=self.spectrum.plot)  # under the spectrum, as in the v1
         self.evolution = EvolutionView()
@@ -49,11 +50,13 @@ class MainWindow(QMainWindow):
         self.map.panel.on_histogram = lambda shown: self.align_plots()
 
         self.tabs = tables = QTabWidget()
+        tables.addTab(self.spectra, "Spectres")
         tables.addTab(self.phases, "Phases")
         tables.addTab(self.peaks, "Pics")
         tables.addTab(self.processing, "Traitement")
         tables.addTab(self.detection, "Détection")
         tables.addTab(self.zones, "Zones")
+        tables.setCurrentWidget(self.phases)
         left = QWidget()
         column = QVBoxLayout(left)
         column.setContentsMargins(0, 0, 0, 0)

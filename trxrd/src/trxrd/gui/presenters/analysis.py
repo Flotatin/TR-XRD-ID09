@@ -36,7 +36,7 @@ class AnalysisChoices:
     current: int  # current spectrum
     analysed: int  # spectra that already hold phases
     two_theta: Tuple[float, float]  # range of the patterns (deg)
-    selection: List[int] = field(default_factory=list)  # spectra of the zone: what the analysis offers first
+    selection: List[int] = field(default_factory=list)  # spectra chosen (list or zone): what is offered first
 
 
 @dataclass

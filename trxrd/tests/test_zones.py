@@ -9,6 +9,7 @@ from synthetic import GASKET
 from trxrd.gui.presenters import display
 from trxrd.gui.presenters.viewer import (
     DisplaySettings, EvolutionPresenter, MapPresenter, NavigatorPresenter, RatePresenter, RateSettings,
+    SpectraListPresenter,
 )
 from trxrd.gui.presenters.zones import CHOOSE_A_ZONE, TOO_NARROW, SpectraZonePresenter, ZonesPresenter
 from trxrd.services import analysis, editing
@@ -332,6 +333,7 @@ def test_where_we_are():
     assert display.position_text(2, 6, []) == "Spectre 2 / 5"
     assert display.position_text(2, 6, [4]) == "Spectre 2 / 5 — sélection : spectre 4"
     assert display.position_text(2, 6, [3, 4, 5]) == "Spectre 2 / 5 — sélection : 3 à 5 (3 spectres)"
+    assert display.position_text(2, 6, [1, 4]) == "Spectre 2 / 5 — sélection : 2 spectres"
 
 
 def test_the_zone_chooses_the_spectra_and_shows_on_the_three_plots(ddac):
@@ -354,8 +356,7 @@ def test_the_zone_stays_while_the_current_spectrum_moves(ddac):
     assert navigator.last("set_current")[:2] == (5, len(session.run))
 
 
-def test_no_zone_no_selection(ddac):
-    """Nothing shows a selection without a zone: left behind, it would act on spectra nobody has in mind."""
+def test_the_zone_removed_the_selection_goes(ddac):
     session, rates, navigator, evolution, rate_view, _ = ddac
     rates.update(interval=(0.6, 3.4))
     assert session.selection == [1, 2, 3]
@@ -370,12 +371,81 @@ def test_changing_the_dpdt_settings_keeps_the_selection(ddac):
     assert session.selection == [1, 2, 3]
 
 
-def test_the_zone_starts_over_all_the_spectra(ddac):
+def test_changing_the_dpdt_settings_keeps_the_rows_chosen_without_a_zone(ddac):
+    session, rates, *_ = ddac
+    session.set_selection([1, 4])
+    rates.update(half_window=4)
+    assert session.selection == [1, 4]
+
+
+def test_the_zone_starts_over_the_selection_or_all_the_spectra(ddac):
     session, rates, navigator, evolution, rate_view, _ = ddac
     rate_view.on_interval_toggle(True)
     assert rates.interval == (-0.5, 5.5) and session.selection == list(range(len(session.run)))
     rate_view.on_interval_toggle(False)
     assert rates.interval is None and evolution.last("show_interval")[0] is None
+    session.set_selection([2, 3])
+    rate_view.on_interval_toggle(True)
+    assert rates.interval == (1.5, 3.5) and session.selection == [2, 3]
+
+
+@pytest.fixture
+def listed(run):
+    session, rates, view = Session(), RateSettings(), Recorder()
+    RatePresenter(session, Recorder(), rates)
+    SpectraListPresenter(session, view, rates)
+    SpectraZonePresenter(session, rates)
+    session.attach(run, None)
+    return session, rates, view
+
+
+def test_several_rows_choose_spectra(listed):
+    session, rates, view = listed
+    assert view.last("show_spectra")[1][0][0] == "0" and view.last("set_current") == (0, [])
+    view.on_selection([1, 2, 4])
+    assert session.selection == [1, 2, 4] and rates.interval is None  # no zone appears
+
+
+def test_moving_the_current_spectrum_keeps_the_rows_chosen(listed):
+    session, rates, view = listed
+    view.on_selection([1, 2, 4])
+    session.select(5)
+    assert session.selection == [1, 2, 4] and view.last("set_current") == (5, [1, 2, 4])
+
+
+def test_one_row_clears_a_selection_without_a_zone(listed):
+    session, rates, view = listed
+    view.on_selection([1, 2, 4])
+    view.on_selection([3])
+    assert session.selection == []
+
+
+def test_one_row_only_moves_the_current_spectrum_with_a_zone(listed):
+    session, rates, view = listed
+    rates.update(interval=(0.6, 3.4))
+    view.on_selection([5])
+    assert session.selection == [1, 2, 3] and rates.interval == (0.6, 3.4)
+    assert view.last("set_current")[1] == [1, 2, 3]  # the list shows the zone again
+
+
+def test_several_rows_move_the_zone(listed):
+    session, rates, view = listed
+    rates.update(interval=(0.6, 3.4))
+    view.on_selection([3, 4])
+    assert session.selection == [3, 4] and rates.interval == (2.5, 4.5)
+
+
+def test_rows_apart_are_kept_though_the_zone_spans_them(listed):
+    session, rates, view = listed
+    rates.update(interval=(0.6, 3.4))
+    view.on_selection([1, 4])
+    assert session.selection == [1, 4] and rates.interval == (0.5, 4.5)
+
+
+def test_the_list_follows_the_zone(listed):
+    session, rates, view = listed
+    rates.update(interval=(0.6, 3.4))
+    assert view.last("set_current") == (0, [1, 2, 3])
 
 
 def test_a_zone_with_no_spectrum_chooses_none(ddac):

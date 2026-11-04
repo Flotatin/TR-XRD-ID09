@@ -385,18 +385,21 @@ def zone_note(outside: int, excluded: int) -> str:
     return "\n".join(notes)
 
 
-NO_SELECTION = "Aucun spectre sélectionné : tracer une zone de spectres sur un graphe dDAC (Maj + glisser)."
+NO_SELECTION = ("Aucun spectre sélectionné : les choisir dans l'onglet Spectres (Maj + clic, Ctrl + clic), "
+                "ou tracer une zone de spectres sur un graphe dDAC (Maj + glisser).")
 
 
 def position_text(index: int, count: int, selection: Sequence[int]) -> str:
-    """Where we are in the run, and the spectra chosen by the zone of spectra."""
+    """Where we are in the run, and the spectra chosen: always written, whatever tab is shown."""
     if not count:
         return ""
     text = f"Spectre {index} / {count - 1}"
     if len(selection) == 1:
         text += f" — sélection : spectre {selection[0]}"
-    elif selection:
+    elif selection and selection[-1] - selection[0] + 1 == len(selection):
         text += f" — sélection : {selection[0]} à {selection[-1]} ({len(selection)} spectres)"
+    elif selection:
+        text += f" — sélection : {len(selection)} spectres"
     return text
 
 
@@ -920,12 +923,22 @@ def range_text(data: Optional[PreviewData], low: float, high: float) -> str:
 
 # ---------------------------------------------------------------------------- tables
 
+SPECTRUM_COLUMNS = ("#", "t (ms)", "Phases")
 PHASE_COLUMNS = ("Phase", "P (GPa)", "σP (GPa)", "V (Å³)", "a (Å)", "b (Å)", "c (Å)", "T (K)", "État", "Pics")
 PEAK_COLUMNS = ("Phase", "hkl", "2θ (°)", "σ 2θ (°)", "d (Å)", "Hauteur", "Largeur (°)", "Profil", "Actif")
 
 
 def _short(phase: str) -> str:
     return phase.replace("H2O_Ice_", "Ice ")
+
+
+def spectrum_rows(run: Run) -> List[Tuple[str, str, str]]:
+    rows = []
+    for i, spectrum in enumerate(run.spectra):
+        time = f"{spectrum.time * 1e3:.4g}" if np.isfinite(spectrum.time) else ""
+        phases = ", ".join(f"{_short(f.phase)} {_number(f.pressure, 2)}" for f in spectrum.phases)
+        rows.append((str(i), time, phases))
+    return rows
 
 
 def phase_rows(spectrum: Optional[Spectrum]) -> List[Tuple[str, ...]]:

@@ -16,6 +16,8 @@ Views expected (duck typing):
 - cake: show_cake(CakeData), show_image(array), show_message(text), clear(), on_mode(mode)
 - table: show_rows(columns, rows)
 - navigator: set_current(index, count, text), on_select(index)
+- list of the spectra: show_spectra(columns, rows), set_current(index, selection), on_select(index),
+  on_selection(indices)
 - window: set_title, set_status, set_units(available, current), set_busy(text or None),
   set_undo(undo label or None, redo label or None), show_message(text),
   ask_open_path() / ask_save_path(suggested) -> path or None, confirm_discard() -> bool,
@@ -241,10 +243,11 @@ class RatePresenter:
             self.interval()
 
     def toggle_interval(self, on: bool) -> None:
-        """On: the zone starts over all the spectra; off: no zone, no mean dP/dt, no spectrum chosen."""
+        """On: the zone starts over the selection, or over all the spectra; off: no zone, no spectrum chosen."""
         run = self.session.run
         if on and run is not None and len(run):
-            self.rates.update(interval=display.region_of(display.spectrum_axis(run)[0], range(len(run))))
+            chosen = self.session.selection if len(self.session.selection) > 1 else range(len(run))
+            self.rates.update(interval=display.region_of(display.spectrum_axis(run)[0], chosen))
         else:
             self.rates.update(interval=None)
 
@@ -415,6 +418,50 @@ class NavigatorPresenter:
         run, index, selection = self.session.run, self.session.index, self.session.selection
         count = len(run) if run is not None else 0
         self.view.set_current(index, count, display.position_text(index, count, selection))
+
+
+class SpectraListPresenter:
+    """List of the spectra (tab "Spectres"): one row goes to a spectrum, several choose them.
+
+    Moving the current spectrum (slider, keys, plots) never changes the
+    selection. One row clears a selection, as in any list; a zone stays,
+    since it takes several rows to move it.
+    """
+
+    def __init__(self, session: Session, view, rate_settings: Optional[RateSettings] = None) -> None:
+        self.session, self.view = session, view
+        self.rates = rate_settings or RateSettings()
+        self._choosing = False
+        view.on_select = session.select
+        view.on_selection = self.chosen
+        session.subscribe(Event.RUN_CHANGED, self.refresh)
+        session.subscribe(Event.DATA_CHANGED, self.refresh)
+        session.subscribe(Event.SPECTRUM_CHANGED, self.current)
+        session.subscribe(Event.SELECTION_CHANGED, self._selection_moved)
+
+    def chosen(self, rows: List[int]) -> None:
+        self._choosing = True  # the list shows it already
+        try:
+            if len(rows) > 1:
+                self.session.set_selection(rows)
+            elif self.rates.interval is None:
+                self.session.set_selection([])
+            else:
+                self.current()  # the zone stays, and the list shows it again
+        finally:
+            self._choosing = False
+
+    def _selection_moved(self, *_) -> None:
+        if not self._choosing:
+            self.current()
+
+    def refresh(self, *_) -> None:
+        run = self.session.run
+        self.view.show_spectra(display.SPECTRUM_COLUMNS, display.spectrum_rows(run) if run is not None else [])
+        self.current()
+
+    def current(self, *_) -> None:
+        self.view.set_current(self.session.index, self.session.selection)
 
 
 class MainPresenter:

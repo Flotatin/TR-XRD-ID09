@@ -1,10 +1,10 @@
-"""Tables and the spectrum navigator (a slider between two arrows)."""
+"""Tables, the slider of the spectra (between two arrows) and their list (tab "Spectres")."""
 
 from __future__ import annotations
 
-from typing import Callable, Optional, Sequence
+from typing import Callable, List, Optional, Sequence
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QItemSelection, QItemSelectionModel, Qt
 from PySide6.QtWidgets import (
     QAbstractItemView, QHBoxLayout, QHeaderView, QLabel, QSlider, QTableWidget, QTableWidgetItem, QToolButton,
     QVBoxLayout, QWidget,
@@ -35,6 +35,69 @@ class RowsTable(QTableWidget):
                     item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 self.setItem(i, j, item)
         self.setUpdatesEnabled(True)
+
+
+def _ranges(rows: Sequence[int]) -> List[tuple]:
+    """[2, 3, 4, 7] -> [(2, 4), (7, 7)]"""
+    out: List[list] = []
+    for row in sorted(rows):
+        if out and row == out[-1][1] + 1:
+            out[-1][1] = row
+        else:
+            out.append([row, row])
+    return [tuple(r) for r in out]
+
+
+class SpectraList(QWidget):
+    """Spectra of the run (index, time, phases): a click goes to a spectrum, Shift or Ctrl + click chooses several."""
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.on_select: Optional[Callable[[int], None]] = None
+        self.on_selection: Optional[Callable[[List[int]], None]] = None
+        self.table = RowsTable()
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        self.table.itemSelectionChanged.connect(self._rows_chosen)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.table)
+
+    def selected_rows(self) -> List[int]:
+        return sorted(index.row() for index in self.table.selectionModel().selectedRows())
+
+    def _rows_chosen(self) -> None:
+        rows = self.selected_rows()
+        if self.on_selection is not None:
+            self.on_selection(rows)
+        if rows and self.on_select is not None:
+            current = self.table.currentRow()
+            self.on_select(current if current in rows else rows[0])
+
+    def show_spectra(self, columns: Sequence[str], rows: Sequence[Sequence[str]]) -> None:
+        self.table.blockSignals(True)
+        self.table.show_rows(columns, rows)
+        self.table.resizeColumnsToContents()
+        self.table.blockSignals(False)
+
+    def set_current(self, index: int, selection: Sequence[int] = ()) -> None:
+        """The spectra chosen are highlighted, or else the current spectrum `index` alone."""
+        count = self.table.rowCount()
+        self.table.blockSignals(True)
+        if count:
+            rows = list(selection) or [index]
+            if rows != self.selected_rows():
+                chosen = QItemSelection()
+                last = self.table.columnCount() - 1
+                for first, end in _ranges(rows):
+                    chosen.select(self.table.model().index(first, 0), self.table.model().index(end, last))
+                self.table.selectionModel().select(chosen, QItemSelectionModel.SelectionFlag.ClearAndSelect)
+            self.table.selectionModel().setCurrentIndex(self.table.model().index(index, 0),
+                                                        QItemSelectionModel.SelectionFlag.NoUpdate)
+            self.table.scrollToItem(self.table.item(index, 0), QAbstractItemView.ScrollHint.EnsureVisible)
+        else:
+            self.table.clearSelection()
+        self.table.blockSignals(False)
 
 
 class Navigator(QWidget):

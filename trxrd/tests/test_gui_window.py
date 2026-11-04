@@ -934,19 +934,76 @@ def test_the_left_column_is_for_the_tabs(viewer, compression_run):
     assert window.actions.get("previous") in menus and window.actions.get("next") in menus
 
 
-def test_the_analysis_offers_the_zone_of_spectra(viewer, compression_run):
-    """As in the v1, where the zone filled the indices of the batch."""
+def test_the_analysis_offers_the_selection(viewer, compression_run):
+    """As in the v1, where the zone filled the indices of the batch; spectra apart stay apart."""
     from trxrd.gui.views.analysis import AnalysisDialog
 
     window = _shown(viewer, compression_run)
     dialog = AnalysisDialog(viewer.analysis.choices(), window)
-    assert dialog.every.isChecked() and dialog.indices() == list(range(6))
+    assert dialog.every.isChecked() and dialog.indices() == list(range(6)) and dialog.selection.isHidden()
     dialog.close()
     window.evolution.on_interval(0.6, 3.4)
     dialog = AnalysisDialog(viewer.analysis.choices(), window)
-    assert dialog.between.isChecked() and dialog.indices() == [1, 2, 3]
-    assert (dialog.first.value(), dialog.last.value()) == (1, 3)
+    assert dialog.selection.isChecked() and dialog.indices() == [1, 2, 3] and not dialog.selection.isHidden()
+    assert dialog.selection.text() == "la sélection (3)"
     dialog.close()
+    window.dpdt.toggle.setChecked(False)
+    _pick_rows(window, [1, 4])
+    dialog = AnalysisDialog(viewer.analysis.choices(), window)
+    assert dialog.indices() == [1, 4]
+    dialog.close()
+
+
+def _pick_rows(window, rows):
+    """What Shift or Ctrl + click do in the list."""
+    from PySide6.QtCore import QItemSelection, QItemSelectionModel
+
+    table = window.spectra.table
+    chosen = QItemSelection()
+    for row in rows:
+        chosen.select(table.model().index(row, 0), table.model().index(row, table.columnCount() - 1))
+    table.selectionModel().select(chosen, QItemSelectionModel.SelectionFlag.ClearAndSelect)
+    table.selectionModel().setCurrentIndex(table.model().index(rows[-1], 0), QItemSelectionModel.SelectionFlag.NoUpdate)
+    QApplication.processEvents()
+
+
+def test_the_list_is_a_tab_and_chooses_spectra(viewer, compression_run):
+    window = _shown(viewer, compression_run)
+    session, spectra = viewer.session, window.spectra
+    assert window.tabs.tabText(window.tabs.indexOf(spectra)) == "Spectres"
+    assert window.tabs.currentWidget() is window.phases  # the list is there when it is wanted
+    assert spectra.table.rowCount() == 6 and spectra.selected_rows() == [0]
+
+    _pick_rows(window, [1, 2, 4])  # spectra apart
+    assert session.selection == [1, 2, 4] and spectra.selected_rows() == [1, 2, 4]
+    assert window.navigator.label.text().endswith("sélection : 3 spectres")
+    assert window.phases.fit_selection.text() == "Ajuster la sélection (3)"
+
+    window.actions.get("last").trigger()  # moving on keeps the choice: it stays written under the slider
+    assert session.index == 5 and session.selection == [1, 2, 4] and spectra.selected_rows() == [1, 2, 4]
+    window.navigator.slider.setValue(0)
+    assert session.selection == [1, 2, 4]
+
+    spectra.table.selectRow(3)  # one row: that spectrum, as in any list
+    QApplication.processEvents()
+    assert session.index == 3 and session.selection == [] and spectra.selected_rows() == [3]
+    window.actions.get("next").trigger()
+    assert session.index == 4 and spectra.selected_rows() == [4]  # the highlight follows the current spectrum
+
+
+def test_the_list_and_the_zone_follow_each_other(viewer, compression_run):
+    window = _shown(viewer, compression_run)
+    session, spectra = viewer.session, window.spectra
+    _drag(window.evolution.plot, 0.6, 3.4, Qt.KeyboardModifier.ShiftModifier)
+    assert session.selection == [1, 2, 3] and spectra.selected_rows() == [1, 2, 3]
+    spectra.table.selectRow(5)  # one row: the zone stays
+    QApplication.processEvents()
+    assert session.index == 5 and session.selection == [1, 2, 3] and spectra.selected_rows() == [1, 2, 3]
+    _pick_rows(window, [2, 3, 4])  # several rows move it
+    assert session.selection == [2, 3, 4]
+    assert window.map.interval.region.getRegion() == pytest.approx((1.5, 4.5))
+    window.dpdt.toggle.setChecked(False)
+    assert session.selection == [] and spectra.selected_rows() == [session.index]
 
 
 def test_the_zone_is_seen_over_the_map(viewer, compression_run):

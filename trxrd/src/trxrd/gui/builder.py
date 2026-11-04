@@ -17,7 +17,7 @@ from trxrd.gui.presenters.editing import EditingPresenter, PeaksPresenter
 from trxrd.gui.presenters.treatment import DetectionPresenter, ProcessingPresenter
 from trxrd.gui.presenters.viewer import (
     CakePresenter, DisplaySettings, EvolutionPresenter, MainPresenter, MapPresenter, NavigatorPresenter,
-    RatePresenter, RateSettings, SpectrumPresenter, TablesPresenter,
+    RatePresenter, RateSettings, SpectraListPresenter, SpectrumPresenter, TablesPresenter,
 )
 from trxrd.gui.presenters.zones import SpectraZonePresenter, ZonesPresenter
 from trxrd.gui.tasks import ThreadRunner
@@ -48,7 +48,7 @@ def create_viewer(session: Optional[Session] = None, runner=None) -> Viewer:
     window = MainWindow()
     runner = runner or ThreadRunner()
     cake = CakePresenter(session, settings, window.cake, runner)
-    rate_settings = RateSettings()  # shared by the dDAC plots (zone of spectra)
+    rate_settings = RateSettings()  # shared by the dDAC plots and the list of the spectra (zone of spectra)
     presenters = [
         SpectrumPresenter(session, settings, window.spectrum),
         cake,
@@ -57,6 +57,7 @@ def create_viewer(session: Optional[Session] = None, runner=None) -> Viewer:
         MapPresenter(session, settings, window.map, rate_settings),
         TablesPresenter(session, window.phases, window.peaks),
         NavigatorPresenter(session, window.navigator),
+        SpectraListPresenter(session, window.spectra, rate_settings),
         SpectraZonePresenter(session, rate_settings),
         ProcessingPresenter(session, window.processing),
         DetectionPresenter(session, settings, window.detection, window.spectrum),
@@ -142,7 +143,7 @@ def create_viewer(session: Optional[Session] = None, runner=None) -> Viewer:
     add("fit_peak", ANALYSIS, "Ajuster le pic choisi", peaks.fit_peak, ["Shift+R"],
         "Le pic choisi seul, les autres étant soustraits (onglet Pics)")
     add("fit_selection", ANALYSIS, "Ajuster la &sélection", lambda: editing.fit_series("selection", window.phases.follow.isChecked()),
-        ["Ctrl+Shift+F", "Shift+T"], "Ajuster les spectres de la zone, à partir du spectre courant")
+        ["Ctrl+Shift+F", "Shift+T"], "Ajuster les spectres choisis, à partir du spectre courant")
     add("add_phase", ANALYSIS, "Ajouter la phase choisie", window.phases.add.click, ["Shift+A"],
         "La phase et la pression de l'onglet Phases, sur le spectre courant")
     add("remove_phase", ANALYSIS, "Retirer la phase choisie", window.phases.remove.click, ["D"])

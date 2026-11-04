@@ -6,8 +6,9 @@ excluded zones belong to the run. Both are drawn on the spectrum, edited or
 removed, and can be undone.
 
 The zone of spectra is the time zone of the dDAC plots, as in the v1: it is
-the interval of the mean dP/dt, and it chooses the spectra: the selection of
-the actions on several spectra, and the range of the automatic analysis.
+the interval of the mean dP/dt, and it chooses the spectra, like the list of
+the spectra: the selection of the actions on several spectra and of the
+automatic analysis.
 
 View expected (duck typing): show_zones(ZoneChoices), show_message(text), clear(); callbacks on_edit(on),
 on_fit_zone(low, high), on_whole(), on_propagate("selection" | "all"), on_row(row), on_remove().
@@ -192,17 +193,40 @@ class ZonesPresenter:
 
 
 class SpectraZonePresenter:
-    """The zone of the dDAC plots chooses the spectra; without a zone, none is chosen.
+    """The zone of the dDAC plots chooses the spectra, and spectra chosen in the list move the zone.
 
-    A selection nobody can see must not be left behind: it would act on spectra the user no longer has in mind.
+    The zone removed, the selection goes with it. Spectra apart stay as they
+    are chosen: the zone only spans them.
     """
 
     def __init__(self, session: Session, rates: RateSettings) -> None:
         self.session, self.rates = session, rates
+        self._region = rates.interval
+        self._following = False  # one follows the other: no echo
         rates.subscribe(self._zone_moved)
+        session.subscribe(Event.SELECTION_CHANGED, self._selection_moved)
+
+    def _x(self):
+        return display.spectrum_axis(self.session.run)[0]
 
     def _zone_moved(self, *_) -> None:
-        run, region = self.session.run, self.rates.interval
-        if run is not None:
-            x = display.spectrum_axis(run)[0]
-            self.session.set_selection([] if region is None else display.spectra_in(x, region))
+        region = self.rates.interval
+        if region == self._region:
+            return  # the settings of dP/dt changed, not the zone
+        self._region = region
+        if self._following or self.session.run is None:
+            return
+        self._following = True
+        try:
+            self.session.set_selection([] if region is None else display.spectra_in(self._x(), region))
+        finally:
+            self._following = False
+
+    def _selection_moved(self, *_) -> None:
+        if self._following or self.rates.interval is None or self.session.run is None or not self.session.selection:
+            return
+        self._following = True
+        try:
+            self.rates.update(interval=display.region_of(self._x(), self.session.selection))
+        finally:
+            self._following = False
