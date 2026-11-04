@@ -73,8 +73,8 @@ Ne pas les remettre en cause sans lui en parler.
 
 ### 3.2 Par fonctionnalité
 
-Tout est testé : `python -m pytest trxrd` compte 403 tests. Les 7 comparaisons numériques avec la v1 sont
-ignorées quand la v1 n'est pas importable, par exemple dans `.venv-v2`, qui n'a pas PyQt5 : 396 tests
+Tout est testé : `python -m pytest trxrd` compte 408 tests. Les 7 comparaisons numériques avec la v1 sont
+ignorées quand la v1 n'est pas importable, par exemple dans `.venv-v2`, qui n'a pas PyQt5 : 401 tests
 passent alors.
 
 | Fonctionnalité | Où | État / preuve |
@@ -238,7 +238,9 @@ run par run, avec une passe sans exclusion puis une passe avec les zones fixes r
 30. **Une tâche d'arrière-plan peut survivre à la fenêtre.** Émettre son résultat lève alors une exception dans le thread
     (`Signal source has been deleted`) : `_Job._emit` s'arrête en silence. Le mode Live, qui lance une tâche toutes les 2 s,
     rendait le cas fréquent. Vu seulement en essai réel : les tests avec `ImmediateRunner` n'ont pas de thread.
-31. **Une mutation qui survit n'est pas toujours un test trop faible.** Pour le mode Live, c'en était trois : deux tests
+31. **Mode Live : ne regarder que le dernier scan en saute.** Ce que fait la v1 ne suffit plus : l'analyse d'un scan de 1 600
+    spectres prend 90 s, et deux tirs rapprochés en perdaient un sans le dire. Les nouveaux scans passent à tour de rôle.
+32. **Une mutation qui survit n'est pas toujours un test trop faible.** Pour le mode Live, c'en était trois : deux tests
     simplement pas lancés, un vrai trou (scan terminé juste après l'arrêt). Pour le curseur, c'était du code mort, retiré.
     Pour l'arc, il a fallu construire un croisement exactement sur la limite ±180° d'azimut.
 

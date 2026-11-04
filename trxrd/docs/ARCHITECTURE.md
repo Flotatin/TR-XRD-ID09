@@ -155,7 +155,7 @@ trxrd/
 │       ├── tasks.py            calculs longs dans un thread, résultat rendu au thread de l'interface
 │       ├── builder.py          assemblage : fenêtre + presenters + actions
 │       └── app.py              point d'entrée léger : journal et affichage des erreurs (sans console)
-└── tests/                      403 tests ; data/ = scan TUTO, calibration, ancien fichier .CEDX d'exemple
+└── tests/                      408 tests ; data/ = scan TUTO, calibration, ancien fichier .CEDX d'exemple
 ```
 
 ## 5. Le format de fichier `trxrd-run` (HDF5)
@@ -927,8 +927,8 @@ lesquelles l'utilisateur a travaillé. On peut aussi se contenter de l'intégrat
 - **Un fichier en cours d'écriture est laissé tranquille** : un scan n'est lu que si sa taille et sa date n'ont pas bougé
   entre deux regards. S'il reste illisible (fichier verrouillé), il est repris deux fois, puis laissé de côté avec un message.
 - **Rien n'est perdu.** Le scan est intégré, analysé et enregistré tout de suite, dans son propre fichier. Seul le passage
-  à l'écran attend : modifications non enregistrées du run affiché, dialogue ou calcul en cours. Si plusieurs scans sont
-  arrivés entre-temps, le dernier s'ouvre, et tous sont enregistrés.
+  à l'écran attend : modifications non enregistrées du run affiché, dialogue ou calcul en cours. **Aucun scan n'est sauté** :
+  les nouveaux passent à tour de rôle, du plus ancien au plus récent, même s'ils arrivent pendant l'analyse d'un long scan.
 - **Rien n'est écrasé.** Le brut n'est que lu, et un scan déjà analysé dans le dossier de sortie est ouvert tel quel.
 - Arrêter (ou fermer la fenêtre) stoppe le scan en cours, qui n'est pas enregistré. Un scan terminé juste après l'arrêt reste
   dans son fichier, mais ne s'ouvre pas.

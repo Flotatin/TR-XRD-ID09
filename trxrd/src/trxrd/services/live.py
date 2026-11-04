@@ -70,25 +70,28 @@ def _modified(path: Path) -> float:
         return -1.0
 
 
-def newest_scan(folder: PathLike) -> Optional[Path]:
-    """Newest image file under `folder`: a dataset, a sample or RAW_DATA."""
+def image_files(folder: PathLike) -> List[Path]:
+    """Image files under `folder`: a dataset, a sample or RAW_DATA."""
     folder = Path(folder)
-    files = [file for depth in ("", "*/", "*/*/") for file in folder.glob(f"{depth}scan[0-9]*/{IMAGE_PATTERN}")]
-    return max(files, key=_modified, default=None)
+    return [file for depth in ("", "*/", "*/*/") for file in folder.glob(f"{depth}scan[0-9]*/{IMAGE_PATTERN}")]
 
 
 class Watch:
-    """Says when a new scan is complete: newer than those seen, and unchanged since the last look."""
+    """Says when a new scan is complete: not seen yet, and unchanged since the last look.
+
+    The new scans come in turn, the oldest first: two shots close together, or
+    a shot during the long analysis of the one before, must not skip a scan.
+    """
 
     def __init__(self, folder: PathLike) -> None:
         self.folder = Path(folder)
-        self.seen = newest_scan(self.folder)  # what is there at the start is not new
+        self.seen = set(image_files(self.folder))  # what is there at the start is not new
         self._looked: Optional[Tuple[Path, int, int]] = None
         self._tries: Dict[Path, int] = {}
 
     def poll(self) -> Optional[Path]:
-        scan = newest_scan(self.folder)
-        if scan is None or scan == self.seen:
+        scan = min((file for file in image_files(self.folder) if file not in self.seen), key=_modified, default=None)
+        if scan is None:
             self._looked = None
             return None
         stat = scan.stat()
@@ -96,15 +99,17 @@ class Watch:
         if looked != self._looked:
             self._looked = looked  # it may still be growing
             return None
-        self.seen, self._looked = scan, None
+        self.seen.add(scan)
+        self._looked = None
         return scan
 
     def failed(self, scan: Path) -> bool:
         """`scan` could not be read, perhaps still being written: True if it will be tried again."""
         self._tries[scan] = self._tries.get(scan, 0) + 1
         if self._tries[scan] >= MAX_TRIES:
+            self.seen.add(scan)
             return False
-        self.seen = None
+        self.seen.discard(scan)
         return True
 
 

@@ -12,7 +12,7 @@ from trxrd.domain import PhaseFit, Processing
 from trxrd.gui.presenters.live import LivePresenter
 from trxrd.io.h5store import load_run, save_run
 from trxrd.services import analysis, live
-from trxrd.services.live import LiveSettings, Watch, newest_scan
+from trxrd.services.live import LiveSettings, Watch, image_files
 from trxrd.services.run_builder import Cancelled, build_and_save
 from trxrd.services.session import Session
 
@@ -84,15 +84,14 @@ def template(built):
 # ------------------------------------------------------------------ where the scans are
 
 
-def test_newest_scan_from_a_dataset_a_sample_or_raw_data(raw_root, dataset):
-    wanted = new_scan(dataset, 4)
-    new_scan(dataset, 5, age=1000)  # landed earlier, whatever its number
+def test_scans_of_a_dataset_a_sample_or_raw_data(raw_root, dataset):
+    wanted = {dataset / "scan0003" / "scan_jf1m_0000.h5", new_scan(dataset, 4)}
     for folder in (dataset, dataset.parent, raw_root):
-        assert newest_scan(folder) == wanted
+        assert set(image_files(folder)) == wanted
 
 
 def test_no_scan_in_an_empty_or_missing_folder(tmp_path):
-    assert newest_scan(tmp_path) is None and newest_scan(tmp_path / "nowhere") is None
+    assert image_files(tmp_path) == [] and image_files(tmp_path / "nowhere") == []
 
 
 def test_the_dataset_of_a_run(built, dataset):
@@ -140,6 +139,37 @@ def test_an_unreadable_scan_is_tried_again_then_left(dataset):
     assert watch.poll() == scan
     assert not watch.failed(scan)  # third time: left
     assert watch.poll() is None and watch.poll() is None
+
+
+def test_no_scan_is_skipped(dataset):
+    """Two shots between two looks, or during the long analysis of the one before."""
+    watch = Watch(dataset)
+    first, second = new_scan(dataset, 4), new_scan(dataset, 5)
+    watch.poll()
+    assert watch.poll() == first
+    watch.poll()
+    assert watch.poll() == second
+    assert watch.poll() is None
+
+
+def test_the_scans_come_in_the_order_they_landed(dataset):
+    watch = Watch(dataset)
+    later, earlier = new_scan(dataset, 4), new_scan(dataset, 5, age=1000)  # whatever their numbers
+    watch.poll()
+    assert watch.poll() == earlier
+    watch.poll()
+    assert watch.poll() == later
+
+
+def test_a_scan_still_being_written_does_not_hold_back_the_one_before(dataset):
+    watch = Watch(dataset)
+    complete, growing = new_scan(dataset, 4), new_scan(dataset, 5)
+    stamp = growing.stat().st_mtime
+    watch.poll()
+    with open(growing, "ab") as file:
+        file.write(b"\0" * 10)
+    os.utime(growing, (stamp + 1, stamp + 1))  # written now: the dates of these scans are ahead of the clock
+    assert watch.poll() == complete
 
 
 def test_a_newer_scan_passes_a_scan_left_behind(dataset):
@@ -497,6 +527,31 @@ def test_a_new_start_does_not_take_the_end_of_the_old_build(threaded, dataset, t
     threaded.runner.finish()  # the old build ends, stopped
     assert threaded.session.run.name == "water02_0001_scan0003" and threaded.running
     assert threaded.window.text.startswith("Live : en attente")
+
+
+def test_two_scans_landing_together_are_both_analysed_and_the_last_is_shown(running, dataset):
+    new_scan(dataset, 4)
+    new_scan(dataset, 5)
+    look(running, 4)
+    assert running.session.run.name == "water02_0001_scan0005"
+    for number in (4, 5):
+        assert (running.settings.output / f"water02_0001_scan{number:04d}.trxrd.h5").is_file()
+
+
+def test_a_scan_landing_during_a_long_build_is_not_skipped(threaded, dataset):
+    new_scan(dataset, 4)
+    for _ in range(2):
+        threaded.tick()
+        threaded.runner.finish()
+    new_scan(dataset, 5)  # scan 4 is still being built
+    threaded.tick()
+    threaded.runner.finish()  # its end
+    assert threaded.session.run.name == "water02_0001_scan0004"
+    for _ in range(2):
+        threaded.tick()
+        threaded.runner.finish()
+    threaded.runner.finish()
+    assert threaded.session.run.name == "water02_0001_scan0005"
 
 
 def test_the_status_follows_the_build(running, dataset):
