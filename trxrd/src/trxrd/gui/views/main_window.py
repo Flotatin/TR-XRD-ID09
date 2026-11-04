@@ -9,7 +9,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QCloseEvent, QGuiApplication
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QDialog, QFileDialog, QLabel, QMainWindow, QMessageBox, QProgressDialog, QSizePolicy,
-    QSplitter, QTabWidget, QVBoxLayout,
+    QSplitter, QTabWidget, QVBoxLayout, QWidget,
 )
 
 from trxrd.gui.actions import ActionRegistry
@@ -54,10 +54,11 @@ class MainWindow(QMainWindow):
         tables.addTab(self.processing, "Traitement")
         tables.addTab(self.detection, "Détection")
         tables.addTab(self.zones, "Zones")
-        left = QSplitter(Qt.Orientation.Vertical)
-        left.addWidget(self.navigator)
-        left.addWidget(tables)
-        left.setSizes([400, 500])
+        left = QWidget()
+        column = QVBoxLayout(left)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.addWidget(self.navigator)
+        column.addWidget(tables, 1)
         center = QSplitter(Qt.Orientation.Vertical)
         center.addWidget(self.spectrum)
         center.addWidget(self.cake)

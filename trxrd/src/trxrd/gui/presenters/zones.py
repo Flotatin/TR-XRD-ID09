@@ -6,8 +6,8 @@ excluded zones belong to the run. Both are drawn on the spectrum, edited or
 removed, and can be undone.
 
 The zone of spectra is the time zone of the dDAC plots, as in the v1: it is
-the interval of the mean dP/dt, and it chooses the spectra. The selection
-and the zone follow each other.
+the interval of the mean dP/dt, and it chooses the spectra: the selection of
+the actions on several spectra, and the range of the automatic analysis.
 
 View expected (duck typing): show_zones(ZoneChoices), show_message(text), clear(); callbacks on_edit(on),
 on_fit_zone(low, high), on_whole(), on_propagate("selection" | "all"), on_row(row), on_remove().
@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import dataclasses
 from dataclasses import dataclass, field
-from typing import Callable, List, Optional, Sequence
+from typing import List, Optional, Sequence
 
 from trxrd.gui.presenters import display
 from trxrd.gui.presenters.editing import apply_edit
@@ -192,30 +192,17 @@ class ZonesPresenter:
 
 
 class SpectraZonePresenter:
-    """The zone of the dDAC plots chooses the spectra, and a selection made in the list moves the zone."""
+    """The zone of the dDAC plots chooses the spectra; without a zone, none is chosen.
+
+    A selection nobody can see must not be left behind: it would act on spectra the user no longer has in mind.
+    """
 
     def __init__(self, session: Session, rates: RateSettings) -> None:
         self.session, self.rates = session, rates
-        self._following = False  # one follows the other: no echo
         rates.subscribe(self._zone_moved)
-        session.subscribe(Event.SELECTION_CHANGED, self._selection_moved)
-
-    def _follow(self, action: Callable[[], None]) -> None:
-        if self._following or self.rates.interval is None or self.session.run is None:
-            return
-        self._following = True
-        try:
-            action()
-        finally:
-            self._following = False
-
-    def _x(self):
-        return display.spectrum_axis(self.session.run)[0]
 
     def _zone_moved(self, *_) -> None:
-        self._follow(lambda: self.session.set_selection(display.spectra_in(self._x(), self.rates.interval)))
-
-    def _selection_moved(self, *_) -> None:
-        region = display.region_of(self._x(), self.session.selection) if self.session.run is not None else None
-        if region is not None:
-            self._follow(lambda: self.rates.update(interval=region))
+        run, region = self.session.run, self.rates.interval
+        if run is not None:
+            x = display.spectrum_axis(run)[0]
+            self.session.set_selection([] if region is None else display.spectra_in(x, region))

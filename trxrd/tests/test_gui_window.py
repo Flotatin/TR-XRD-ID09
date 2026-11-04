@@ -47,7 +47,7 @@ def test_window_opens_a_run_and_navigates(viewer):
     assert [label.text for sample, label in window.spectrum.legend.items][0] == "brut"
     window.actions.get("raw").trigger()
     assert len(window.spectrum._ticks) == 2  # ice VII: ticks + their tooltips
-    assert window.navigator.table.rowCount() == 5 and window.phases.table.rowCount() == 1
+    assert window.navigator.slider.maximum() == 4 and window.phases.table.rowCount() == 1
     assert window.peaks.table.rowCount() == 2 and window.map.image.image.shape == (400, 5)  # [2θ, time]
     assert window.evolution.channel.currentText() == "Channel3"  # the non-trigger channel first
 
@@ -58,7 +58,7 @@ def test_window_opens_a_run_and_navigates(viewer):
     window.navigator.slider.setValue(4)
     assert viewer.session.index == 4 and window.map.marker.value() == pytest.approx(4.0)  # ms
     window.actions.get("first").trigger()
-    assert viewer.session.index == 0 and window.navigator.table.currentRow() == 0
+    assert viewer.session.index == 0 and window.navigator.slider.value() == 0
 
     window.actions.get("unit_q").trigger()
     assert window.units.currentData() == "q_A^-1" and window.actions.get("unit_q").isChecked()
@@ -70,10 +70,11 @@ def test_window_opens_a_run_and_navigates(viewer):
 def test_close_and_reopen(viewer):
     viewer.main.open(str(viewer.path))
     viewer.window.actions.get("close").trigger()
-    assert viewer.session.run is None and viewer.window.navigator.table.rowCount() == 0
+    assert viewer.session.run is None and not viewer.window.navigator.slider.isEnabled()
+    assert viewer.window.navigator.label.text() == ""
     assert viewer.window.windowTitle() == "TR-XRD v2 2.0.0a1"
     viewer.main.open(str(viewer.path))
-    assert viewer.window.navigator.table.rowCount() == 5
+    assert viewer.window.navigator.slider.maximum() == 4 and viewer.window.navigator.slider.isEnabled()
 
 
 def test_shortcuts_are_unique():
@@ -328,7 +329,6 @@ def test_automatic_analysis_action(viewer, compression_run):
 
 
 def test_treatment_tab_and_selection_of_spectra(viewer, compression_run):
-    from PySide6.QtCore import QItemSelection, QItemSelectionModel
     from trxrd.domain import Processing
 
     window, session = viewer.window, viewer.session
@@ -345,19 +345,17 @@ def test_treatment_tab_and_selection_of_spectra(viewer, compression_run):
     panel.filter.setCurrentIndex(panel.filter.findData("svg"))
     panel.p1.setValue(15)
 
-    table = window.navigator.table  # Shift + click from spectrum 2 to spectrum 4
-    rows = QItemSelection(table.model().index(2, 0), table.model().index(4, table.columnCount() - 1))
-    table.selectionModel().select(rows, QItemSelectionModel.SelectionFlag.ClearAndSelect)
+    session.select(2)
+    window.evolution.on_interval(1.5, 4.5)  # the zone of spectra, from spectrum 2 to spectrum 4
     assert session.selection == [2, 3, 4] and session.index == 2 and panel.selected.text().endswith("(3)")
     panel.p1.setValue(13)  # the current spectrum (2)...
     panel.selected.click()  # ...then the selection
     assert [s.processing.filter_params for s in session.run.spectra] == [(15.0, 2.0), (9, 2), (13.0, 2.0),
                                                                           (13.0, 2.0), (13.0, 2.0), (9, 2)]
     assert panel.message.text() == "Traitement du spectre 2 appliqué à 3 spectre(s)."
-    session.select(4)  # inside the selection: it stays
-    assert window.navigator.selected_rows() == [2, 3, 4] and session.selection == [2, 3, 4]
-    window.actions.get("next").trigger()  # outside: the current spectrum alone
-    assert session.index == 5 and window.navigator.selected_rows() == [5] and session.selection == [5]
+    window.dpdt.toggle.setChecked(False)
+    assert session.selection == []
+    window.actions.get("last").trigger()
     panel.all.click()
     assert all(s.processing == Processing(1, "svg", (9, 2)) for s in session.run.spectra)  # that of spectrum 5
     panel.window.setValue(1.0)  # background window for broad peaks
@@ -420,7 +418,7 @@ def test_phases_tab_and_undo(viewer, compression_run):
     window.actions.get("copy_model").trigger()
     assert panel.paste.isEnabled()
     session.select(3)
-    session.set_selection([3, 5])  # the current spectrum is always in the selection of the list
+    session.set_selection([3, 5])
     window.actions.get("paste_model").trigger()
     assert session.run.spectra[5].phases and panel.fit_selection.text() == "Ajuster la sélection (2)"
     panel.fit_selection.click()
@@ -873,7 +871,7 @@ def test_zone_of_spectra_drawn_on_a_ddac_plot(viewer, compression_run, plot_of):
     assert not window.dpdt.toggle.isChecked()
     _drag(plot_of(window), 0.6, 3.4, Qt.KeyboardModifier.ShiftModifier)
     assert viewer.session.selection == [1, 2, 3] and window.dpdt.toggle.isChecked()
-    assert window.navigator.selected_rows() == [1, 2, 3]
+    assert window.navigator.label.text() == "Spectre 0 / 5 — sélection : 1 à 3 (3 spectres)"
     for view in (window.evolution, window.dpdt, window.map):
         assert view.interval.region.isVisible()
         assert view.interval.region.getRegion() == pytest.approx((0.6, 3.4), abs=0.1)
@@ -884,33 +882,71 @@ def test_zone_of_spectra_drawn_on_a_ddac_plot(viewer, compression_run, plot_of):
 def test_zone_of_spectra_dragged_with_the_mouse(viewer, compression_run, plot_of):
     """On the evolution plot the oscilloscope has its own view box, over the one of the zone."""
     window = _shown(viewer, compression_run)
-    viewer.session.set_selection([1, 2])
-    window.dpdt.toggle.setChecked(True)
-    assert window.evolution.interval.region.getRegion() == pytest.approx((0.5, 2.5))
+    window.evolution.on_interval(0.5, 2.5)
+    assert viewer.session.selection == [1, 2]
     view = window.evolution.plot.getPlotItem().vb.viewRange()[0]
     _drag(plot_of(window), 1.5, 3.5)  # its body, two spectra further
-    assert viewer.session.selection == [3, 4] and window.navigator.selected_rows() == [3, 4]
+    assert viewer.session.selection == [3, 4]
     assert window.map.interval.region.getRegion() == pytest.approx((2.5, 4.5), abs=0.1)
     assert window.evolution.plot.getPlotItem().vb.viewRange()[0] == pytest.approx(view)  # the plot stays
     _drag(plot_of(window), 4.5, 5.5)  # its right edge
     assert viewer.session.selection == [3, 4, 5]
 
 
-def test_zone_of_spectra_survives_browsing_in_the_real_list(viewer, compression_run):
+def test_zone_of_spectra_survives_browsing(viewer, compression_run):
     window = _shown(viewer, compression_run)
     _drag(window.evolution.plot, 0.6, 3.4, Qt.KeyboardModifier.ShiftModifier)
     window.actions.get("last").trigger()
     assert viewer.session.index == 5 and viewer.session.selection == [1, 2, 3]
-    assert window.navigator.selected_rows() == [1, 2, 3]
-    window.navigator.table.selectRow(0)  # a click on one row of the list
-    QApplication.processEvents()
+    assert window.navigator.label.text() == "Spectre 5 / 5 — sélection : 1 à 3 (3 spectres)"
+    window.navigator.slider.setValue(0)
     assert viewer.session.index == 0 and viewer.session.selection == [1, 2, 3]
-    assert window.navigator.selected_rows() == [1, 2, 3]
-    window.dpdt.toggle.setChecked(False)
-    window.actions.get("next").trigger()  # no zone any more: the list works as before
-    assert viewer.session.index == 1
-    window.actions.get("last").trigger()
-    assert viewer.session.selection == [5] and window.navigator.selected_rows() == [5]
+    window.dpdt.toggle.setChecked(False)  # a selection nobody sees must not stay
+    assert viewer.session.selection == [] and window.navigator.label.text() == "Spectre 0 / 5"
+
+
+def test_slider_between_two_arrows(viewer, compression_run):
+    """The list of the spectra took a third of the column: a slider and two arrows are enough."""
+    window = _shown(viewer, compression_run)
+    navigator, session = window.navigator, viewer.session
+    assert not navigator.previous.isEnabled() and navigator.following.isEnabled()
+    navigator.following.click()
+    assert session.index == 1 and navigator.slider.value() == 1 and navigator.previous.isEnabled()
+    navigator.previous.click()
+    assert session.index == 0 and not navigator.previous.isEnabled()
+    window.actions.get("last").trigger()  # the keys still go
+    assert session.index == 5 and not navigator.following.isEnabled() and navigator.previous.isEnabled()
+    window.actions.get("previous").trigger()
+    assert session.index == 4 and navigator.following.isEnabled()
+    assert navigator.label.text() == "Spectre 4 / 5" and navigator.following.autoRepeat()
+
+
+def test_the_left_column_is_for_the_tabs(viewer, compression_run):
+    from PySide6.QtWidgets import QToolBar
+
+    window = _shown(viewer, compression_run)
+    assert window.navigator.height() < 100 and window.tabs.height() > 600
+    bar = window.findChild(QToolBar)
+    shown = bar.actions()
+    assert window.actions.get("previous") not in shown and window.actions.get("next") not in shown
+    assert window.actions.get("save") in shown
+    menus = [a for menu in window.actions.menus() for a in window.actions.in_menu(menu)]
+    assert window.actions.get("previous") in menus and window.actions.get("next") in menus
+
+
+def test_the_analysis_offers_the_zone_of_spectra(viewer, compression_run):
+    """As in the v1, where the zone filled the indices of the batch."""
+    from trxrd.gui.views.analysis import AnalysisDialog
+
+    window = _shown(viewer, compression_run)
+    dialog = AnalysisDialog(viewer.analysis.choices(), window)
+    assert dialog.every.isChecked() and dialog.indices() == list(range(6))
+    dialog.close()
+    window.evolution.on_interval(0.6, 3.4)
+    dialog = AnalysisDialog(viewer.analysis.choices(), window)
+    assert dialog.between.isChecked() and dialog.indices() == [1, 2, 3]
+    assert (dialog.first.value(), dialog.last.value()) == (1, 3)
+    dialog.close()
 
 
 def test_the_zone_is_seen_over_the_map(viewer, compression_run):

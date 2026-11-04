@@ -15,8 +15,7 @@ Views expected (duck typing):
 - map: show_map(TimeMapData), show_interval(region), set_marker(x), clear(), on_pick(x), on_interval(start, stop)
 - cake: show_cake(CakeData), show_image(array), show_message(text), clear(), on_mode(mode)
 - table: show_rows(columns, rows)
-- navigator: show_spectra(columns, rows), set_current(index, count, selection, keep), on_select(index),
-  on_selection(indices)
+- navigator: set_current(index, count, text), on_select(index)
 - window: set_title, set_status, set_units(available, current), set_busy(text or None),
   set_undo(undo label or None, redo label or None), show_message(text),
   ask_open_path() / ask_save_path(suggested) -> path or None, confirm_discard() -> bool,
@@ -242,11 +241,10 @@ class RatePresenter:
             self.interval()
 
     def toggle_interval(self, on: bool) -> None:
-        """On: the zone starts over the selection, or over all the spectra; off: no zone, no mean dP/dt."""
+        """On: the zone starts over all the spectra; off: no zone, no mean dP/dt, no spectrum chosen."""
         run = self.session.run
         if on and run is not None and len(run):
-            chosen = self.session.selection if len(self.session.selection) > 1 else range(len(run))
-            self.rates.update(interval=display.region_of(display.spectrum_axis(run)[0], chosen))
+            self.rates.update(interval=display.region_of(display.spectrum_axis(run)[0], range(len(run))))
         else:
             self.rates.update(interval=None)
 
@@ -405,38 +403,18 @@ class TablesPresenter:
 
 
 class NavigatorPresenter:
-    """List of the spectra and slider; several spectra can be chosen together (the selection)."""
+    """Slider of the spectra, and where we are: the current spectrum and the spectra chosen by the zone."""
 
-    def __init__(self, session: Session, view, rate_settings: Optional[RateSettings] = None) -> None:
+    def __init__(self, session: Session, view) -> None:
         self.session, self.view = session, view
-        self.rates = rate_settings or RateSettings()
         view.on_select = session.select
-        view.on_selection = self.chosen
-        session.subscribe(Event.RUN_CHANGED, self.refresh)
-        session.subscribe(Event.DATA_CHANGED, self.refresh)
-        session.subscribe(Event.SPECTRUM_CHANGED, self.current)
-        session.subscribe(Event.SELECTION_CHANGED, self._selection_moved)
-
-    def chosen(self, rows: List[int]) -> None:
-        """While a time zone is shown, one row only moves the current spectrum: it takes several to change the zone."""
-        if self.rates.interval is not None and len(rows) == 1:
-            self.current()
-        else:
-            self.session.set_selection(rows)
-
-    def _selection_moved(self, *_) -> None:
-        if self.rates.interval is not None:  # chosen by the zone: the list shows it
-            self.current()
+        for event in (Event.SPECTRUM_CHANGED, Event.SELECTION_CHANGED):  # a new run emits SPECTRUM_CHANGED too
+            session.subscribe(event, self.refresh)
 
     def refresh(self, *_) -> None:
-        run = self.session.run
-        self.view.show_spectra(display.SPECTRUM_COLUMNS, display.spectrum_rows(run) if run is not None else [])
-        self.current()
-
-    def current(self, *_) -> None:
-        run = self.session.run
-        self.view.set_current(self.session.index, len(run) if run is not None else 0, self.session.selection,
-                              self.rates.interval is not None)
+        run, index, selection = self.session.run, self.session.index, self.session.selection
+        count = len(run) if run is not None else 0
+        self.view.set_current(index, count, display.position_text(index, count, selection))
 
 
 class MainPresenter:

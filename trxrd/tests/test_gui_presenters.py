@@ -87,8 +87,7 @@ def test_open_shows_every_panel(viewer, sample_run):
     assert patterns.image.shape == (400, 5) and patterns.x_label == "t (ms)" and patterns.y_label == "2θ (°)"
     np.testing.assert_allclose(patterns.x, [0, 1, 2, 3, 4])  # one column per spectrum, on the time axis
     assert views["map"].last("set_marker") == (0.0,)
-    assert views["navigator"].last("show_spectra")[1][2] == ("2", "2", "Ice VII 4.00, Ice VI 1.50")
-    assert views["navigator"].last("set_current") == (0, 5, [], False)
+    assert views["navigator"].last("set_current") == (0, 5, "Spectre 0 / 4")
     assert views["phases"].last("show_rows")[1][0][:3] == ("H2O_Ice_VII", "2.000", "0.050")
     assert [r[1] for r in views["peaks"].last("show_rows")[1]] == ["110", "200"]
 
@@ -193,7 +192,7 @@ def test_new_runs_from_raw_data(viewer, raw_root, tmp_path):
     assert progress[-1] == (2000, 2000) and window.count("end_progress") == 1
     assert session.run.name == "water02_0001_scan0003" and len(session.run) == 3 and not session.dirty
     assert session.path == tmp_path / "analyse" / "water02_0001_scan0003.trxrd.h5"
-    assert window.last("show_info")[0] == "Runs créés" and views["navigator"].last("set_current") == (0, 3, [], False)
+    assert window.last("show_info")[0] == "Runs créés" and views["navigator"].last("set_current") == (0, 3, "Spectre 0 / 2")
 
 
 def test_new_run_cancelled_or_failing(viewer, raw_root, tmp_path):

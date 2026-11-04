@@ -64,7 +64,7 @@ class ProcessingPanel(QWidget):
         self.p1_label, self.p2_label = QLabel(), QLabel()
         self.all = QPushButton("Appliquer à tous les spectres")
         self.selected = QPushButton("Appliquer à la sélection")
-        self.selected.setToolTip("Spectres choisis dans la liste (Maj + clic, Ctrl + clic)")
+        self.selected.setToolTip("Spectres de la zone de spectres : Maj + glisser sur un graphe dDAC")
         self.message = QLabel("")
         self.message.setWordWrap(True)
         self.message.setStyleSheet("color: #8a5a00")

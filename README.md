@@ -7,9 +7,9 @@ Ce dépôt contient **deux programmes distincts** :
 | Où | racine du dépôt : `main.py`, `src/cedapp/`, `src/Bibli_python/` | dossier autonome `trxrd/` |
 | Nom du paquet | `cedapp` | `trxrd` |
 | Fichiers d'analyse | `.CEDX` / `.CEDXUp` (pickles dill) | `.trxrd.h5` (HDF5 ouvert, lisible sans le programme) |
-| Interface | PyQt5 | PySide6 (en cours) ; ligne de commande `trxrd` ; notebook (`XRDRun`) |
+| Interface | PyQt5 | PySide6 (`trxrd-gui`) ; ligne de commande `trxrd` ; notebook (`XRDRun`) |
 | État | **figée** : sert à relire les anciennes données | **en développement** ; deviendra un dépôt séparé |
-| Lancer | `python main.py` | `pip install -e "./trxrd[notebook]"` puis `trxrd --help` |
+| Lancer | `python main.py` | `pip install -e "./trxrd[notebook,gui]"` puis `trxrd-gui` ou `trxrd --help` |
 | Git | dernier état de la v1 seule : commit `6f579f5`, tag `v1-cedapp` | dans `main` depuis la PR #16 (dossier `trxrd/`) |
 
 Les anciens fichiers `.CEDX` se convertissent au nouveau format avec `trxrd convert`, sans avoir besoin de la v1.

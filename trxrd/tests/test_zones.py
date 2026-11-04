@@ -318,7 +318,7 @@ def test_spectra_of_a_region_and_region_of_spectra():
 def ddac(run):
     session, rates = Session(), RateSettings()
     navigator, evolution, rate_view, map_view = Recorder(), Recorder(), Recorder(), Recorder()
-    NavigatorPresenter(session, navigator, rates)
+    NavigatorPresenter(session, navigator)
     EvolutionPresenter(session, evolution, rates)
     RatePresenter(session, rate_view, rates)
     MapPresenter(session, DisplaySettings(), map_view, rates)
@@ -327,11 +327,18 @@ def ddac(run):
     return session, rates, navigator, evolution, rate_view, map_view
 
 
+def test_where_we_are():
+    assert display.position_text(0, 0, []) == ""
+    assert display.position_text(2, 6, []) == "Spectre 2 / 5"
+    assert display.position_text(2, 6, [4]) == "Spectre 2 / 5 — sélection : spectre 4"
+    assert display.position_text(2, 6, [3, 4, 5]) == "Spectre 2 / 5 — sélection : 3 à 5 (3 spectres)"
+
+
 def test_the_zone_chooses_the_spectra_and_shows_on_the_three_plots(ddac):
     session, rates, navigator, evolution, rate_view, map_view = ddac
     evolution.on_interval(0.6, 3.4)  # ms; drawn or dragged on the plot above
     assert session.selection == [1, 2, 3] and rates.interval == (0.6, 3.4)
-    assert navigator.last("set_current") == (0, len(session.run), [1, 2, 3], True)
+    assert navigator.last("set_current")[2].endswith("sélection : 1 à 3 (3 spectres)")
     assert map_view.last("show_interval") == ((0.6, 3.4),) and evolution.last("show_interval")[0] == (0.6, 3.4)
     assert rate_view.last("show_interval")[1] == (0.6, 3.4)
     map_view.on_interval(1.6, 4.4)  # the same zone from the map
@@ -344,52 +351,31 @@ def test_the_zone_stays_while_the_current_spectrum_moves(ddac):
     rates.update(interval=(0.6, 3.4))
     session.select(5)
     assert session.selection == [1, 2, 3] and rates.interval == (0.6, 3.4)
-    assert navigator.last("set_current") == (5, len(session.run), [1, 2, 3], True)
+    assert navigator.last("set_current")[:2] == (5, len(session.run))
 
 
-def test_one_row_of_the_list_only_moves_the_current_spectrum(ddac):
-    session, rates, navigator, *_ = ddac
+def test_no_zone_no_selection(ddac):
+    """Nothing shows a selection without a zone: left behind, it would act on spectra nobody has in mind."""
+    session, rates, navigator, evolution, rate_view, _ = ddac
     rates.update(interval=(0.6, 3.4))
-    calls = len(navigator.calls)
-    navigator.on_selection([5])
-    assert session.selection == [1, 2, 3] and rates.interval == (0.6, 3.4)
-    assert navigator.calls[calls:] and navigator.last("set_current")[2] == [1, 2, 3]  # the list shows the zone again
+    assert session.selection == [1, 2, 3]
+    rate_view.on_interval_toggle(False)
+    assert session.selection == [] and navigator.last("set_current")[2] == "Spectre 0 / 5"
 
 
-def test_several_rows_of_the_list_move_the_zone(ddac):
-    session, rates, navigator, evolution, *_ = ddac
+def test_changing_the_dpdt_settings_keeps_the_selection(ddac):
+    session, rates, *_ = ddac
     rates.update(interval=(0.6, 3.4))
-    navigator.on_selection([3, 4])
-    assert session.selection == [3, 4] and rates.interval == (2.5, 4.5)
-    assert evolution.last("show_interval")[0] == (2.5, 4.5)
+    rates.update(half_window=4)
+    assert session.selection == [1, 2, 3]
 
 
-def test_rows_apart_are_kept_though_the_zone_spans_them(ddac):
-    session, rates, navigator, *_ = ddac
-    rates.update(interval=(0.6, 3.4))
-    navigator.on_selection([1, 4])
-    assert session.selection == [1, 4] and rates.interval == (0.5, 4.5)
-
-
-def test_without_a_zone_the_list_works_as_before(ddac):
-    session, rates, navigator, *_ = ddac
-    navigator.on_selection([3])
-    assert session.selection == [3] and rates.interval is None
-    navigator.on_selection([2, 3])
-    assert session.selection == [2, 3] and rates.interval is None
-    session.select(0)
-    assert navigator.last("set_current")[3] is False
-
-
-def test_the_zone_starts_over_the_selection_or_all_the_spectra(ddac):
+def test_the_zone_starts_over_all_the_spectra(ddac):
     session, rates, navigator, evolution, rate_view, _ = ddac
     rate_view.on_interval_toggle(True)
     assert rates.interval == (-0.5, 5.5) and session.selection == list(range(len(session.run)))
     rate_view.on_interval_toggle(False)
     assert rates.interval is None and evolution.last("show_interval")[0] is None
-    session.set_selection([2, 3])
-    rate_view.on_interval_toggle(True)
-    assert rates.interval == (1.5, 3.5) and session.selection == [2, 3]
 
 
 def test_a_zone_with_no_spectrum_chooses_none(ddac):

@@ -6,7 +6,7 @@
 les anciennes données ; son dernier état est le commit `6f579f5` de `main` (tag `v1-cedapp`).
 
 Ce document décrit les couches du programme, le format de fichier, l'accès depuis un notebook, la conversion
-des anciens fichiers, l'interface graphique prévue et la feuille de route.
+des anciens fichiers, l'interface graphique et la feuille de route.
 
 ---
 
@@ -18,7 +18,7 @@ des anciens fichiers, l'interface graphique prévue et la feuille de route.
 | Versions | **v1 = `cedapp`** (ancienne, figée, commit `6f579f5` de `main`, fichiers `.CEDX`) ; **v2 = `trxrd`** (nouvelle, `2.0.0a1`, fichiers `.trxrd.h5`). |
 | Ancien programme | Conservé tel quel pour les anciennes données. Le nouveau programme ira dans un **dépôt séparé** une fois bien avancé (§10). |
 | Jauges de spectroscopie (rubis, Sm, SrFCl, rhodamine) | **Abandonnées.** Seules les phases DRX existent. Le convertisseur les ignore en le signalant. |
-| Interface graphique | **PySide6** + pyqtgraph : nouveau programme, nouvelle interface (§8). |
+| Interface graphique | **PySide6** + pyqtgraph : nouveau programme, nouvelle interface (§9). |
 | Ajustement des pics | `scipy.optimize.curve_fit`. **lmfit n'est plus utilisé.** Ajustement sur le signal brut moins le fond, sans lissage (§6.2). |
 | Profil des pics | **Pearson IV par défaut** : pics asymétriques du synchrotron et de la compression dynamique. |
 | Recherche automatique de phases | L'algorithme génétique (deap) est **remplacé** par une recherche déterministe (§6.5) : pas de doublons, même résultat à chaque exécution, et plus juste et plus rapide sur nos essais (§6.6). |
@@ -81,7 +81,7 @@ des anciens fichiers, l'interface graphique prévue et la feuille de route.
 | `processing` | `domain`, `physics`, pyFAI, scipy, pybaselines | `io`, `services`, Qt |
 | `services` | tout sauf `gui` | Qt |
 | `notebook` | `io`, `domain`, `physics`, matplotlib | pyFAI, Qt |
-| `gui` (à venir) | `services`, `domain`, `physics`, PySide6, pyqtgraph | h5py, pyFAI, scipy.optimize en direct |
+| `gui` | `services`, `domain`, `physics`, PySide6, pyqtgraph | h5py, pyFAI, scipy.optimize en direct |
 
 ### 3.2 Dépendances
 
@@ -103,6 +103,7 @@ trxrd/
 ├── pyproject.toml              paquet autonome (futur dépôt)
 ├── README.md
 ├── docs/ARCHITECTURE.md        ce document
+├── docs/PASSATION.md           état du projet, décisions, leçons, tâches restantes
 ├── resources/phases/           bibliothèque de fiches .jcpds (Au, Bi, Cr, Cu, Ga, H2O, KCl, Sn, Ta)
 ├── src/trxrd/
 │   ├── domain/model.py         ✅ Run, Spectrum, PhaseFit, Peak, PhaseCard, Calibration, Processing, Source, Oscilloscope
@@ -112,10 +113,11 @@ trxrd/
 │   │   └── profiles.py         ✅ Gauss, pseudo-Voigt, Pearson IV, Moffat, Lorentzienne asymétrique
 │   ├── io/
 │   │   ├── h5store.py          ✅ save_run / load_run : le format de fichier (§5)
+│   │   ├── h5utils.py          ✅ lecture et écriture des tables et des textes HDF5
 │   │   ├── esrf.py             ✅ piles d'images LIMA (lecture paresseuse), fichier maître BLISS (ch5/ch6)
 │   │   ├── calibration.py      ✅ .poni + masque Dioptas → Calibration
 │   │   ├── jcpds.py            ✅ fiches de phase
-│   │   └── legacy.py           ✅ conversion des .CEDX/.CEDXUp, sans l'ancien code (§7)
+│   │   └── legacy.py           ✅ conversion des .CEDX/.CEDXUp, sans l'ancien code (§8)
 │   ├── processing/
 │   │   ├── integration.py      ✅ intégration azimutale pyFAI, pas en 2θ automatique
 │   │   ├── background.py       ✅ lissage (Savitzky-Golay / FFT) + fond SNIP
@@ -143,16 +145,16 @@ trxrd/
 │   ├── cli.py                  ✅ trxrd build | auto | compare | convert | info
 │   └── gui/                    ✅ lecteur PySide6 + pyqtgraph (§9) : `trxrd-gui`
 │       ├── presenters/         display.py (données affichées), viewer.py, preview.py, analysis.py, treatment.py,
-│       │                       editing.py, calibration.py
+│       │                       editing.py, zones.py, calibration.py
 │       │                       (presenters), sans Qt
 │       ├── views/              plots.py (spectre, cake, grandeurs(t), carte), images.py (échelle, niveaux, couleurs),
-│       │                       panels.py, new_run.py, preview.py, analysis.py, treatment.py, editing.py,
+│       │                       panels.py, new_run.py, preview.py, analysis.py, treatment.py, editing.py, zones.py,
 │       │                       calibration.py, main_window.py
 │       ├── actions.py          registre unique des QAction (menus, barre d'outils, raccourcis)
 │       ├── tasks.py            calculs longs dans un thread, résultat rendu au thread de l'interface
 │       ├── builder.py          assemblage : fenêtre + presenters + actions
 │       └── app.py              point d'entrée léger : journal et affichage des erreurs (sans console)
-└── tests/                      313 tests ; data/ = scan TUTO, calibration, ancien fichier .CEDX d'exemple
+└── tests/                      315 tests ; data/ = scan TUTO, calibration, ancien fichier .CEDX d'exemple
 ```
 
 ## 5. Le format de fichier `trxrd-run` (HDF5)
@@ -397,7 +399,7 @@ fixe (18,48–18,68°) exclue, telle que proposée par `find_static_peaks`.
 | Détection | 59 des 61 pics ajustés à la main retrouvés (les 2 manqués sont des raies faibles de la glace VI) |
 | Composition | **identique à l'analyse manuelle dans 15 spectres sur 16** ; dans le spectre 8 (coexistence VII + VI), la VI n'est pas retenue : un seul pic faible (SNR 10) la soutient |
 | Pression des glaces VII, VI, Ih | écart ≤ 0,03 GPa avec l'analyse manuelle |
-| Pression de Sn β | écart ≤ 0,17 GPa (0,165), la v2 donnant en moyenne ~0,1 GPa de moins : écart systématique du modèle de profil, expliqué en §6.8 |
+| Pression de Sn β | écart ≤ 0,17 GPa (0,169), la v2 donnant en moyenne ~0,1 GPa de moins : écart systématique du modèle de profil, expliqué en §6.8 |
 | Temps | ~5 s pour les 16 spectres en relançant la recherche partout, ~3 s avec le suivi des pics (8 spectres sur 16 suivis, résultats identiques) |
 
 Ce run a révélé les points corrigés ci-dessus : un pic fixe non modélisé qui faussait l'ajustement, la glace
@@ -533,8 +535,9 @@ trxrd-gui "F:/ESRF/.../Water05_scan0009.CEDX"
 
 Architecture **MVP** au-dessus de `services.Session` :
 
-- **Session** (sans Qt) : run courant, spectre sélectionné, indicateur « modifié ». Elle émet les
-  événements `run_changed`, `spectrum_changed`, `data_changed` et `saved`. C'est la seule source de vérité.
+- **Session** (sans Qt) : run courant, spectre courant, spectres choisis, indicateur « modifié ». Elle émet les
+  événements `run_changed`, `spectrum_changed`, `selection_changed`, `data_changed` et `saved`. C'est la seule
+  source de vérité.
   `Session.read` charge un fichier sans toucher à la session, ce qui permet de le faire dans un thread ;
   `Session.attach` installe ensuite le run, depuis le thread de l'interface.
 - **Données affichées** (`gui/presenters/display.py`, sans Qt) : courbes du spectre, raies attendues de
@@ -547,17 +550,17 @@ Architecture **MVP** au-dessus de `services.Session` :
   fausses vues (`tests/test_gui_presenters.py`).
 - **Vues** (`gui/views/`) : widgets PySide6/pyqtgraph passifs. Ils ne font aucun calcul.
 - **Actions et raccourcis** (`gui/actions.py`) : un registre unique de `QAction`, d'où viennent les menus,
-  la barre d'outils et la fenêtre des raccourcis (F1). Les lettres seules restent libres pour l'ajustement
-  interactif, qui reprendra les raccourcis de la v1 ; F3 enregistre, comme dans la v1.
+  la barre d'outils et la fenêtre des raccourcis (F1). Les lettres seules reprennent les touches de la v1
+  (C, R, U, D, M, Z...), et F3 enregistre, comme dans la v1.
 - **Calculs longs** (`gui/tasks.py`) : exécutés dans un thread (`QThreadPool`). Le résultat ou l'erreur
   revient dans le thread de l'interface. La tâche reçoit `progress(done, total) -> continuer ?`, le
-  paramètre de `build_run`, `fit_spectra` et `auto_analyse`, ce qui servira à la barre de progression et au
+  paramètre de `build_run`, `fit_spectra` et `auto_analyse`, d'où viennent la barre de progression et le
   bouton d'arrêt.
 
 **Le lecteur (étape 1)** :
 - ouvrir un `.trxrd.h5` ou un ancien `.CEDX`, en arrière-plan (~2 s pour les 1 600 spectres de
   Water01_scan0074) ; un `.CEDX` est converti en mémoire et s'enregistre en `.trxrd.h5` à côté ;
-- liste des spectres (temps, phases et pressions) et curseur ;
+- curseur des spectres, entre deux flèches (flèche maintenue : défilement) ;
 - spectre courant : données, fond, ajustement, et sous le diagramme une rangée de traits par phase, aux
   positions attendues à sa pression, de hauteur proportionnelle à l'intensité de la fiche (hkl au survol).
   Le zoom est gardé d'un spectre à l'autre ;
@@ -641,7 +644,8 @@ Architecture **MVP** au-dessus de `services.Session` :
 
 **Étape 2, deuxième partie : panneau dDAC et images (novembre 2026)**. La fenêtre reprend la disposition de
 la v1 :
-- à gauche, la liste des spectres et, en onglets, les tableaux des phases et des pics ;
+- à gauche, le curseur des spectres et, en onglets, les phases, les pics, le traitement, la détection et les
+  zones ;
 - au centre, le spectre et son cake ;
 - à droite, le panneau dDAC de la v1, de haut en bas : une grandeur de chaque phase en fonction du temps,
   dP/dt, et la carte des diffractogrammes intégrés (temps en x, 2θ / Q / d en y). Les trois graphes
@@ -707,9 +711,9 @@ limité à `io`, `domain` et `physics` (`tests/test_architecture.py`).
 `gui/presenters/analysis.py`, `gui/views/analysis.py`) :
 - **Le dialogue** propose :
   - les phases candidates du run, cochées par défaut, avec leur plage de pression. On peut ajouter un
-    dossier de fiches : les fiches du run restent prioritaires (§5, point 9), mais la recherche prend la
+    dossier de fiches : les fiches du run restent prioritaires (PASSATION §5, point 9), mais la recherche prend la
     plage de P de la bibliothèque, comme `trxrd auto --library` ;
-  - les spectres : tous, le spectre courant, ou une plage ;
+  - les spectres : tous, le spectre courant, ou une plage, celle de la zone de spectres s'il y en a une ;
   - la plage de P, la température, les zones exclues (`18.48:18.68; 21.1:21.3`, virgule ou point) ;
   - des réglages avancés, repliés par défaut : plage 2θ, tolérance, nombre de phases, seuil, écart et saut
     de P, suivi des pics.
@@ -732,7 +736,7 @@ limité à `io`, `domain` et `physics` (`tests/test_architecture.py`).
 
 Sur Water05 scan 9, l'analyse lancée depuis l'interface (dossiers H2O et Sn, P ≤ 10 GPa, zone
 18,479–18,679°) donne le résultat de référence de `trxrd compare` (§6.7) : mêmes phases dans 15 spectres sur
-16, |ΔP| ≤ 0,03 GPa pour les glaces et 0,165 GPa pour Sn, en 1,6 s. Sur Water01_scan0074 (1 600 spectres),
+16, |ΔP| ≤ 0,03 GPa pour les glaces et ≤ 0,17 GPa pour Sn, en 1,6 s. Sur Water01_scan0074 (1 600 spectres),
 l'analyse avance à environ 18 spectres par seconde, et l'arrêt garde les spectres déjà faits.
 
 Les pics libres (zones exclues, pics inexpliqués) sont gardés avec le spectre (`Spectrum.free_peaks`), et la
@@ -750,7 +754,7 @@ sur D2O_03_0001_scan0006 ; `services/treatment.py`, `gui/presenters/treatment.py
   travers le spectre (Affichage > Raies sur le spectre, Ctrl+G).
 - **Onglet Traitement** : lissage du fond SNIP et filtre (Savitzky-Golay, FFT ou aucun) du spectre courant.
   Un changement s'applique tout de suite à ce spectre (au cas par cas). On le propage ensuite à tous les
-  spectres, ou à la sélection de la liste (Maj + clic, Ctrl + clic). Les paramètres impossibles (fenêtre
+  spectres, ou à la sélection (la zone de spectres). Les paramètres impossibles (fenêtre
   paire, ordre trop grand...) sont refusés avec un message, et le spectre ne change pas. Les ajustements
   déjà faits sont gardés, mais ils l'ont été avec l'ancien fond : il faut les refaire. Appliquer un
   traitement aux 1 600 spectres de Water01_scan0074 prend 3,2 s ; ce calcul bloque encore l'interface.
@@ -765,8 +769,7 @@ sur D2O_03_0001_scan0006 ; `services/treatment.py`, `gui/presenters/treatment.py
   - les zones exclues restent visibles en rouge, avec ou sans cet onglet (voir **Zones**).
 
   Le tableau donne 2θ, SNR, hauteur, largeur et la raison d'un rejet.
-- **Sélection** : la liste des spectres accepte une sélection multiple (`Session.selection`), qui servira
-  aussi à l'ajustement interactif.
+- **Sélection** (`Session.selection`) : les spectres de la zone de spectres (voir **Zones**).
 
 Ce qu'on a appris sur D2O_03_0001_scan0006 :
 - **La calibration était fausse.** Le `.poni` fait ce jour-là avec l'outil de la v2 (`test.poni`) donne
@@ -875,18 +878,27 @@ format ne change pas, tout était déjà stocké.
   chevauchent sont réunies (`merged_zones`). La zone d'ajustement et les zones exclues sont en 2θ : `from_unit` y
   ramène ce qu'on trace en Q ou en d, où l'axe s'inverse.
 - **Zone de spectres.** Comme dans la v1, c'est une seule zone pour les trois graphes : elle sert à la fois au dP/dt
-  moyen et à choisir les spectres, ce qui évite deux bandes superposées. `SpectraZonePresenter` fait suivre la zone et
-  la sélection l'une de l'autre, sans écho. Tant que la zone est là, on peut parcourir les spectres, même hors de la
-  zone, sans la perdre (`Navigator.set_current(keep=True)`), et un clic sur une ligne de la liste ne fait que changer de
-  spectre : il en faut plusieurs pour déplacer la zone. `region_of` s'arrête à mi-chemin du spectre voisin, pour ne
-  prendre que les spectres voulus ; `mean_dpdt` n'utilise que les spectres dedans, donc les pentes n'en dépendent pas.
-  Elle marche aussi sans temps (en numéro de spectre), où il n'y a pas de dP/dt moyen.
+  moyen et à choisir les spectres, ce qui évite deux bandes superposées. C'est le seul moyen d'en choisir plusieurs
+  (`SpectraZonePresenter`) : ajuster, coller, vider, traiter, et l'analyse automatique, qui la propose comme plage, comme
+  les indices du lot de la v1. Sans zone, rien n'est sélectionné : une sélection que rien ne montre agirait sur des
+  spectres qu'on n'a plus en tête. On peut parcourir les spectres, même hors de la zone, sans la perdre ; sous le curseur,
+  on lit « sélection : 3 à 9 (7 spectres) ». Le spectre courant reste le départ d'une série : hors de la zone, il est
+  ajusté aussi, et son modèle y entre. `region_of` s'arrête à mi-chemin du spectre voisin, pour ne prendre que les spectres
+  voulus ; `mean_dpdt` n'utilise que les spectres dedans, donc les pentes n'en dépendent pas. Elle marche aussi sans
+  temps (en numéro de spectre), où il n'y a pas de dP/dt moyen.
 - **Tracer.** `plots.drag_draws` reprend le glissement de la vue quand Maj est tenue au début du geste ; un Maj relâché
   en route ne le coupe pas.
 
-Sur Water01_scan0074 (1 600 spectres) : 27 ms par déplacement de la zone (45 au pire) pour 200 spectres choisis, liste
-comprise ; 0,2 s pour donner une zone d'ajustement à tous. Water05 scan 9 est inchangé (15/16, glaces ≤ 0,029 GPa,
+Sur Water01_scan0074 (1 600 spectres) : 28 ms par déplacement de la zone (47 au pire) pour 200 spectres choisis ;
+0,2 s pour donner une zone d'ajustement à tous. Water05 scan 9 est inchangé (15/16, glaces ≤ 0,029 GPa,
 Sn 0,169 GPa).
+
+**Curseur des spectres** (`Navigator`, demandé par l'utilisateur) : la liste des spectres (numéro, temps, phases) prenait
+le haut de la colonne pour peu de chose : le temps est dans le titre du spectre, les phases dans l'onglet Phases, et leur
+évolution sur P(t). Elle laisse la place à un curseur entre deux flèches, ce qui rend inutiles les boutons
+précédent / suivant de la barre d'outils (les touches et le menu Navigation restent). Les onglets gagnent 340 pixels de haut.
+On ne peut plus choisir des spectres non contigus (3, 7 et 12) : aucune demande en ce sens, et la zone couvre l'usage de la
+v1, qui n'avait qu'un intervalle.
 
 **Limites de zoom** (demandées par l'utilisateur ; `limit_view`, `keep_in_limits`, `ImagePanel.update_limits`) :
 on ne peut pas dézoomer au-delà des données de chaque graphe, avec 3 % de marge. Deux pièges :
@@ -910,7 +922,7 @@ d'entrée est écrit dans `trxrd-gui.exe`. Avec `trxrd.gui.launch:main`, le nouv
 l'exécutable est refusé, `python -m trxrd.gui` lance la même chose.
 
 **Ensuite** :
-- étape 3 (suite) : note du run (`docs/PASSATION.md` §6, P1).
+- note du run, édition du masque (`docs/PASSATION.md` §6, P1), fonctions de la v1 restantes (P4).
 
 ## 10. Séparation en deux dépôts
 
@@ -931,7 +943,7 @@ git push <url-du-nouveau-depot> trxrd-only:main
 | 2 | Profils de pics, ajustement `curve_fit`, affinement de maille, P et incertitudes, séries de spectres, axes Q/d | ✅ |
 | 3 | Détection de pics, recherche de composition déterministe, suivi des pics, analyse automatique (`trxrd auto`), validation sur un run réel (`trxrd compare`) | ✅ |
 | 4 | GUI « lecteur » PySide6 sur `Session` | ✅ |
-| 5 | GUI complet : création de run, ajustement interactif, zones, calibration, vue oscilloscope | 🔜 |
+| 5 | GUI complet : création de run, ajustement interactif, zones, calibration, vue oscilloscope | ✅ reste le masque, la note du run et les fonctions de la v1 de PASSATION P4 |
 | 6 | Nouveau dépôt (§10) | 🔜 |
 
 ## 12. Écarts avec l'ancien code

@@ -40,7 +40,7 @@ def _kept(spectrum: Spectrum) -> Spectrum:
 class Event:
     RUN_CHANGED = "run_changed"  # another run loaded / created / closed
     SPECTRUM_CHANGED = "spectrum_changed"  # selection moved to another spectrum
-    SELECTION_CHANGED = "selection_changed"  # spectra chosen together (navigator), for actions on a selection
+    SELECTION_CHANGED = "selection_changed"  # spectra chosen together (zone of spectra), for actions on several
     DATA_CHANGED = "data_changed"  # current run modified (fit, note...)
     SAVED = "saved"
 

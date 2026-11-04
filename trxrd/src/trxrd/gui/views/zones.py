@@ -32,7 +32,7 @@ class ZonesPanel(QWidget):
             box.valueChanged.connect(self._fit_zone_typed)
         self.whole = QPushButton("Tout le spectre")
         self.selected = QPushButton("Appliquer à la sélection")
-        self.selected.setToolTip("Spectres choisis dans la liste ou par la zone de spectres des graphes dDAC")
+        self.selected.setToolTip("Spectres de la zone de spectres : Maj + glisser sur un graphe dDAC")
         self.all = QPushButton("Appliquer à tous les spectres")
         self.all.setToolTip("Tous les spectres, et la plage de l'analyse automatique")
         self.table = RowsTable()

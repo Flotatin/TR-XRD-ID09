@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import dataclasses
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Optional, Sequence, Tuple
 
 from trxrd.gui.presenters.viewer import ImmediateRunner
@@ -36,6 +36,7 @@ class AnalysisChoices:
     current: int  # current spectrum
     analysed: int  # spectra that already hold phases
     two_theta: Tuple[float, float]  # range of the patterns (deg)
+    selection: List[int] = field(default_factory=list)  # spectra of the zone: what the analysis offers first
 
 
 @dataclass
@@ -105,7 +106,7 @@ class AnalysisPresenter:
         highs = [float(s.two_theta[-1]) for s in run.spectra if len(s.two_theta)]
         return AnalysisChoices(phases, settings, len(run), self.session.index,
                                sum(1 for s in run.spectra if s.phases),
-                               (min(lows), max(highs)) if lows else (0.0, 0.0))
+                               (min(lows), max(highs)) if lows else (0.0, 0.0), list(self.session.selection))
 
     def start(self) -> None:
         """Action "Analyse automatique…": ask, confirm overwriting earlier analyses, run in the background."""

@@ -180,7 +180,7 @@ class EditingPresenter:
         run, start, settings = self.session.run, self.session.index, self._settings()
         indices = list(self.session.selection) if scope == "selection" else list(range(len(run)))
         if not indices:
-            self.view.show_message("Aucun spectre sélectionné : les choisir dans la liste (Maj + clic, Ctrl + clic).")
+            self.view.show_message(display.NO_SELECTION)
             return
         self.running = True
         self.window.start_progress(f"Ajustement de {len(indices)} spectre(s)…", self.cancel)

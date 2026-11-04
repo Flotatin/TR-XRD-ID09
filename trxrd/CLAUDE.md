@@ -75,7 +75,7 @@ values). Never commit the user's data (raw scans, .CEDX) to the repository.
 | Analysis as the user asks for it (settings kept in the run, work on a copy, static peaks), GUI and CLI | `services/analysis.py`, `gui/presenters/analysis.py` |
 | Treatment of the spectra (background, filter; one, all, selection), detection as the analysis sees it | `services/treatment.py`, `gui/presenters/treatment.py` |
 | Manual work on the phases and the peaks (add, move, fit, series from the current spectrum, copy the model), undo | `services/editing.py`, `gui/presenters/editing.py`, `Session.remember` |
-| Zones: fit zone of a spectrum, excluded zones of the run, zone of spectra of the dDAC plots (= interval of the mean dP/dt, drives the selection) | `editing.set_fit_range`, `analysis.merged_zones`, `gui/presenters/zones.py`, `gui/views/zones.py`, `plots.drag_draws` |
+| Zones: fit zone of a spectrum, excluded zones of the run, zone of spectra of the dDAC plots (= interval of the mean dP/dt, and the only way to choose several spectra: no list of the spectra, a slider between two arrows) | `editing.set_fit_range`, `analysis.merged_zones`, `gui/presenters/zones.py`, `gui/views/zones.py`, `plots.drag_draws` |
 | GUI state (Qt-free) | `services/session.py` |
 | GUI (`trxrd-gui`): display data and presenters without Qt, passive views, actions, threads | `gui/presenters/`, `gui/views/`, `gui/actions.py`, `gui/tasks.py`, `gui/builder.py` |
 | Entry point, log file and error messages (keep `trxrd.gui.app:main`: Windows refuses an exe with a new content) | `gui/app.py` |

@@ -48,7 +48,7 @@ def create_viewer(session: Optional[Session] = None, runner=None) -> Viewer:
     window = MainWindow()
     runner = runner or ThreadRunner()
     cake = CakePresenter(session, settings, window.cake, runner)
-    rate_settings = RateSettings()  # shared by the dDAC plots and the list of the spectra (zone of spectra)
+    rate_settings = RateSettings()  # shared by the dDAC plots (zone of spectra)
     presenters = [
         SpectrumPresenter(session, settings, window.spectrum),
         cake,
@@ -56,7 +56,7 @@ def create_viewer(session: Optional[Session] = None, runner=None) -> Viewer:
         RatePresenter(session, window.dpdt, rate_settings),
         MapPresenter(session, settings, window.map, rate_settings),
         TablesPresenter(session, window.phases, window.peaks),
-        NavigatorPresenter(session, window.navigator, rate_settings),
+        NavigatorPresenter(session, window.navigator),
         SpectraZonePresenter(session, rate_settings),
         ProcessingPresenter(session, window.processing),
         DetectionPresenter(session, settings, window.detection, window.spectrum),
@@ -142,7 +142,7 @@ def create_viewer(session: Optional[Session] = None, runner=None) -> Viewer:
     add("fit_peak", ANALYSIS, "Ajuster le pic choisi", peaks.fit_peak, ["Shift+R"],
         "Le pic choisi seul, les autres étant soustraits (onglet Pics)")
     add("fit_selection", ANALYSIS, "Ajuster la &sélection", lambda: editing.fit_series("selection", window.phases.follow.isChecked()),
-        ["Ctrl+Shift+F", "Shift+T"], "Ajuster la sélection de la liste, à partir du spectre courant")
+        ["Ctrl+Shift+F", "Shift+T"], "Ajuster les spectres de la zone, à partir du spectre courant")
     add("add_phase", ANALYSIS, "Ajouter la phase choisie", window.phases.add.click, ["Shift+A"],
         "La phase et la pression de l'onglet Phases, sur le spectre courant")
     add("remove_phase", ANALYSIS, "Retirer la phase choisie", window.phases.remove.click, ["D"])
@@ -150,7 +150,7 @@ def create_viewer(session: Optional[Session] = None, runner=None) -> Viewer:
     add("calibration", TOOLS, "&Calibration du détecteur…", window.show_calibration, ["Ctrl+L"],
         "Calibrer la géométrie sur une image de LaB6 / CeO2 et enregistrer le .poni")
     add("shortcuts", HELP, "&Raccourcis clavier", window.show_shortcuts, ["F1"])
-    window.build_menus(toolbar=("new_run", "open", "save", "|", "previous", "next", "|", "raw", "auto"))
+    window.build_menus(toolbar=("new_run", "open", "save", "|", "raw", "auto"))
     main.update()  # the unit actions exist now
     return Viewer(session, settings, window, main, analysis, editing, peaks, zones, presenters)
 

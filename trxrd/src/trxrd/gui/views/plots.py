@@ -699,7 +699,7 @@ class RateView(QWidget):
         self.toggle = QPushButton("Zone de spectres")
         self.toggle.setCheckable(True)
         self.toggle.setToolTip("Zone de temps, à tirer sur l'un des trois graphes, ou à tracer avec Maj + glisser.\n"
-                               "Elle choisit les spectres (la sélection de la liste, pour ajuster, coller, traiter…)\n"
+                               "Elle choisit les spectres (la sélection, pour ajuster, coller, traiter, analyser…)\n"
                                "et donne le dP/dt moyen : pente de la droite ajustée sur tous ses spectres.")
         self.copy = QPushButton("Copier")
         self.copy.setToolTip("Copier le dP/dt moyen de chaque courbe (tableau pour un tableur)")

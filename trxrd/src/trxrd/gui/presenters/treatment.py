@@ -2,7 +2,7 @@
 
 Treatment: the background and the filter of the current spectrum are
 changed at once (case by case), then propagated to every spectrum or to the
-selection of the navigator. Detection: the peaks the automatic analysis
+selection (zone of spectra). Detection: the peaks the automatic analysis
 detects in the current spectrum, with its settings (kept in the run), drawn
 on the spectrum with the threshold, to check the detection before the
 phase search.
@@ -66,7 +66,7 @@ class ProcessingPresenter:
             raise ValueError(f"unknown scope {scope!r}")
         indices = range(len(run)) if scope == "all" else self.session.selection
         if not indices:
-            self.view.show_message("Aucun spectre sélectionné : les choisir dans la liste (Maj + clic, Ctrl + clic).")
+            self.view.show_message(display.NO_SELECTION)
             return
         self.session.remember(indices, "traitement propagé")
         done = treatment.set_processing(run, indices, spectrum.processing)

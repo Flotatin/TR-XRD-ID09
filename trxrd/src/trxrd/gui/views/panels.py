@@ -1,12 +1,13 @@
-"""Tables and the spectrum navigator (list + slider)."""
+"""Tables and the spectrum navigator (a slider between two arrows)."""
 
 from __future__ import annotations
 
-from typing import Callable, List, Optional, Sequence
+from typing import Callable, Optional, Sequence
 
-from PySide6.QtCore import QItemSelection, QItemSelectionModel, Qt
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QAbstractItemView, QHeaderView, QLabel, QSlider, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QAbstractItemView, QHBoxLayout, QHeaderView, QLabel, QSlider, QTableWidget, QTableWidgetItem, QToolButton,
+    QVBoxLayout, QWidget,
 )
 
 
@@ -36,87 +37,46 @@ class RowsTable(QTableWidget):
         self.setUpdatesEnabled(True)
 
 
-def _ranges(rows: Sequence[int]) -> List[tuple]:
-    """[2, 3, 4, 7] -> [(2, 4), (7, 7)]"""
-    out: List[list] = []
-    for row in sorted(rows):
-        if out and row == out[-1][1] + 1:
-            out[-1][1] = row
-        else:
-            out.append([row, row])
-    return [tuple(r) for r in out]
-
-
 class Navigator(QWidget):
-    """Spectra of the run (index, time, phases) and a slider; reports the current spectrum and the selection
-    (several spectra chosen with Shift or Ctrl + click)."""
+    """Slider of the spectra between two arrows, and where we are under it; reports the current spectrum."""
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.on_select: Optional[Callable[[int], None]] = None
-        self.on_selection: Optional[Callable[[List[int]], None]] = None
-        self.table = RowsTable()
-        self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        self.table.itemSelectionChanged.connect(self._row_selected)
         self.slider = QSlider(Qt.Orientation.Horizontal)
         self.slider.valueChanged.connect(self._report)
+        self.previous = self._arrow(Qt.ArrowType.LeftArrow, "Spectre précédent", -1)
+        self.following = self._arrow(Qt.ArrowType.RightArrow, "Spectre suivant", +1)
         self.label = QLabel("")
+        row = QHBoxLayout()
+        row.addWidget(self.previous)
+        row.addWidget(self.slider, 1)
+        row.addWidget(self.following)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(self.table)
-        layout.addWidget(self.slider)
+        layout.addLayout(row)
         layout.addWidget(self.label)
+        self.set_current(0, 0)
+
+    def _arrow(self, kind: Qt.ArrowType, tip: str, step: int) -> QToolButton:
+        button = QToolButton()
+        button.setArrowType(kind)
+        button.setAutoRepeat(True)  # held down, it runs through the spectra
+        button.setToolTip(tip)
+        button.clicked.connect(lambda: self.slider.setValue(self.slider.value() + step))
+        return button
 
     def _report(self, index: int) -> None:
         if self.on_select is not None:
             self.on_select(int(index))
 
-    def selected_rows(self) -> List[int]:
-        return sorted(index.row() for index in self.table.selectionModel().selectedRows())
-
-    def _row_selected(self) -> None:
-        rows = self.selected_rows()
-        if self.on_selection is not None:
-            self.on_selection(rows)
-        if rows:
-            current = self.table.currentRow()
-            self._report(current if current in rows else rows[0])
-
-    def show_spectra(self, columns: Sequence[str], rows: Sequence[Sequence[str]]) -> None:
-        self.table.blockSignals(True)
-        self.table.show_rows(columns, rows)
-        self.table.resizeColumnsToContents()
-        self.table.blockSignals(False)
+    def set_current(self, index: int, count: int, text: str = "") -> None:
+        """Current spectrum `index` among `count`; `text`: where we are."""
         self.slider.blockSignals(True)
-        self.slider.setRange(0, max(len(rows) - 1, 0))
-        self.slider.setEnabled(bool(rows))
+        self.slider.setRange(0, max(count - 1, 0))
+        self.slider.setValue(index)
         self.slider.blockSignals(False)
-
-    def set_current(self, index: int, count: int, selection: Sequence[int] = (), keep: bool = False) -> None:
-        """Current spectrum `index`, inside the selection; elsewhere (keys, slider, plots) it is selected alone.
-
-        `keep`: the selection stays wherever the current spectrum goes (a zone of spectra chose it).
-        """
-        for widget in (self.table, self.slider):
-            widget.blockSignals(True)
-        rows = list(selection) if keep or index in selection else [index]
-        if count:
-            if rows != self.selected_rows():
-                chosen = QItemSelection()
-                last = self.table.columnCount() - 1
-                for first, end in _ranges(rows):
-                    chosen.select(self.table.model().index(first, 0), self.table.model().index(end, last))
-                self.table.selectionModel().select(chosen, QItemSelectionModel.SelectionFlag.ClearAndSelect)
-            self.table.selectionModel().setCurrentIndex(self.table.model().index(index, 0),
-                                                        QItemSelectionModel.SelectionFlag.NoUpdate)
-            self.table.scrollToItem(self.table.item(index, 0), QAbstractItemView.ScrollHint.EnsureVisible)
-            self.slider.setValue(index)
-            self.label.setText(f"Spectre {index} / {count - 1}")
-        else:
-            self.table.clearSelection()
-            self.label.setText("")
-        for widget in (self.table, self.slider):
-            widget.blockSignals(False)
-        if count and rows != list(selection) and self.on_selection is not None:
-            self.on_selection(rows)  # moved outside the selection: it is now the current spectrum alone
+        self.slider.setEnabled(count > 0)
+        self.previous.setEnabled(index > 0)
+        self.following.setEnabled(index < count - 1)
+        self.label.setText(text)

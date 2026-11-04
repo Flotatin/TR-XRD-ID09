@@ -67,14 +67,15 @@ class AnalysisDialog(QDialog):
         self.current = QRadioButton(f"le spectre courant (n° {choices.current})")
         self.between = QRadioButton("du n°")
         self.first, self.last = QSpinBox(), QSpinBox()
-        for box, value in ((self.first, 0), (self.last, last)):
+        chosen = choices.selection  # the zone of spectra, as the indices of the batch in the v1
+        for box, value in ((self.first, chosen[0] if chosen else 0), (self.last, chosen[-1] if chosen else last)):
             box.setRange(0, last)
             box.setValue(value)
             box.valueChanged.connect(lambda *_: self.between.setChecked(True))
         group = QButtonGroup(self)
         for button in (self.every, self.current, self.between):
             group.addButton(button)
-        self.every.setChecked(True)
+        (self.between if chosen else self.every).setChecked(True)
         spectra = QGroupBox("Spectres")
         spectra_layout = QVBoxLayout(spectra)
         spectra_layout.addWidget(_row(self.every, self.current))
