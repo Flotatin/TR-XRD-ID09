@@ -513,6 +513,7 @@ class RateView(QWidget):
         self.copy.setToolTip("Copier le dP/dt moyen de chaque courbe (tableau pour un tableur)")
         self.copy.setEnabled(False)
         self.message = QLabel("")
+        self.message.setWordWrap(True)  # a long message must not widen the window
         self.message.setStyleSheet("color: #8a5a00")
         self.by.currentIndexChanged.connect(self._options_chosen)
         self.window.valueChanged.connect(self._options_chosen)
@@ -671,6 +672,7 @@ class CakeView(QWidget):
         self.mode.addItem("image brute", "image")
         self.mode.currentIndexChanged.connect(lambda i: self.on_mode and self.on_mode(self.mode.itemData(i)))
         self.message = QLabel("")
+        self.message.setWordWrap(True)  # a long message must not widen the window
         self.message.setStyleSheet("color: #8a5a00")
         self.panel = ImagePanel("cake", scale="log", histogram=False)  # narrow: the histogram is optional
         if link_to is not None:

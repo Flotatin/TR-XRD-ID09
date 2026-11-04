@@ -12,7 +12,7 @@ from trxrd.io.h5store import save_run  # noqa: E402
 
 @pytest.fixture
 def viewer(tmp_path, sample_run):
-    from trxrd.gui.app import create_viewer
+    from trxrd.gui.builder import create_viewer
     from trxrd.gui.views.main_window import application
 
     app = application(["test"])
@@ -69,7 +69,7 @@ def test_close_and_reopen(viewer):
 
 
 def test_shortcuts_are_unique():
-    from trxrd.gui.app import create_viewer
+    from trxrd.gui.builder import create_viewer
     from trxrd.gui.views.main_window import application
 
     application(["test"])
@@ -499,6 +499,17 @@ def test_image_limits_with_locked_proportions(viewer):
     panel.clear()
     assert box.state["limits"]["xLimits"] == [None, None]
     panel.close()
+
+
+def test_long_texts_do_not_widen_the_window(viewer):
+    """The window left a screen of 2560 pixels: the path in the status bar and the message of the dP/dt plot."""
+    window = viewer.window
+    width = window.minimumSizeHint().width()
+    window.set_status("F:/ESRF/" + "un dossier très long/" * 40)
+    window.dpdt.message.setText("dP/dt : pas assez de pressions ajustées (3 spectres au moins par courbe). " * 3)
+    window.cake.message.setText("Images brutes introuvables, fichier source déplacé. " * 5)
+    assert window.minimumSizeHint().width() == width
+    assert window.status_label.toolTip().startswith("F:/ESRF/")  # the whole path stays readable
 
 
 def test_peaks_with_the_mouse_on_the_spectrum(viewer, compression_run):

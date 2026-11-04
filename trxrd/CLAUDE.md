@@ -76,7 +76,8 @@ values). Never commit the user's data (raw scans, .CEDX) to the repository.
 | Treatment of the spectra (background, filter; one, all, selection), detection as the analysis sees it | `services/treatment.py`, `gui/presenters/treatment.py` |
 | Manual work on the phases and the peaks (add, move, fit, series from the current spectrum, copy the model), undo | `services/editing.py`, `gui/presenters/editing.py`, `Session.remember` |
 | GUI state (Qt-free) | `services/session.py` |
-| GUI (`trxrd-gui`): display data and presenters without Qt, passive views, actions, threads | `gui/presenters/`, `gui/views/`, `gui/actions.py`, `gui/tasks.py`, `gui/app.py` |
+| GUI (`trxrd-gui`): display data and presenters without Qt, passive views, actions, threads | `gui/presenters/`, `gui/views/`, `gui/actions.py`, `gui/tasks.py`, `gui/builder.py` |
+| Entry point, log file and error messages (keep `trxrd.gui.app:main`: Windows refuses an exe with a new content) | `gui/app.py` |
 | Raw data browsing, raw image and cake of a spectrum | `services/raw_data.py`, `services/images.py` |
 | Preview of a raw scan before integration (whole detector, 2θ range) | `services/images.ScanPreview`, `gui/presenters/preview.py`, `gui/views/preview.py` |
 | GUI image display (histogram, log/linear/sqrt, colour map) | `gui/views/images.py` (`ImagePanel`) |

@@ -1,7 +1,7 @@
 """PySide6 + pyqtgraph interface of TR-XRD v2 (MVP over services.Session).
 
 presenters/: no Qt, testable with fake views; views/: passive widgets;
-app.py: builds the window and wires actions to the presenters.
+builder.py: builds the window and wires actions to the presenters; app.py: entry point, errors to a log file.
 Start it with `trxrd-gui [run file]` or `python -m trxrd.gui`.
 """
 

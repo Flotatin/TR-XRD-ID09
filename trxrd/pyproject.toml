@@ -32,7 +32,7 @@ dev = ["pytest>=7", "matplotlib>=3.7"]
 trxrd = "trxrd.cli:main"
 
 [project.gui-scripts]
-trxrd-gui = "trxrd.gui.app:main"  # needs the [gui] extra
+trxrd-gui = "trxrd.gui.app:main"  # needs the [gui] extra; do not rename: see gui/app.py
 
 [tool.setuptools.packages.find]
 where = ["src"]

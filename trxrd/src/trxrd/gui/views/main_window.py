@@ -8,8 +8,8 @@ from typing import Callable, Optional, Sequence
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QCloseEvent, QGuiApplication
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QDialog, QFileDialog, QLabel, QMainWindow, QMessageBox, QProgressDialog, QSplitter,
-    QTabWidget, QVBoxLayout,
+    QApplication, QComboBox, QDialog, QFileDialog, QLabel, QMainWindow, QMessageBox, QProgressDialog, QSizePolicy,
+    QSplitter, QTabWidget, QVBoxLayout,
 )
 
 from trxrd.gui.actions import ActionRegistry
@@ -75,6 +75,8 @@ class MainWindow(QMainWindow):
         self.units = QComboBox()
         self.units.currentIndexChanged.connect(self._unit_chosen)
         self.status_label = QLabel()
+        # a long path is cut, not imposed on the window, which would leave the screen
+        self.status_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.statusBar().addPermanentWidget(self.status_label, 1)
 
     # ------------------------------------------------------------------ built once the actions exist
@@ -110,6 +112,7 @@ class MainWindow(QMainWindow):
 
     def set_status(self, text: str) -> None:
         self.status_label.setText(text)
+        self.status_label.setToolTip(text)
 
     def set_units(self, available: Sequence[str], current: str) -> None:
         self.units.blockSignals(True)

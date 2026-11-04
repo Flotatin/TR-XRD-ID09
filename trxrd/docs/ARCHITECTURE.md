@@ -150,8 +150,9 @@ trxrd/
 │       │                       calibration.py, main_window.py
 │       ├── actions.py          registre unique des QAction (menus, barre d'outils, raccourcis)
 │       ├── tasks.py            calculs longs dans un thread, résultat rendu au thread de l'interface
-│       └── app.py              assemblage : fenêtre + presenters + actions
-└── tests/                      247 tests ; data/ = scan TUTO, calibration, ancien fichier .CEDX d'exemple
+│       ├── builder.py          assemblage : fenêtre + presenters + actions
+│       └── app.py              point d'entrée léger : journal et affichage des erreurs (sans console)
+└── tests/                      254 tests ; data/ = scan TUTO, calibration, ancien fichier .CEDX d'exemple
 ```
 
 ## 5. Le format de fichier `trxrd-run` (HDF5)
@@ -838,6 +839,19 @@ on ne peut pas dézoomer au-delà des données de chaque graphe, avec 3 % de mar
 - Sur une image à proportions verrouillées, une limite stricte couperait l'image dès que la fenêtre n'a pas les
   mêmes proportions. La limite tient donc compte de la forme de la fenêtre, et se recalcule à chaque
   redimensionnement.
+
+**Démarrage et erreurs** (`gui/app.py`) : `trxrd-gui.exe` n'a pas de console, et une erreur, même à l'import,
+ne laissait aucune trace. Le point d'entrée reste léger et n'importe l'interface (`builder.py`) qu'une fois le
+journal ouvert. Chaque démarrage, les avertissements et les erreurs vont dans
+`%LOCALAPPDATA%\trxrd\trxrd-gui.log` (1 Mo, une sauvegarde). Une erreur non traitée, y compris dans un
+slot Qt, s'affiche dans une fenêtre, une seule fois par message.
+
+**Ne pas renommer le point d'entrée `trxrd.gui.app:main`.** Le contrôle intelligent des applications de Windows
+est actif sur le poste de l'utilisateur : il refuse un exécutable non signé dont le contenu est nouveau
+(« bloqué par la stratégie Device Guard », événements 3033 et 3077 du journal CodeIntegrity). Or le nom du point
+d'entrée est écrit dans `trxrd-gui.exe`. Avec `trxrd.gui.launch:main`, le nouvel `.exe` a été refusé ; revenu à
+`trxrd.gui.app:main`, il a de nouveau été accepté, comme `trxrd.exe`, régénéré avec le même contenu. Si
+l'exécutable est refusé, `python -m trxrd.gui` lance la même chose.
 
 **Ensuite** :
 - étape 3 (suite) : zones d'ajustement et zones exclues dessinées à la souris, note du run

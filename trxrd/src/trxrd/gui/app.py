@@ -1,137 +1,96 @@
-"""Entry point of the GUI: builds the window, the presenters and the actions.
+"""Entry point of `trxrd-gui`: the executable has no console, so errors must go somewhere.
 
-    trxrd-gui [run.trxrd.h5 | old.CEDX]
-    python -m trxrd.gui [file]
+Without this module an error at start, even an import error, leaves no trace.
+It stays light (the GUI, builder.py, is imported inside `main`). Each start, the
+warnings and the errors go to a log file, and errors are shown in a message box.
+
+Keep the name `trxrd.gui.app:main`: it is written in trxrd-gui.exe, and Smart App
+Control (Windows) refuses an executable with a new content ("Device Guard").
 """
 
 from __future__ import annotations
 
-import argparse
+import logging
+import os
+import platform
 import sys
-from dataclasses import dataclass
-from typing import List, Optional, Sequence
+import traceback
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
+from typing import Optional, Sequence, Set
 
-from trxrd import __version__
-from trxrd.gui.presenters.analysis import AnalysisPresenter
-from trxrd.gui.presenters.editing import EditingPresenter, PeaksPresenter
-from trxrd.gui.presenters.treatment import DetectionPresenter, ProcessingPresenter
-from trxrd.gui.presenters.viewer import (
-    CakePresenter, DisplaySettings, EvolutionPresenter, MainPresenter, MapPresenter, NavigatorPresenter,
-    RatePresenter, RateSettings, SpectrumPresenter, TablesPresenter,
-)
-from trxrd.gui.tasks import ThreadRunner
-from trxrd.gui.views.main_window import MainWindow, application
-from trxrd.services.session import Session
-
-FILE, EDIT, NAVIGATION, VIEW, ANALYSIS, TOOLS, HELP = ("&Fichier", "&Édition", "&Navigation", "&Affichage", "A&nalyse",
-                                                       "&Outils", "&Aide")
+logger = logging.getLogger("trxrd")
+MAX_LOG_BYTES = 1_000_000
+_shown: Set[str] = set()  # an error raised at every repaint must not open a message box each time
+_handler: Optional[logging.Handler] = None
 
 
-@dataclass
-class Viewer:
-    session: Session
-    settings: DisplaySettings
-    window: MainWindow
-    main: MainPresenter
-    analysis: AnalysisPresenter
-    editing: EditingPresenter
-    peaks: PeaksPresenter
-    presenters: List[object]
+def log_path() -> Path:
+    return Path(os.environ.get("LOCALAPPDATA") or Path.home()) / "trxrd" / "trxrd-gui.log"
 
 
-def create_viewer(session: Optional[Session] = None, runner=None) -> Viewer:
-    """The whole viewer; `runner` runs the long tasks (default: a worker thread)."""
-    session = session or Session()
-    settings = DisplaySettings()
-    window = MainWindow()
-    runner = runner or ThreadRunner()
-    cake = CakePresenter(session, settings, window.cake, runner)
-    rate_settings = RateSettings()  # dP/dt: shared by the evolution and dP/dt plots (interval of the mean)
-    presenters = [
-        SpectrumPresenter(session, settings, window.spectrum),
-        cake,
-        EvolutionPresenter(session, window.evolution, rate_settings),
-        RatePresenter(session, window.dpdt, rate_settings),
-        MapPresenter(session, settings, window.map),
-        TablesPresenter(session, window.phases, window.peaks),
-        NavigatorPresenter(session, window.navigator),
-        ProcessingPresenter(session, window.processing),
-        DetectionPresenter(session, settings, window.detection, window.spectrum),
-    ]
-    main = MainPresenter(session, settings, window, runner, version=__version__)
-    analysis = AnalysisPresenter(session, window, runner)
-    editing = EditingPresenter(session, window.phases, window, runner)
-    peaks = PeaksPresenter(session, settings, window.peaks, window.spectrum, window.phases)
-    window.on_close_request = main.may_discard
-    window.on_unit = main.set_unit
+def start_log() -> None:
+    """Warnings and errors of every module go to the log file; a full disk must not stop the program."""
+    global _handler
+    if _handler is not None:
+        return
+    try:
+        path = log_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _handler = RotatingFileHandler(path, maxBytes=MAX_LOG_BYTES, backupCount=1, encoding="utf-8")
+    except OSError:
+        return
+    _handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    logging.getLogger().addHandler(_handler)
+    logger.setLevel(logging.INFO)
 
-    add = window.actions.add
-    add("new_run", FILE, "&Nouveau run depuis RAW_DATA…", main.new_run, ["Ctrl+N"],
-        "Intégrer des scans bruts (images Jungfrau + oscilloscope du fichier maître) en nouveaux runs")
-    add("open", FILE, "&Ouvrir…", main.open, ["Ctrl+O"], "Ouvrir un run .trxrd.h5 ou un ancien fichier .CEDX")
-    add("save", FILE, "&Enregistrer", main.save, ["Ctrl+S", "F3"], "Enregistrer le run (.trxrd.h5)")
-    add("save_as", FILE, "Enregistrer &sous…", main.save_as, ["Ctrl+Shift+S"])
-    add("close", FILE, "&Fermer le run", main.close, ["Ctrl+W"])
-    add("quit", FILE, "&Quitter", window.close, ["Ctrl+Q"])
-    add("undo", EDIT, "&Annuler", main.undo, ["Ctrl+Z"])
-    add("redo", EDIT, "&Rétablir", main.redo, ["Ctrl+Y", "Ctrl+Shift+Z"])
-    add("copy_model", EDIT, "&Copier le modèle du spectre", editing.copy, ["Ctrl+Shift+C"],
-        "Phases et pics libres du spectre courant, à coller sur d'autres spectres")
-    add("paste_model", EDIT, "C&oller le modèle sur la sélection", editing.paste, ["Ctrl+Shift+V"])
-    add("edit_peaks", EDIT, "Modifier les &pics à la souris", lambda: window.peaks.edit.setChecked(window.actions.get("edit_peaks").isChecked()),
-        ["Ctrl+E"], checkable=True, tip="Poignées sur les pics du modèle ; Ctrl + clic pour ajouter un pic")
-    add("delete_peak", EDIT, "&Supprimer le pic choisi", peaks.remove, ["Del"])
-    window.actions.get("delete_peak").setEnabled(False)  # the key stays free for the fields otherwise
-    window.peaks.edit.toggled.connect(window.actions.get("edit_peaks").setChecked)
-    window.peaks.edit.toggled.connect(window.actions.get("delete_peak").setEnabled)
-    add("previous", NAVIGATION, "Spectre &précédent", lambda: main.step(-1), ["Ctrl+Left", "PgUp"])
-    add("next", NAVIGATION, "Spectre &suivant", lambda: main.step(+1), ["Ctrl+Right", "PgDown"])
-    add("first", NAVIGATION, "P&remier spectre", main.first, ["Ctrl+Home"])
-    add("last", NAVIGATION, "&Dernier spectre", main.last, ["Ctrl+End"])
-    add("unit_2th", VIEW, "Axe en &2θ", lambda: main.set_unit("2th_deg"), ["Ctrl+1"], checkable=True)
-    add("unit_q", VIEW, "Axe en &Q (Å⁻¹)", lambda: main.set_unit("q_A^-1"), ["Ctrl+2"], checkable=True)
-    add("unit_d", VIEW, "Axe en &d (Å)", lambda: main.set_unit("d_A"), ["Ctrl+3"], checkable=True)
 
-    def toggle_cake() -> None:
-        shown = window.actions.get("cake").isChecked()
-        window.cake.setVisible(shown)
-        window.align_plots()
-        cake.set_visible(shown)  # nothing is computed while it is hidden
+def stop_log() -> None:
+    global _handler
+    if _handler is not None:
+        logging.getLogger().removeHandler(_handler)
+        _handler.close()
+        _handler = None
 
-    add("raw", VIEW, "Signal &brut (avec le fond)", lambda: settings.set_raw(window.actions.get("raw").isChecked()),
-        ["Ctrl+B"], checkable=True,
-        tip="Par défaut le spectre est montré filtré, fond soustrait : c'est sur ce signal qu'on cherche les pics")
-    add("guides", VIEW, "Raies sur le spec&tre", lambda: window.spectrum.set_guides(window.actions.get("guides").isChecked()),
-        ["Ctrl+G"], checkable=True, tip="Traits verticaux des raies attendues à travers le spectre, à tout zoom")
-    window.actions.get("guides").setChecked(True)
-    add("cake", VIEW, "&Intégration sous le spectre (cake)", toggle_cake, ["Ctrl+K"], checkable=True,
-        tip="Cake (2θ × azimut) ou image brute du spectre courant, calculé depuis les images de RAW_DATA")
-    window.actions.get("cake").setChecked(True)
-    add("auto", ANALYSIS, "Analyse &automatique…", analysis.start, ["Ctrl+R"],
-        "Détecter les pics, trouver les phases et leurs pressions, ajuster (Pearson IV), avec suivi des pics")
-    add("fit", ANALYSIS, "A&juster le spectre", editing.fit, ["Ctrl+F"],
-        "Ajuster les pics du spectre courant, puis sa maille et sa pression")
-    add("fit_selection", ANALYSIS, "Ajuster la &sélection", lambda: editing.fit_series("selection", window.phases.follow.isChecked()),
-        ["Ctrl+Shift+F"], "Ajuster la sélection de la liste, à partir du spectre courant")
-    add("calibration", TOOLS, "&Calibration du détecteur…", window.show_calibration, ["Ctrl+L"],
-        "Calibrer la géométrie sur une image de LaB6 / CeO2 et enregistrer le .poni")
-    add("shortcuts", HELP, "&Raccourcis clavier", window.show_shortcuts, ["F1"])
-    window.build_menus(toolbar=("new_run", "open", "save", "|", "previous", "next", "|", "raw", "auto"))
-    main.update()  # the unit actions exist now
-    return Viewer(session, settings, window, main, analysis, editing, peaks, presenters)
+
+def show_error(text: str) -> None:
+    """A message box, even when Qt could not be started."""
+    try:
+        from PySide6.QtWidgets import QApplication, QMessageBox
+
+        if QApplication.instance() is not None:
+            QMessageBox.critical(None, "TR-XRD v2", text)
+            return
+    except Exception:  # Qt itself may be what fails
+        logger.exception("no Qt message box")
+    if sys.platform == "win32":
+        import ctypes
+
+        ctypes.windll.user32.MessageBoxW(None, text, "TR-XRD v2", 0x10)
+
+
+def report(kind, value, trace) -> None:
+    """Log an uncaught error and show it (sys.excepthook: also the errors raised in Qt slots)."""
+    if issubclass(kind, KeyboardInterrupt):
+        sys.__excepthook__(kind, value, trace)
+        return
+    logger.critical("uncaught error\n%s", "".join(traceback.format_exception(kind, value, trace)))
+    message = f"{kind.__name__}: {value}"
+    if message not in _shown:
+        _shown.add(message)
+        show_error(f"{message}\n\nDétails dans {log_path()}")
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
-    parser = argparse.ArgumentParser(prog="trxrd-gui", description=f"TR-XRD v2 ({__version__}): viewer")
-    parser.add_argument("run", nargs="?", help=".trxrd.h5 run file or old .CEDX file")
-    args, qt_args = parser.parse_known_args(argv)
-    app = application([sys.argv[0], *qt_args])
-    viewer = create_viewer()
-    viewer.window.show()
-    if args.run:
-        viewer.main.open(args.run)
-    return app.exec()
+    start_log()
+    logger.info("start: %s, Python %s, %s", sys.argv, platform.python_version(), sys.executable)
+    sys.excepthook = report
+    try:
+        from trxrd.gui.builder import run
 
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+        code = run(argv)
+    except Exception:
+        report(*sys.exc_info())
+        return 1
+    logger.info("end: exit code %s", code)
+    return code

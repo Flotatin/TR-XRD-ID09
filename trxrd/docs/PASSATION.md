@@ -71,8 +71,8 @@ Ne pas les remettre en cause sans lui en parler.
 
 ### 3.2 Par fonctionnalité
 
-Tout est testé : `python -m pytest trxrd` compte 247 tests. Les 7 comparaisons numériques avec la v1 sont
-ignorées quand la v1 n'est pas importable, par exemple dans `.venv-v2`, qui n'a pas PyQt5 : 240 tests
+Tout est testé : `python -m pytest trxrd` compte 254 tests. Les 7 comparaisons numériques avec la v1 sont
+ignorées quand la v1 n'est pas importable, par exemple dans `.venv-v2`, qui n'a pas PyQt5 : 247 tests
 passent alors.
 
 | Fonctionnalité | Où | État / preuve |
@@ -212,6 +212,12 @@ run par run, avec une passe sans exclusion puis une passe avec les zones fixes r
     plonge sous zéro par effet de bord (−3 800 pour 300 sur des raies de 0,94°). Il faut alors régler la
     fenêtre du fond, un peu plus large que les pics. La fenêtre d'ajustement doit aussi suivre leur
     largeur, sans toucher les raies cristallines : une largeur à mi-hauteur, pas 1,5.
+25. **Ne pas changer le contenu de `trxrd-gui.exe`.** Le contrôle intelligent des applications de Windows
+    refuse un `.exe` non signé dont le contenu est nouveau (« Device Guard »). Le nom du point d'entrée est écrit
+    dedans : garder `trxrd.gui.app:main` (`docs/ARCHITECTURE.md` §9). En cas de refus : `python -m trxrd.gui`. Pour
+    voir ce qui se passe au lancement : `%LOCALAPPDATA%\trxrd\trxrd-gui.log`, et le journal CodeIntegrity.
+26. **Un long texte élargit toute la fenêtre.** Le message de dP/dt et le chemin de la barre d'état l'amenaient
+    à 2 196 pixels, hors de l'écran : retour à la ligne, ou texte coupé avec une infobulle.
 
 ## 6. Reste à faire (par priorité)
 
@@ -256,6 +262,10 @@ Seul `trxrd/gui/` a le droit d'importer PySide6/pyqtgraph (règle vérifiée par
   est faux de 4,4 mm sur la distance (glace Ih décompressée à −0,55 GPa). Savoir sur quelle image et avec
   quels anneaux il a été fait ; ajouter une vérification (glace Ih ou calibrant intégré, écart des raies) ;
 - [ ] traitement de tous les spectres dans un thread (3,2 s pour 1 600 spectres, l'interface est bloquée) ;
+- [ ] « le script ne se lance plus avec l'exe » (4 novembre 2026) : cause non trouvée. Lancé depuis les outils de
+  Claude, l'exécutable démarre, avec ou sans fichier, et aucun blocage ni plantage n'était inscrit dans les
+  journaux de Windows. Regarder `trxrd-gui.log` au prochain échec. Vu une seule fois, non reproduit : avec
+  D2O_03, le processus ne s'est pas terminé après la fermeture ;
 - [x] pics larges (liquides) : fenêtre du fond SNIP réglable (format 1.1), largeur max de la détection,
   seuil des pics larges de la recherche (« jamais »), fenêtre d'ajustement qui suit la largeur des pics.
   Reste à essayer sur un vrai liquide (Ga liquide de janvier 2026, fiche `Ga_liq`) ;
