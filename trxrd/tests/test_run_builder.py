@@ -100,3 +100,18 @@ def test_build_and_save(tmp_path, raw_root):
     with pytest.raises(Cancelled):
         build_and_save(scan, tmp_path / "stopped", DATA / "calib_THT8_correct_samedi.poni", progress=lambda d, n: d < 2)
     assert not (tmp_path / "stopped").exists()
+
+
+def test_the_treatment_is_kept_whole(tmp_path, bliss_dataset):
+    """The background window, for broad peaks, used to be left out."""
+    from conftest import DATA
+    from trxrd.domain import Processing
+    from trxrd.io.calibration import calibration_from_files
+    from trxrd.services.run_builder import build_run
+
+    calibration = calibration_from_files(DATA / "calib_THT8_correct_samedi.poni", DATA / "scan_jf1m_0000.mask",
+                                         two_theta_range=(8, 25))
+    processing = Processing(3, "svg", (11, 3), baseline_window=1.0)
+    run = build_run(bliss_dataset, calibration, processing=processing)
+    assert run.spectra[0].processing == processing and run.spectra[0].processing is not processing
+    assert run.spectra[0].processing is not run.spectra[1].processing

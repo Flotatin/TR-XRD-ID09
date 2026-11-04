@@ -75,7 +75,10 @@ values). Never commit the user's data (raw scans, .CEDX) to the repository.
 | Analysis as the user asks for it (settings kept in the run, work on a copy, static peaks), GUI and CLI | `services/analysis.py`, `gui/presenters/analysis.py` |
 | Treatment of the spectra (background, filter; one, all, selection), detection as the analysis sees it | `services/treatment.py`, `gui/presenters/treatment.py` |
 | Manual work on the phases and the peaks (add, move, fit, series from the current spectrum, copy the model), undo | `services/editing.py`, `gui/presenters/editing.py`, `Session.remember` |
-| Zones: fit zone of a spectrum, excluded zones of the run, zone of spectra of the dDAC plots (= interval of the mean dP/dt, and the only way to choose several spectra: no list of the spectra, a slider between two arrows) | `editing.set_fit_range`, `analysis.merged_zones`, `gui/presenters/zones.py`, `gui/views/zones.py`, `plots.drag_draws` |
+| Zones: fit zone of a spectrum, excluded zones of the run, zone of spectra of the dDAC plots (= interval of the mean dP/dt) | `editing.set_fit_range`, `analysis.merged_zones`, `gui/presenters/zones.py`, `gui/views/zones.py`, `plots.drag_draws` |
+| Spectra: slider between two arrows, list in a tab; the selection comes from the list or the zone, never from moving the current spectrum | `gui/views/panels.py`, `SpectraListPresenter`, `SpectraZonePresenter` |
+| Over the cake and the image: lines of the phases, 2θ chosen with a click (line, or exact arc) | `CakePresenter`, `gui/views/plots.py` (`CakeView`), `processing/geometry.iso_curve`, `FrameSource.ring` |
+| Live mode: follow the raw data, analyse each new scan; only the switch on screen waits | `services/live.py`, `gui/presenters/live.py`, `gui/views/live.py` |
 | GUI state (Qt-free) | `services/session.py` |
 | GUI (`trxrd-gui`): display data and presenters without Qt, passive views, actions, threads | `gui/presenters/`, `gui/views/`, `gui/actions.py`, `gui/tasks.py`, `gui/builder.py` |
 | Entry point, log file and error messages (keep `trxrd.gui.app:main`: Windows refuses an exe with a new content) | `gui/app.py` |
@@ -89,5 +92,5 @@ values). Never commit the user's data (raw scans, .CEDX) to the repository.
 ## Next steps
 
 See `docs/PASSATION.md` §6 (P1: GUI, viewer + run creation + cake + calibration + dDAC panel + raw-scan preview +
-automatic analysis + manual work and custom fit of phases and peaks + zones with the mouse done, next: mask editing, note of the run; P2: remaining validation items; P4: v1 features not ported yet;
+automatic analysis + manual work and custom fit of phases and peaks + zones with the mouse + Live mode done, next: mask editing, note of the run; P2: remaining validation items; P4: v1 features not ported yet;
 P5: algorithm ideas; P6: repository split).

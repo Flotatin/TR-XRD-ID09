@@ -140,21 +140,22 @@ trxrd/
 │   │   ├── rates.py            ✅ dP/dt par échantillon ou par phase, dP/dt moyen sur un intervalle
 │   │   ├── treatment.py        ✅ traitement des spectres (fond, filtre), détection telle que l'analyse la voit
 │   │   ├── editing.py          ✅ travail manuel : phases d'un spectre, ajustement d'une série, modèle copié
+│   │   ├── live.py             ✅ mode Live : surveillance du dossier, intégration et analyse de chaque nouveau scan
 │   │   └── session.py          ✅ état de l'application pour le GUI (run courant, sélection, événements)
 │   ├── notebook.py             ✅ XRDRun : lecture seule pour notebooks
 │   ├── cli.py                  ✅ trxrd build | auto | compare | convert | info
 │   └── gui/                    ✅ lecteur PySide6 + pyqtgraph (§9) : `trxrd-gui`
 │       ├── presenters/         display.py (données affichées), viewer.py, preview.py, analysis.py, treatment.py,
-│       │                       editing.py, zones.py, calibration.py
+│       │                       editing.py, zones.py, live.py, calibration.py
 │       │                       (presenters), sans Qt
 │       ├── views/              plots.py (spectre, cake, grandeurs(t), carte), images.py (échelle, niveaux, couleurs),
-│       │                       panels.py, new_run.py, preview.py, analysis.py, treatment.py, editing.py, zones.py,
+│       │                       panels.py, new_run.py, preview.py, analysis.py, treatment.py, editing.py, zones.py, live.py,
 │       │                       calibration.py, main_window.py
 │       ├── actions.py          registre unique des QAction (menus, barre d'outils, raccourcis)
 │       ├── tasks.py            calculs longs dans un thread, résultat rendu au thread de l'interface
 │       ├── builder.py          assemblage : fenêtre + presenters + actions
 │       └── app.py              point d'entrée léger : journal et affichage des erreurs (sans console)
-└── tests/                      315 tests ; data/ = scan TUTO, calibration, ancien fichier .CEDX d'exemple
+└── tests/                      403 tests ; data/ = scan TUTO, calibration, ancien fichier .CEDX d'exemple
 ```
 
 ## 5. Le format de fichier `trxrd-run` (HDF5)
@@ -560,7 +561,7 @@ Architecture **MVP** au-dessus de `services.Session` :
 **Le lecteur (étape 1)** :
 - ouvrir un `.trxrd.h5` ou un ancien `.CEDX`, en arrière-plan (~2 s pour les 1 600 spectres de
   Water01_scan0074) ; un `.CEDX` est converti en mémoire et s'enregistre en `.trxrd.h5` à côté ;
-- curseur des spectres, entre deux flèches (flèche maintenue : défilement) ;
+- curseur des spectres, entre deux flèches (flèche maintenue : défilement), et leur liste dans un onglet ;
 - spectre courant : données, fond, ajustement, et sous le diagramme une rangée de traits par phase, aux
   positions attendues à sa pression, de hauteur proportionnelle à l'intensité de la fiche (hkl au survol).
   Le zoom est gardé d'un spectre à l'autre ;
@@ -644,8 +645,8 @@ Architecture **MVP** au-dessus de `services.Session` :
 
 **Étape 2, deuxième partie : panneau dDAC et images (novembre 2026)**. La fenêtre reprend la disposition de
 la v1 :
-- à gauche, le curseur des spectres et, en onglets, les phases, les pics, le traitement, la détection et les
-  zones ;
+- à gauche, le curseur des spectres et, en onglets, leur liste, les phases, les pics, le traitement, la détection
+  et les zones ;
 - au centre, le spectre et son cake ;
 - à droite, le panneau dDAC de la v1, de haut en bas : une grandeur de chaque phase en fonction du temps,
   dP/dt, et la carte des diffractogrammes intégrés (temps en x, 2θ / Q / d en y). Les trois graphes
@@ -713,7 +714,7 @@ limité à `io`, `domain` et `physics` (`tests/test_architecture.py`).
   - les phases candidates du run, cochées par défaut, avec leur plage de pression. On peut ajouter un
     dossier de fiches : les fiches du run restent prioritaires (PASSATION §5, point 9), mais la recherche prend la
     plage de P de la bibliothèque, comme `trxrd auto --library` ;
-  - les spectres : tous, le spectre courant, ou une plage, celle de la zone de spectres s'il y en a une ;
+  - les spectres : tous, le spectre courant, une plage, ou la sélection s'il y en a une, proposée d'emblée ;
   - la plage de P, la température, les zones exclues (`18.48:18.68; 21.1:21.3`, virgule ou point) ;
   - des réglages avancés, repliés par défaut : plage 2θ, tolérance, nombre de phases, seuil, écart et saut
     de P, suivi des pics.
@@ -754,7 +755,7 @@ sur D2O_03_0001_scan0006 ; `services/treatment.py`, `gui/presenters/treatment.py
   travers le spectre (Affichage > Raies sur le spectre, Ctrl+G).
 - **Onglet Traitement** : lissage du fond SNIP et filtre (Savitzky-Golay, FFT ou aucun) du spectre courant.
   Un changement s'applique tout de suite à ce spectre (au cas par cas). On le propage ensuite à tous les
-  spectres, ou à la sélection (la zone de spectres). Les paramètres impossibles (fenêtre
+  spectres, ou à la sélection (onglet Liste, ou zone de spectres). Les paramètres impossibles (fenêtre
   paire, ordre trop grand...) sont refusés avec un message, et le spectre ne change pas. Les ajustements
   déjà faits sont gardés, mais ils l'ont été avec l'ancien fond : il faut les refaire. Appliquer un
   traitement aux 1 600 spectres de Water01_scan0074 prend 3,2 s ; ce calcul bloque encore l'interface.
@@ -769,7 +770,7 @@ sur D2O_03_0001_scan0006 ; `services/treatment.py`, `gui/presenters/treatment.py
   - les zones exclues restent visibles en rouge, avec ou sans cet onglet (voir **Zones**).
 
   Le tableau donne 2θ, SNR, hauteur, largeur et la raison d'un rejet.
-- **Sélection** (`Session.selection`) : les spectres de la zone de spectres (voir **Zones**).
+- **Sélection** (`Session.selection`) : les spectres choisis dans la liste ou par la zone (voir **Liste et curseur**).
 
 Ce qu'on a appris sur D2O_03_0001_scan0006 :
 - **La calibration était fausse.** Le `.poni` fait ce jour-là avec l'outil de la v2 (`test.poni`) donne
@@ -878,14 +879,11 @@ format ne change pas, tout était déjà stocké.
   chevauchent sont réunies (`merged_zones`). La zone d'ajustement et les zones exclues sont en 2θ : `from_unit` y
   ramène ce qu'on trace en Q ou en d, où l'axe s'inverse.
 - **Zone de spectres.** Comme dans la v1, c'est une seule zone pour les trois graphes : elle sert à la fois au dP/dt
-  moyen et à choisir les spectres, ce qui évite deux bandes superposées. C'est le seul moyen d'en choisir plusieurs
-  (`SpectraZonePresenter`) : ajuster, coller, vider, traiter, et l'analyse automatique, qui la propose comme plage, comme
-  les indices du lot de la v1. Sans zone, rien n'est sélectionné : une sélection que rien ne montre agirait sur des
-  spectres qu'on n'a plus en tête. On peut parcourir les spectres, même hors de la zone, sans la perdre ; sous le curseur,
-  on lit « sélection : 3 à 9 (7 spectres) ». Le spectre courant reste le départ d'une série : hors de la zone, il est
-  ajusté aussi, et son modèle y entre. `region_of` s'arrête à mi-chemin du spectre voisin, pour ne prendre que les spectres
-  voulus ; `mean_dpdt` n'utilise que les spectres dedans, donc les pentes n'en dépendent pas. Elle marche aussi sans
-  temps (en numéro de spectre), où il n'y a pas de dP/dt moyen.
+  moyen et à choisir les spectres, ce qui évite deux bandes superposées (`SpectraZonePresenter` ; voir **Liste et
+  curseur**). Le spectre courant reste le départ d'une série : hors de la zone, il est ajusté aussi, et son modèle y
+  entre. `region_of` s'arrête à mi-chemin du spectre voisin, pour ne prendre que les spectres voulus ; `mean_dpdt`
+  n'utilise que les spectres dedans, donc les pentes n'en dépendent pas. Elle marche aussi sans temps (en numéro de
+  spectre), où il n'y a pas de dP/dt moyen.
 - **Tracer.** `plots.drag_draws` reprend le glissement de la vue quand Maj est tenue au début du geste ; un Maj relâché
   en route ne le coupe pas.
 
@@ -893,12 +891,53 @@ Sur Water01_scan0074 (1 600 spectres) : 28 ms par déplacement de la zone (47 au
 0,2 s pour donner une zone d'ajustement à tous. Water05 scan 9 est inchangé (15/16, glaces ≤ 0,029 GPa,
 Sn 0,169 GPa).
 
-**Curseur des spectres** (`Navigator`, demandé par l'utilisateur) : la liste des spectres (numéro, temps, phases) prenait
-le haut de la colonne pour peu de chose : le temps est dans le titre du spectre, les phases dans l'onglet Phases, et leur
-évolution sur P(t). Elle laisse la place à un curseur entre deux flèches, ce qui rend inutiles les boutons
-précédent / suivant de la barre d'outils (les touches et le menu Navigation restent). Les onglets gagnent 340 pixels de haut.
-On ne peut plus choisir des spectres non contigus (3, 7 et 12) : aucune demande en ce sens, et la zone couvre l'usage de la
-v1, qui n'avait qu'un intervalle.
+**Liste et curseur** (`Navigator`, `SpectraList`, demandés par l'utilisateur) : en haut de la colonne, un curseur entre
+deux flèches (les boutons précédent / suivant de la barre d'outils ont disparu ; les touches et le menu Navigation
+restent), et sous lui « sélection : 3 à 9 (7 spectres) ». La liste des spectres (numéro, temps, phases) est dans l'onglet
+Liste : elle prenait le haut de la colonne, mais elle reste utile pour choisir des spectres, même non contigus. Le nom
+est court pour que les six onglets tiennent sans défilement. Les règles de la sélection :
+- seuls la liste (plusieurs lignes) et la zone de spectres la changent, jamais le déplacement du spectre courant (curseur,
+  touches, graphes). Comme elle reste écrite sous le curseur, elle n'est jamais invisible ;
+- une seule ligne cliquée va à ce spectre et vide la sélection, comme dans toute liste. S'il y a une zone, elle reste :
+  il faut plusieurs lignes pour la déplacer ;
+- la zone et la liste se suivent, sans écho. Des spectres non contigus restent tels quels, la zone les enjambe. La zone
+  retirée, la sélection part avec elle ;
+- elle sert à ajuster, coller, vider, traiter, et à l'analyse automatique, qui la propose d'emblée et la prend telle
+  quelle (dans la v1, la zone remplissait les indices du lot).
+
+**Sur le cake et l'image** (`CakePresenter`, `CakeView`, `processing/geometry.iso_curve`, `FrameSource.ring`, repris de la
+v1) :
+- Les raies des phases sont en pointillés sur le cake, avec le seuil de celles du spectre (5 %), et Ctrl+G montre ou cache
+  les deux. Elles suivent la pression sans recalculer le cake.
+- Un clic sur le spectre, le cake ou l'image pose un repère 2θ : un trait sur le spectre (avec sa valeur) et sur le cake,
+  un arc sur l'image. Il reste d'un spectre à l'autre pour suivre un anneau, et Échap l'efface. Ce n'est pas une
+  modification : rien à enregistrer ni à annuler. Sur l'image, un clic donne le 2θ du pixel.
+- L'arc n'est pas un cercle. La v1 traçait un cercle de rayon lu sur une ligne de pixels ; ici c'est la courbe
+  2θ = constante, à partir du 2θ de chaque pixel, donc juste avec un détecteur incliné et le faisceau hors du détecteur.
+  Les points de croisement sont interpolés entre pixels voisins, triés par azimut, et séparés par un NaN quand la courbe
+  quitte le détecteur. C'est vectorisé, sans `silx` (bloqué par Windows, PASSATION §5, point 21). Sur D2O_03 : 11 ms,
+  1 649 points, à ±0,012° du 2θ demandé (un pixel fait environ 0,02°). La carte des angles se calcule une fois (0,13 s).
+
+**Mode Live** (Outils, ou le bouton de la barre d'outils ; `services/live.py`, `gui/presenters/live.py`, `gui/views/live.py`) :
+pendant l'expérience, le dossier choisi (le jeu de données du run affiché par défaut, ou un échantillon, ou tout RAW_DATA) est
+regardé toutes les 2 s. Chaque nouveau scan reprend ce que le run affiché a au moment où il arrive : calibration, phases,
+traitement, réglages de l'analyse, zones. Là où la v1 gardait les jauges et ajustait un spectre, l'analyse automatique les suit
+à travers le scan, qui en compte plusieurs. Les phases candidates sont celles choisies pour l'analyse, ou sinon celles sur
+lesquelles l'utilisateur a travaillé. On peut aussi se contenter de l'intégration.
+- **Un fichier en cours d'écriture est laissé tranquille** : un scan n'est lu que si sa taille et sa date n'ont pas bougé
+  entre deux regards. S'il reste illisible (fichier verrouillé), il est repris deux fois, puis laissé de côté avec un message.
+- **Rien n'est perdu.** Le scan est intégré, analysé et enregistré tout de suite, dans son propre fichier. Seul le passage
+  à l'écran attend : modifications non enregistrées du run affiché, dialogue ou calcul en cours. Si plusieurs scans sont
+  arrivés entre-temps, le dernier s'ouvre, et tous sont enregistrés.
+- **Rien n'est écrasé.** Le brut n'est que lu, et un scan déjà analysé dans le dossier de sortie est ouvert tel quel.
+- Arrêter (ou fermer la fenêtre) stoppe le scan en cours, qui n'est pas enregistré. Un scan terminé juste après l'arrêt reste
+  dans son fichier, mais ne s'ouvre pas.
+
+Essai de bout en bout, avec un vrai thread, un vrai minuteur (400 ms) et un vrai scan de D2O_03 recopié par morceaux dans un
+dossier temporaire : scan 7 entièrement écrit à 3,4 s, touché pour la première fois à 3,9 s, ouvert à 6,3 s, 16 spectres
+analysés (glace VII à 3,46 GPa, puis VI, puis Ih vers 0 GPa). Le scan 8, arrivé pendant une modification, a été enregistré
+sans changer l'écran, et s'est ouvert une fois le run enregistré. **Pas encore essayé sur une vraie acquisition** : on ne sait
+pas si LIMA s'arrête d'écrire plus de 2 s au milieu d'un scan, ce qui en ferait lire une partie.
 
 **Limites de zoom** (demandées par l'utilisateur ; `limit_view`, `keep_in_limits`, `ImagePanel.update_limits`) :
 on ne peut pas dézoomer au-delà des données de chaque graphe, avec 3 % de marge. Deux pièges :

@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable, Optional, Sequence
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QCloseEvent, QGuiApplication
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QDialog, QFileDialog, QLabel, QMainWindow, QMessageBox, QProgressDialog, QSizePolicy,
@@ -30,6 +30,10 @@ class MainWindow(QMainWindow):
         self.resize(1600, 950)
         self.on_close_request: Optional[Callable[[], bool]] = None  # set by the application
         self.on_unit: Optional[Callable[[str], None]] = None
+        self.on_closed: Optional[Callable[[], None]] = None
+        self.on_live_tick: Optional[Callable[[], None]] = None
+        self.live_timer = QTimer(self)
+        self.live_timer.timeout.connect(lambda: self.on_live_tick and self.on_live_tick())
         self.actions = ActionRegistry(self)
         self._folder = ""
 
@@ -85,6 +89,11 @@ class MainWindow(QMainWindow):
         # a long path is cut, not imposed on the window, which would leave the screen
         self.status_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.statusBar().addPermanentWidget(self.status_label, 1)
+        self.live_label = QLabel()
+        self.live_label.setStyleSheet("color: #b00000; font-weight: bold")
+        self.live_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.live_label.hide()
+        self.statusBar().addPermanentWidget(self.live_label, 1)
 
     # ------------------------------------------------------------------ built once the actions exist
 
@@ -195,6 +204,29 @@ class MainWindow(QMainWindow):
         dialog.deleteLater()
         return answer
 
+    def ask_live(self, suggestion):
+        from trxrd.gui.views.live import LiveDialog
+
+        dialog = LiveDialog(suggestion, self)
+        answer = dialog.answer() if dialog.exec() == QDialog.DialogCode.Accepted else None
+        dialog.deleteLater()
+        return answer
+
+    def start_live(self, period: int) -> None:
+        self.live_timer.start(period)
+
+    def stop_live(self) -> None:
+        self.live_timer.stop()
+
+    def set_live(self, text: Optional[str]) -> None:
+        self.live_label.setVisible(text is not None)
+        self.live_label.setText(text or "")
+        self.live_label.setToolTip(text or "")
+
+    def busy(self) -> bool:
+        """A dialog is open, or a long task with its progress bar: the run must not change under it."""
+        return QApplication.activeModalWidget() is not None
+
     def ask_new_run(self, browse):
         from trxrd.gui.views.new_run import NewRunDialog
 
@@ -244,6 +276,8 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event: QCloseEvent) -> None:
         if self.on_close_request is None or self.on_close_request():
             event.accept()
+            if self.on_closed is not None:
+                self.on_closed()
         else:
             event.ignore()
 

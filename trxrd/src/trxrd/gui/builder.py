@@ -14,6 +14,7 @@ from typing import List, Optional, Sequence
 from trxrd import __version__
 from trxrd.gui.presenters.analysis import AnalysisPresenter
 from trxrd.gui.presenters.editing import EditingPresenter, PeaksPresenter
+from trxrd.gui.presenters.live import LivePresenter
 from trxrd.gui.presenters.treatment import DetectionPresenter, ProcessingPresenter
 from trxrd.gui.presenters.viewer import (
     CakePresenter, DisplaySettings, EvolutionPresenter, MainPresenter, MapPresenter, NavigatorPresenter,
@@ -38,6 +39,7 @@ class Viewer:
     editing: EditingPresenter
     peaks: PeaksPresenter
     zones: ZonesPresenter
+    live: LivePresenter
     presenters: List[object]
 
 
@@ -67,7 +69,9 @@ def create_viewer(session: Optional[Session] = None, runner=None) -> Viewer:
     editing = EditingPresenter(session, window.phases, window, runner)
     peaks = PeaksPresenter(session, settings, window.peaks, window.spectrum, window.phases)
     zones = ZonesPresenter(session, settings, window.zones, window.spectrum)
+    live = LivePresenter(session, window, runner)
     window.on_close_request = main.may_discard
+    window.on_closed = lambda: live.toggle(False)
     window.on_unit = main.set_unit
 
     add = window.actions.add
@@ -155,12 +159,18 @@ def create_viewer(session: Optional[Session] = None, runner=None) -> Viewer:
         "La phase et la pression de l'onglet Phases, sur le spectre courant")
     add("remove_phase", ANALYSIS, "Retirer la phase choisie", window.phases.remove.click, ["D"])
     add("show_detection", ANALYSIS, "Voir la détection des pics", lambda: window.tabs.setCurrentWidget(window.detection), ["M"])
+    def toggle_live() -> None:
+        action = window.actions.get("live")
+        action.setChecked(live.toggle(action.isChecked()))  # the user may have cancelled
+
+    add("live", TOOLS, "Mode &Live…", toggle_live, checkable=True,
+        tip="Pendant l'expérience : chaque nouveau scan est intégré, analysé, enregistré et ouvert")
     add("calibration", TOOLS, "&Calibration du détecteur…", window.show_calibration, ["Ctrl+L"],
         "Calibrer la géométrie sur une image de LaB6 / CeO2 et enregistrer le .poni")
     add("shortcuts", HELP, "&Raccourcis clavier", window.show_shortcuts, ["F1"])
-    window.build_menus(toolbar=("new_run", "open", "save", "|", "raw", "auto"))
+    window.build_menus(toolbar=("new_run", "open", "save", "|", "raw", "auto", "live"))
     main.update()  # the unit actions exist now
-    return Viewer(session, settings, window, main, analysis, editing, peaks, zones, presenters)
+    return Viewer(session, settings, window, main, analysis, editing, peaks, zones, live, presenters)
 
 
 def run(argv: Optional[Sequence[str]] = None) -> int:

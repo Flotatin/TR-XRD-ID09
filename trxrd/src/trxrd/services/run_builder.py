@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -69,7 +70,7 @@ def build_run(
             intensity=intensity,
             frame=index,
             label=f"frame_{index}",
-            processing=Processing(processing.baseline_degree, processing.filter_type, processing.filter_params),
+            processing=dataclasses.replace(processing),
         )
         spectra.append(background.apply(spectrum))
         if progress is not None and not progress(done, len(indices)):

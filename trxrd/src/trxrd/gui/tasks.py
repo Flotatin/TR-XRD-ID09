@@ -53,18 +53,25 @@ class _Job(QRunnable):
         super().__init__()
         self.task, self.relay = task, relay
 
+    def _emit(self, signal: str, *values) -> bool:
+        """False when nobody is left to hear it: the window was closed while the task ran."""
+        try:
+            getattr(self.relay, signal).emit(*values)
+        except RuntimeError:
+            return False
+        return True
+
     def run(self) -> None:
         def progress(done: int, total: int) -> bool:
-            self.relay.progressed.emit(int(done), int(total))
-            return not self.relay.cancelled
+            return self._emit("progressed", int(done), int(total)) and not self.relay.cancelled
 
         try:
             result = self.task(progress)
         except Exception as exc:
             logger.exception("background task failed")
-            self.relay.failed.emit(f"{type(exc).__name__}: {exc}")
+            self._emit("failed", f"{type(exc).__name__}: {exc}")
         else:
-            self.relay.done.emit(result)
+            self._emit("done", result)
 
 
 class ThreadRunner:

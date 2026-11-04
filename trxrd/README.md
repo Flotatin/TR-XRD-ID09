@@ -18,7 +18,7 @@ Un environnement virtuel dédié, séparé de celui de la v1 : PyQt5 (v1) et PyS
 python -m venv .venv-v2
 .venv-v2\Scripts\activate                    # Windows ; Linux/macOS : source .venv-v2/bin/activate
 pip install -e "./trxrd[notebook,gui,dev]"  # depuis la racine du dépôt
-python -m pytest trxrd                      # 315 tests
+python -m pytest trxrd                      # 403 tests
 ```
 
 ## Interface graphique
@@ -29,8 +29,8 @@ trxrd-gui "F:/ESRF/2026 Janvier HC-6664 id09/Fichier_CED_DRX/Water05_scan0009.CE
 ```
 
 Le lecteur ouvre un `.trxrd.h5` ou un ancien `.CEDX`, et affiche :
-- à gauche, le curseur des spectres, avec une flèche de chaque côté, et en onglets les phases, les pics, le
-  traitement, la détection et les zones ;
+- à gauche, le curseur des spectres, avec une flèche de chaque côté, et en onglets la liste des spectres, les
+  phases, les pics, le traitement, la détection et les zones ;
 - au centre, le spectre courant, avec son fond, son ajustement et les raies attendues de chaque phase, et
   dessous son cake ou son image brute ;
 - à droite, comme le panneau dDAC de la v1, sur le même axe du temps :
@@ -61,7 +61,10 @@ L'interface sait aussi :
   sélection ou à tous, et zones exclues du run (joint, diamant) ;
 - régler chaque pic (onglet Pics) : modèle, position, largeur, forme, ajustement du pic seul (Maj+R), vue zoomée ;
   choisir les raies d'une phase par des cases ; pics remplis et résidu sous le spectre ;
-- afficher sous le spectre le cake ou l'image brute du spectre courant (Ctrl+K) ;
+- afficher sous le spectre le cake ou l'image brute du spectre courant (Ctrl+K), avec les raies des phases en
+  pointillés sur le cake ; un clic sur le spectre, le cake ou l'image pose un repère 2θ : un trait, ou l'arc de
+  cercle sur l'image (Échap l'efface) ;
+- suivre une expérience en mode Live : chaque nouveau scan est intégré, analysé, enregistré et ouvert ;
 - calibrer le détecteur sur une image de LaB6 ou de CeO2, à la Dioptas (Ctrl+L).
 
 ## Ligne de commande

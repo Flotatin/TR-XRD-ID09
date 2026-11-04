@@ -939,17 +939,17 @@ def test_the_analysis_offers_the_selection(viewer, compression_run):
     from trxrd.gui.views.analysis import AnalysisDialog
 
     window = _shown(viewer, compression_run)
-    dialog = AnalysisDialog(viewer.analysis.choices(), window)
+    dialog = AnalysisDialog(viewer.analysis.choices(), lambda paths: [], window)
     assert dialog.every.isChecked() and dialog.indices() == list(range(6)) and dialog.selection.isHidden()
     dialog.close()
     window.evolution.on_interval(0.6, 3.4)
-    dialog = AnalysisDialog(viewer.analysis.choices(), window)
+    dialog = AnalysisDialog(viewer.analysis.choices(), lambda paths: [], window)
     assert dialog.selection.isChecked() and dialog.indices() == [1, 2, 3] and not dialog.selection.isHidden()
     assert dialog.selection.text() == "la sélection (3)"
     dialog.close()
     window.dpdt.toggle.setChecked(False)
     _pick_rows(window, [1, 4])
-    dialog = AnalysisDialog(viewer.analysis.choices(), window)
+    dialog = AnalysisDialog(viewer.analysis.choices(), lambda paths: [], window)
     assert dialog.indices() == [1, 4]
     dialog.close()
 
@@ -1086,3 +1086,123 @@ def test_a_click_still_leaves_the_peaks_alone(raw_viewer):
     dirty = session.dirty
     _click(raw_viewer.window.spectrum.plot, 15.0)
     assert session.undo_label == undo and session.dirty == dirty
+
+
+def test_live_mode_in_the_window(raw_viewer, raw_root, tmp_path, monkeypatch):
+    from pathlib import Path
+    from trxrd.gui.views.live import LiveDialog
+    from trxrd.services.live import LiveSettings
+
+    window, session = raw_viewer.window, raw_viewer.session
+    session.save()
+    action = window.actions.get("live")
+    monkeypatch.setattr(window, "ask_live", lambda suggestion: None)
+    action.trigger()  # cancelled
+    assert not action.isChecked() and not window.live_timer.isActive() and window.live_label.isHidden()
+
+    dataset = raw_root / "water02" / "water02_0001"
+    monkeypatch.setattr(window, "ask_live", lambda suggestion: LiveSettings(dataset, tmp_path / "live", analyse=False))
+    action.trigger()
+    assert action.isChecked() and window.live_timer.isActive() and window.live_timer.interval() == 2000
+    assert not window.live_label.isHidden() and window.live_label.text().startswith("Live : en attente")
+
+    import os
+    import shutil
+    scan = dataset / "scan0004" / "scan_jf1m_0000.h5"
+    scan.parent.mkdir()
+    shutil.copy(dataset / "scan0003" / "scan_jf1m_0000.h5", scan)
+    stamp = scan.stat().st_mtime + 100
+    os.utime(scan, (stamp, stamp))
+    window.on_live_tick()
+    window.on_live_tick()
+    assert session.run.name == "water02_0001_scan0004" and window.spectra.table.rowCount() == 3
+    assert "ouvert à" in window.live_label.text() and window.windowTitle().endswith("water02_0001_scan0004")
+
+    action.trigger()
+    assert not action.isChecked() and not window.live_timer.isActive() and window.live_label.isHidden()
+
+
+def test_closing_the_window_stops_live_mode(raw_viewer, raw_root, tmp_path, monkeypatch):
+    from trxrd.services.live import LiveSettings
+
+    window = raw_viewer.window
+    raw_viewer.session.save()
+    monkeypatch.setattr(window, "ask_live", lambda s: LiveSettings(raw_root, tmp_path / "live"))
+    window.actions.get("live").trigger()
+    assert raw_viewer.live.running
+    window.close()
+    assert not raw_viewer.live.running and not window.live_timer.isActive()
+
+
+def test_live_waits_for_an_open_dialog(viewer):
+    assert not viewer.window.busy()
+    from PySide6.QtWidgets import QDialog
+
+    dialog = QDialog(viewer.window)
+    dialog.setModal(True)
+    dialog.show()
+    QApplication.processEvents()
+    assert viewer.window.busy()
+    dialog.close()
+    QApplication.processEvents()
+    assert not viewer.window.busy()
+
+
+def test_live_dialog(raw_root, tmp_path):
+    from pathlib import Path
+    from PySide6.QtWidgets import QDialog
+    from trxrd.gui.views.live import LiveDialog
+    from trxrd.gui.views.main_window import application
+    from trxrd.services.live import LiveSettings
+
+    application(["test"])
+    dialog = LiveDialog(LiveSettings(Path(""), Path("")))
+    assert dialog.folder.text() == "" and dialog.output.text() == "" and dialog.analyse.isChecked()
+    dialog.accept()
+    assert "n'existe pas" in dialog.message.text() and dialog.result() != QDialog.DialogCode.Accepted
+    dialog.folder.setText(str(raw_root))
+    dialog.accept()
+    assert "enregistrer les analyses" in dialog.message.text()
+    dialog.output.setText(str(tmp_path / "out"))
+    dialog.analyse.setChecked(False)
+    dialog.accept()
+    assert dialog.result() == QDialog.DialogCode.Accepted
+    assert dialog.answer() == LiveSettings(raw_root, tmp_path / "out", analyse=False)
+
+
+class _GoneRelay:
+    """The relay of a task, once the window is closed: its signals raise."""
+
+    cancelled = False
+
+    @property
+    def progressed(self):
+        raise RuntimeError("Internal C++ object already deleted")
+
+    class _Signal:
+        def emit(self, *values):
+            raise RuntimeError("Signal source has been deleted")
+
+    done = failed = _Signal()
+
+
+def test_a_task_that_outlives_the_window_ends_quietly():
+    from trxrd.gui.tasks import _Job
+
+    answers = []
+
+    def task(progress):
+        answers.append(progress(1, 2))
+        return "result"
+
+    _Job(task, _GoneRelay()).run()  # nothing raised in the worker thread
+    assert answers == [False]  # and it is told to stop
+
+
+def test_a_failing_task_that_outlives_the_window_ends_quietly():
+    from trxrd.gui.tasks import _Job
+
+    def task(progress):
+        raise ValueError("no")
+
+    _Job(task, _GoneRelay()).run()
