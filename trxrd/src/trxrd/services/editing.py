@@ -51,7 +51,10 @@ def _cover(spectrum: Spectrum, centers: Sequence[float], window: Optional[Tuple[
 def _lines(card: PhaseCard, pressure: float, energy_ev: float, temperature: float,
            window: Tuple[float, float]) -> List[tuple]:
     """(2θ, reflection) inside `window`, strongest first."""
-    lines = card.two_theta_lines(pressure, energy_ev, temperature, max_lines=len(card.reflections))
+    try:
+        lines = card.two_theta_lines(pressure, energy_ev, temperature, max_lines=len(card.reflections))
+    except ValueError:
+        raise ValueError(f"{card.name} : {pressure:g} GPa est hors du domaine de son équation d'état") from None
     inside = [(t, r) for t, r in lines if np.isfinite(t) and window[0] <= t <= window[1]]
     return sorted(inside, key=lambda line: -line[1].intensity)
 
@@ -152,14 +155,8 @@ def _unused_line(run: Run, fit: Optional[PhaseFit], center: float, temperature: 
     return min(close, key=lambda item: item[:2])[2] if close else None
 
 
-def add_peak(run: Run, index: int, position: float, phase: Optional[str] = None,
-             settings: Optional[AnalysisSettings] = None) -> PeakRef:
-    """A peak at 2θ = `position`, on the peak detected there if there is one. Not fitted yet.
-
-    Near a line of `phase` that has no peak yet it takes that line (hkl);
-    otherwise it is a free peak. Returns its reference.
-    """
-    options = (settings or AnalysisSettings()).options()
+def _new_peak(run: Run, index: int, position: float, options) -> Peak:
+    """A peak at 2θ = `position`, on the peak detected there if there is one."""
     spectrum = run.spectra[index]
     window = analysis_window(run, options)
     near = min(detect(run, index, window, options.detection), key=lambda p: abs(p.position - position), default=None)
@@ -173,8 +170,20 @@ def add_peak(run: Run, index: int, position: float, phase: Optional[str] = None,
     width = _peak_width(spectrum, options.fit.width)
     if near is not None and np.isfinite(near.fwhm):
         width = profiles.width_from_fwhm(model, near.fwhm, shape)
-    peak = Peak(f"free_{len(spectrum.free_peaks)}", model, center=center, height=max(height, 1.0), width=width, shape=shape)
+    return Peak(f"free_{len(spectrum.free_peaks)}", model, center=center, height=max(height, 1.0), width=width, shape=shape)
 
+
+def add_peak(run: Run, index: int, position: float, phase: Optional[str] = None,
+             settings: Optional[AnalysisSettings] = None) -> PeakRef:
+    """A peak at 2θ = `position`, on the peak detected there if there is one. Not fitted yet.
+
+    Near a line of `phase` that has no peak yet it takes that line (hkl);
+    otherwise it is a free peak. Returns its reference.
+    """
+    options = (settings or AnalysisSettings()).options()
+    spectrum = run.spectra[index]
+    peak = _new_peak(run, index, position, options)
+    center = peak.center
     fit = spectrum.phase_fit(phase) if phase is not None else None
     line = _unused_line(run, fit, center, options.fit.temperature)
     if line is not None:
@@ -185,9 +194,68 @@ def add_peak(run: Run, index: int, position: float, phase: Optional[str] = None,
     else:
         spectrum.free_peaks.append(peak)
         ref = (None, len(spectrum.free_peaks) - 1)
-    _cover(spectrum, [center], window)
+    _cover(spectrum, [center], analysis_window(run, options))
     refresh_model(spectrum)
     return ref
+
+
+@dataclass
+class Line:
+    """A reflection of a phase of the spectrum at its pressure, and whether it has a peak."""
+
+    hkl: Tuple[int, int, int]
+    label: str
+    two_theta: float
+    intensity: float  # % of the card
+    used: bool
+
+
+def phase_lines(run: Run, index: int, phase: str, settings: Optional[AnalysisSettings] = None) -> List[Line]:
+    """The lines of `phase` inside the pattern, in increasing 2θ."""
+    spectrum = run.spectra[index]
+    fit = spectrum.phase_fit(phase)
+    if fit is None or run.calibration is None or not np.isfinite(fit.pressure):
+        return []
+    temperature = (settings or AnalysisSettings()).options().fit.temperature
+    x = np.asarray(spectrum.two_theta, dtype=float)
+    used = {p.hkl for p in fit.peaks}
+    card = run.phases[phase]
+    positions = card.two_theta_table([fit.pressure], run.calibration.energy_ev, temperature)[0]  # NaN outside the EoS
+    inside = [(t, r) for t, r in zip(positions, card.reflections) if np.isfinite(t) and x.min() <= t <= x.max()]
+    return [Line(r.hkl, r.label, float(t), float(r.intensity), r.hkl in used) for t, r in sorted(inside, key=lambda l: l[0])]
+
+
+def set_line(run: Run, index: int, phase: str, hkl: Tuple[int, int, int], used: bool,
+             settings: Optional[AnalysisSettings] = None) -> None:
+    """Give a line of the phase a peak, on what is detected there, or take its peak away."""
+    spectrum = run.spectra[index]
+    fit = spectrum.phase_fit(phase)
+    if fit is None:
+        raise ValueError(f"{phase} n'est pas sur ce spectre")
+    hkl = tuple(hkl)
+    if not used:
+        fit.peaks = [p for p in fit.peaks if p.hkl != hkl]
+    elif all(p.hkl != hkl for p in fit.peaks):
+        line = next((l for l in phase_lines(run, index, phase, settings) if l.hkl == hkl), None)
+        if line is None:
+            raise ValueError(f"Pas de raie {hkl} dans ce spectre")
+        options = (settings or AnalysisSettings()).options()
+        peak = _new_peak(run, index, line.two_theta, options)
+        peak.name, peak.hkl = f"{run.phases[phase].name}_{line.label}", hkl
+        fit.peaks.append(peak)
+        fit.peaks.sort(key=lambda p: p.center)
+        _cover(spectrum, [peak.center], analysis_window(run, options))
+    refresh_model(spectrum)
+
+
+def misfit(spectrum: Spectrum) -> Optional[float]:
+    """Sum of the squared residuals in the fit range, to compare two fits; None without a model."""
+    if spectrum.model is None:
+        return None
+    x = np.asarray(spectrum.two_theta, dtype=float)
+    low, high = spectrum.fit_range or (float(x.min()), float(x.max()))
+    inside = (x >= low) & (x <= high)
+    return float(np.sum((corrected_signal(spectrum) - spectrum.model)[inside] ** 2))
 
 
 def move_peak(run: Run, index: int, ref: PeakRef, center: float, height: Optional[float] = None) -> None:

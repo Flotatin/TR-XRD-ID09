@@ -6,16 +6,16 @@ of the spectra, with a progress bar and a stop button. The settings
 (temperature, detection) are those of the automatic analysis, kept in the
 run.
 
-View expected (duck typing): show_model(ModelChoices), show_message(text), clear(); callbacks on_add(phase, pressure),
-on_remove(phase), on_pressure(phase, pressure), on_fit(), on_fit_series(scope: "selection" | "all", follow), on_copy(),
-on_paste(), on_clear().
+View expected (duck typing): show_model(ModelChoices), show_message(text), clear(), chosen_phase(); callbacks
+on_add(phase, pressure), on_remove(phase), on_pressure(phase, pressure), on_phase(phase), on_line(phase, hkl, used),
+on_fit(), on_fit_series(scope: "selection" | "all", follow), on_copy(), on_paste(), on_clear().
 Window: start_progress(text, on_cancel), set_progress(done, total), end_progress(), show_message(text),
-show_error(title, text).
+show_error(title, text), ask_yes_no(title, text) -> bool.
 Peaks: view show_message(text), select_row(row or None), show_peak(PeakDetail or None, settings),
 show_zoom(PeakZoom or None); callbacks on_edit(on), on_row(row), on_remove(), on_toggle(), on_model(model),
 on_value(name, value), on_shape(index, value), on_fit_peak(), on_fit_settings(**changes).
 Spectrum view: show_handles(handles or None, selected ref), show_peak_fills(curves, selected ref); callbacks
-on_add_peak(x, y), on_move_peak(ref, x, y), on_pick_peak(ref). Phases view: chosen_phase().
+on_add_peak(x, y), on_move_peak(ref, x, y), on_pick_peak(ref), on_cursor(x, y). Phases view: chosen_phase().
 """
 
 from __future__ import annotations
@@ -46,15 +46,18 @@ class ModelChoices:
     selected: int  # spectra chosen together
     count: int
     copied_from: Optional[int]  # spectrum of the copied model
+    lines: List[editing.Line] = dataclasses.field(default_factory=list)  # of the chosen phase, if on the spectrum
 
 
 def apply_edit(session: Session, view, indices: Iterable[int], label: str, action: Callable[[], object],
                merge: bool = False) -> None:
     """Do `action` on the spectra `indices`, which can then be undone; its errors are shown, not raised."""
-    session.remember(list(indices), label, merge)
+    kept = session.remember(list(indices), label, merge)
     try:
         action()
     except (ValueError, KeyError) as exc:
+        if kept:
+            session.forget()
         view.show_message(str(exc))
         return
     view.show_message("")
@@ -71,6 +74,8 @@ class EditingPresenter:
         view.on_add = self.add
         view.on_remove = self.remove
         view.on_pressure = self.move
+        view.on_phase = self.refresh
+        view.on_line = self.set_line
         view.on_fit = self.fit
         view.on_fit_series = self.fit_series
         view.on_copy = self.copy
@@ -91,8 +96,10 @@ class EditingPresenter:
             return
         cards = [(name, phase_label(name, card.p_range)) for name, card in run.phases.items()]
         pressures = {f.phase: float(f.pressure) for f in spectrum.phases if np.isfinite(f.pressure)}
+        chosen = self.view.chosen_phase()
+        lines = editing.phase_lines(run, self.session.index, chosen, self._settings()) if chosen in pressures else []
         self.view.show_model(ModelChoices(cards, pressures, len(self.session.selection), len(run),
-                                          self.clipboard.source if self.clipboard is not None else None))
+                                          self.clipboard.source if self.clipboard is not None else None, lines))
 
     def _settings(self) -> analysis.AnalysisSettings:
         return analysis.saved_settings(self.session.run)
@@ -135,7 +142,25 @@ class EditingPresenter:
             self.view.show_message("Aucune phase sur ce spectre : en ajouter une avant d'ajuster.")
             return
         settings = self._settings()
+        before = editing.misfit(self.session.spectrum)
         self._edit([index], "ajustement du spectre", lambda: editing.fit_current(run, index, settings))
+        after = editing.misfit(self.session.spectrum)
+        if before is None or after is None:
+            return
+        text = f"Résidu : {before:.4g} → {after:.4g}"
+        if after <= before:
+            self.view.show_message(text)
+        elif self.window.ask_yes_no("Ajustement moins bon", f"{text}\n\nGarder ce nouvel ajustement ?"):
+            self.view.show_message(f"{text} (moins bon, gardé)")
+        else:
+            self.session.undo()
+            self.view.show_message(f"{text} : ajustement annulé")
+
+    def set_line(self, phase: str, hkl, used: bool) -> None:
+        """A box of the lines of the phase: give that line a peak, or take its peak away."""
+        if self._ready():
+            run, index, settings = self.session.run, self.session.index, self._settings()
+            self._edit([index], f"raies de {phase}", lambda: editing.set_line(run, index, phase, hkl, used, settings))
 
     # ------------------------------------------------------------------ series
 
@@ -216,6 +241,7 @@ class PeaksPresenter:
         self.spectrum_view, self.phases_view = spectrum_view, phases_view
         self.editing = False
         self.selected: Optional[editing.PeakRef] = None
+        self.cursor: Optional[Tuple[float, float]] = None  # last click on the spectrum, in the display unit
         view.on_edit = self.set_editing
         view.on_row = self.pick_row
         view.on_remove = self.remove
@@ -228,6 +254,7 @@ class PeaksPresenter:
         spectrum_view.on_add_peak = self.add
         spectrum_view.on_move_peak = self.move
         spectrum_view.on_pick_peak = self.pick
+        spectrum_view.on_cursor = self.set_cursor
         for event in (Event.RUN_CHANGED, Event.SPECTRUM_CHANGED, Event.DATA_CHANGED):
             session.subscribe(event, self.refresh)
         settings.subscribe(self.refresh)
@@ -259,6 +286,23 @@ class PeaksPresenter:
         chosen = self.selected is not None
         self.view.show_peak(display.peak_detail(spectrum, self.selected) if chosen else None, settings)
         self.view.show_zoom(display.peak_zoom(run, spectrum, self.selected, settings.fit_window) if chosen else None)
+
+    def set_cursor(self, x: float, y: float) -> None:
+        self.cursor = (x, y)
+
+    def confirm(self) -> None:
+        """A new peak at the cursor (key C of the v1)."""
+        if self.cursor is None:
+            self.view.show_message("Cliquer d'abord sur le spectre, en mode « Modifier les pics à la souris ».")
+        else:
+            self.add(*self.cursor)
+
+    def replace(self) -> None:
+        """The chosen peak goes to the cursor (key R of the v1)."""
+        if self.selected is None or self.cursor is None:
+            self.view.show_message("Choisir un pic, puis cliquer sur le spectre où le replacer.")
+        else:
+            self.move(self.selected, *self.cursor)
 
     def pick(self, ref: editing.PeakRef) -> None:
         self.selected = ref

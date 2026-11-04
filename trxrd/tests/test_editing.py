@@ -237,6 +237,42 @@ def test_fit_variation_bounds_the_widths(run):
     assert AnalysisSettings().options().fit.variation is None
 
 
+def test_lines_of_a_phase_chosen_one_by_one(run):
+    editing.add_phase(run, 5, ICE_VII, 3.7)
+    spectrum = run.spectra[5]
+    lines = editing.phase_lines(run, 5, ICE_VII)
+    assert [line.label for line in lines] == ["110", "200"] and all(line.used for line in lines)
+    assert lines[0].two_theta < lines[1].two_theta and lines[0].intensity == 100.0
+    assert editing.phase_lines(run, 5, ICE_VI) == []  # not on this spectrum
+    pressure = spectrum.phases[0].pressure
+    spectrum.phases[0].pressure = 99.0  # outside the equation of state: no line, no error
+    assert editing.phase_lines(run, 5, ICE_VII) == []
+    spectrum.phases[0].pressure = pressure
+
+    position = spectrum.phases[0].peaks[1].center
+    editing.set_line(run, 5, ICE_VII, (2, 0, 0), False)
+    assert [p.hkl for p in spectrum.phases[0].peaks] == [(1, 1, 0)]
+    assert [line.used for line in editing.phase_lines(run, 5, ICE_VII)] == [True, False]
+    editing.set_line(run, 5, ICE_VII, (2, 0, 0), True)
+    editing.set_line(run, 5, ICE_VII, (2, 0, 0), True)  # already there: not twice
+    assert [p.hkl for p in spectrum.phases[0].peaks] == [(1, 1, 0), (2, 0, 0)]
+    assert spectrum.phases[0].peaks[1].center == pytest.approx(position, abs=0.01)  # back on the detected peak
+    assert spectrum.phases[0].peaks[1].name.endswith("_200")
+
+    with pytest.raises(ValueError, match="Pas de raie"):
+        editing.set_line(run, 5, ICE_VII, (9, 9, 9), True)
+    with pytest.raises(ValueError, match="pas sur ce spectre"):
+        editing.set_line(run, 5, ICE_VI, (1, 0, 0), True)
+
+
+def test_misfit_compares_two_fits(run):
+    assert editing.misfit(run.spectra[5]) is None
+    editing.add_phase(run, 5, ICE_VII, 3.7)
+    before = editing.misfit(run.spectra[5])
+    editing.fit_current(run, 5)
+    assert 0 < editing.misfit(run.spectra[5]) < before
+
+
 def test_undo_and_redo(run):
     session = Session()
     session.attach(run, None)

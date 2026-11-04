@@ -630,3 +630,69 @@ def test_custom_fit_of_a_peak_in_the_window(viewer, compression_run):
     viewer.peaks.refresh()
     panel.model.setCurrentText("Moffat")
     assert analysis.saved_settings(session.run).peak_model == "Moffat" and panel.model.currentText() == "Moffat"
+
+
+def test_lines_of_the_phase_and_keys_of_the_v1(viewer, compression_run):
+    from PySide6.QtCore import QPointF, Qt
+    from PySide6.QtGui import QKeySequence
+    from synthetic import GASKET
+    from trxrd.gui.views.main_window import application
+
+    class Click:
+        def __init__(self, position):
+            self.position = position
+
+        def button(self):
+            return Qt.MouseButton.LeftButton
+
+        def modifiers(self):
+            return Qt.KeyboardModifier.NoModifier
+
+        def scenePos(self):
+            return self.position
+
+    app = application(["test"])
+    window, session = viewer.window, viewer.session
+    window.show()
+    session.attach(compression_run, None)
+    session.select(5)
+    phases, view = window.phases, window.spectrum
+    phases.card.setCurrentIndex(phases.card.findData("H2O_Ice_VII"))
+    assert phases.lines.count() == 0  # not on the spectrum yet
+    phases.pressure.setValue(3.7)
+    window.actions.get("add_phase").trigger()  # Maj+A
+    assert session.spectrum.phases[0].phase == "H2O_Ice_VII" and phases.lines.count() == 2
+    assert phases.lines.item(1).text().startswith("200") and phases.lines.item(1).checkState() == Qt.CheckState.Checked
+
+    phases.lines.item(1).setCheckState(Qt.CheckState.Unchecked)  # a box of the lines
+    assert [p.hkl for p in session.spectrum.phases[0].peaks] == [(1, 1, 0)]
+    assert phases.lines.item(1).checkState() == Qt.CheckState.Unchecked
+    phases.lines.item(1).setCheckState(Qt.CheckState.Checked)
+    assert len(session.spectrum.phases[0].peaks) == 2 and window.peaks.table.rowCount() == 2
+
+    window.actions.get("edit_peaks").trigger()
+    view.plot.setYRange(0, 5000)
+    app.processEvents()
+    box = view.plot.getPlotItem().vb
+    view._clicked(Click(box.mapViewToScene(QPointF(GASKET, 1000.0))))  # a click puts the cursor
+    assert view.cross_x.isVisible() and view.cross_x.value() == pytest.approx(GASKET, abs=0.05)
+    assert session.spectrum.free_peaks == []
+    window.actions.get("confirm_peak").trigger()  # C
+    assert len(session.spectrum.free_peaks) == 1
+    view._clicked(Click(box.mapViewToScene(QPointF(GASKET + 0.1, 800.0))))
+    window.actions.get("replace_peak").trigger()  # R
+    assert session.spectrum.free_peaks[0].center == pytest.approx(GASKET + 0.1, abs=0.05)
+    assert session.spectrum.free_peaks[0].height == pytest.approx(800.0, rel=0.05)
+    window.actions.get("delete_peak").trigger()  # U
+    assert session.spectrum.free_peaks == []
+    window.actions.get("edit_peaks").trigger()
+    assert not view.cross_x.isVisible()
+
+    window.actions.get("remove_phase").trigger()  # D
+    assert session.spectrum.phases == [] and phases.lines.count() == 0
+    keys = {key: window.actions.get(key).shortcuts() for key in ("fit", "fit_selection", "fit_peak", "copy_model", "paste_model")}
+    assert QKeySequence("Shift+F") in keys["fit"] and QKeySequence("Shift+T") in keys["fit_selection"]
+    assert QKeySequence("Shift+R") in keys["fit_peak"] and QKeySequence("Ctrl+C") in keys["copy_model"]
+    assert QKeySequence("Ctrl+V") in keys["paste_model"]
+    window.actions.get("show_detection").trigger()  # M
+    assert window.tabs.currentWidget() is window.detection

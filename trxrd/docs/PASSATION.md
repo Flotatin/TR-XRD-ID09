@@ -71,8 +71,8 @@ Ne pas les remettre en cause sans lui en parler.
 
 ### 3.2 Par fonctionnalité
 
-Tout est testé : `python -m pytest trxrd` compte 254 tests. Les 7 comparaisons numériques avec la v1 sont
-ignorées quand la v1 n'est pas importable, par exemple dans `.venv-v2`, qui n'a pas PyQt5 : 247 tests
+Tout est testé : `python -m pytest trxrd` compte 265 tests. Les 7 comparaisons numériques avec la v1 sont
+ignorées quand la v1 n'est pas importable, par exemple dans `.venv-v2`, qui n'a pas PyQt5 : 258 tests
 passent alors.
 
 | Fonctionnalité | Où | État / preuve |
@@ -100,6 +100,7 @@ passent alors.
 | Aperçu d'un scan brut avant l'intégration : image ou cake (maximum du scan ou une image), diagramme et couverture en azimut sur tout le détecteur, plage 2θ à tirer | `services/images.ScanPreview`, `gui/presenters/preview.py`, `gui/views/preview.py` | ✅ Water05 scan 9 : pixels utilisables de 5,21 à 29,30° ; maximum de 32 images sur 1 600 en 2,4 s |
 | Traitement des spectres (fond SNIP, filtre) au cas par cas ou propagé à tous / à la sélection ; spectre affiché filtré, fond soustrait (brut sur demande) ; contrôle de la détection (pics, seuil, raisons des rejets) avec les réglages de l'analyse | `services/treatment.py`, `gui/presenters/treatment.py`, `gui/views/treatment.py` | ✅ détection sur le signal filtré du spectre : 805/1 053 spectres contre 797 sur 29 runs ; Water05 inchangé ; 35 ms par spectre sur Water01_scan0074 |
 | Travail manuel sur les phases : ajouter, retirer, changer P, ajuster le spectre, ajuster une série en suivant à partir du spectre courant, copier le modèle ; pics libres gardés et tracés ; annuler / rétablir | `services/editing.py`, `Session.remember`, `gui/presenters/editing.py`, `gui/views/editing.py` | ✅ D2O_03 scan 6 : 14 spectres à moins de 0,05 GPa de la v1, sauf le spectre 4 (0,09 GPa), en 2 s |
+| Ajustement personnalisé : paramètres et modèle de chaque pic, ajustement d'un pic seul, vue zoomée, pics remplis, résidu, cases par raie, comparaison au fit précédent, touches de la v1 | `editing.set_peak`, `fit_peak`, `set_line`, `misfit`, `PeaksPresenter`, `PeaksPanel` | ✅ D2O_03 scan 6 #0 : résidu 4,45e6 → 2,17e6, P = 5,75 GPa ; le résidu montre la bosse non expliquée vers 19° |
 | Pics à la souris : poignées, ajout (raie ou pic libre), suppression, désactivation | `editing.add_peak`, `PeaksPresenter`, `SpectrumView.show_handles` | ✅ Water05 scan 9 #8 : pic du joint ajouté, ajusté à 18,64° ; Sn passe de 2,07 à 2,01 GPa |
 | Limites de zoom de tous les graphes | `limit_view`, `keep_in_limits`, `ImagePanel.update_limits` | ✅ |
 | Cake / image brute sous le spectre | `services/images.py`, `CakePresenter` | ✅ image brute d'un `.CEDX` retrouvée par le nom du run ; 0,03 s par spectre |
@@ -292,7 +293,11 @@ Seul `trxrd/gui/` a le droit d'importer PySide6/pyqtgraph (règle vérifiée par
   spectre courant ;
 - [x] pics à la souris (Ctrl+E) : poignées à tirer, Ctrl + clic pour ajouter (raie de la phase choisie, ou pic
   libre), Suppr, activer / désactiver ; la zone d'ajustement s'étend pour couvrir ce qu'on ajoute ;
+- [x] ajustement personnalisé, comme dans la v1 : modèle et paramètres de chaque pic, ajustement d'un seul pic
+  (Maj+R, fenêtre en σ, Var), vue zoomée, pics remplis, résidu, cases par raie, comparaison avec le fit
+  précédent, curseur et touches de la v1 ;
 - [ ] zones d'ajustement / zones exclues dessinées à la souris (à stocker dans `Run.ui_state` ou dans le modèle) ;
+  dans la v1, une zone par jauge, et une zone sur le graphe dDAC pour choisir les spectres ;
 - [x] copier / coller le modèle de phases d'un spectre sur une sélection de spectres ; supprimer les phases d'une zone de spectres ;
 - [x] détection automatique des pics affichée (marqueurs), avec SNR (onglet Détection) ;
 - [ ] note du run.
@@ -347,6 +352,8 @@ On reconstruit le run avec `trxrd build`, puis on compare les résidus des deux 
 - [ ] **Spectres statiques ajoutés** avant ou après la série (`Add_Static`).
 - [ ] **Entrées DRX autres que HDF5** dans `run_builder` : dossier ou liste de fichiers EDF/TIFF via fabio.
       La v1 le gérait.
+- [ ] **Édition d'une fiche** (`f_edit_gauge`) et export `.jcpds` depuis l'interface ; **T d'une phase** (`T_All`,
+      spinbox T) : la v2 prend une seule température par analyse.
 - [ ] **Mode « température »** : la v1 avait `fixe="T"` (T calculée à P fixée, via `ALPHAT`). La v2 gère
       V0(T) mais pas ce calcul inverse.
 - [ ] **Acquisition directe** de l'oscilloscope LeCroy (`Oscillo_autosave`) : probablement hors du périmètre

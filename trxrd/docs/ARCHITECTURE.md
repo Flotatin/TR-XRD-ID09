@@ -152,7 +152,7 @@ trxrd/
 │       ├── tasks.py            calculs longs dans un thread, résultat rendu au thread de l'interface
 │       ├── builder.py          assemblage : fenêtre + presenters + actions
 │       └── app.py              point d'entrée léger : journal et affichage des erreurs (sans console)
-└── tests/                      254 tests ; data/ = scan TUTO, calibration, ancien fichier .CEDX d'exemple
+└── tests/                      265 tests ; data/ = scan TUTO, calibration, ancien fichier .CEDX d'exemple
 ```
 
 ## 5. Le format de fichier `trxrd-run` (HDF5)
@@ -820,6 +820,25 @@ Ce qu'on a appris sur D2O_03_0001_scan0006 :
   tous les pics libres actifs, même loin des raies des phases (`FitOptions.fit_far_free_peaks`) ; l'analyse
   automatique les laisse de côté pour aller vite. Les poignées sont en unité d'affichage (2θ, Q ou d) et sur le
   signal montré : `display.from_unit` et `signal_offset` reviennent à 2θ et à la hauteur au-dessus du fond.
+- **Ajustement personnalisé**, repris de la v1 (`editing.set_peak`, `fit_peak`, `set_line`, `misfit`) :
+  - Onglet Pics, pour le pic choisi : modèle (PearsonIV, PseudoVoigt, Moffat, SplitLorentzian, Gaussian), 2θ,
+    hauteur, σ et paramètres de forme. Changer de modèle garde la position, la hauteur et la largeur à
+    mi-hauteur. Sans pic choisi, le modèle est celui des prochains pics (`AnalysisSettings.peak_model`).
+  - « Ajuster ce pic » (Maj+R) : le pic seul, sur le signal brut moins le fond et tous les autres pics, à moins
+    de « Fenêtre » σ de son centre (5 par défaut, comme le nσ de la v1). Les autres pics ne bougent pas ; la
+    maille et P de sa phase suivent. « Var » borne la largeur dans les ajustements, de w/(1+Var) à w×(1+Var) ;
+    la v1 prenait 120 %, la v2 garde 300 % par défaut.
+  - Une vue zoomée montre le pic seul (signal moins les autres pics), avec sa fenêtre.
+  - Sur le spectre : chaque pic rempli à la couleur de sa phase, le pic choisi plus foncé (Ctrl+P), et le résidu
+    sur le signal brut, dans la zone d'ajustement (Ctrl+D).
+  - Onglet Phases : les raies de la phase choisie, avec une case chacune (les d110, d200… de la v1) : cocher donne
+    à la raie un pic, posé sur ce qui est détecté, décocher le retire.
+  - « Ajuster ce spectre » compare la somme des carrés du résidu avant et après. Si c'est mieux, le résultat
+    s'affiche ; si c'est moins bon, l'interface demande s'il faut garder ce fit, et annule sinon. La v1 posait la
+    question à chaque ajustement.
+  - Touches de la v1 : un clic pose le curseur en mode pics, C ajoute un pic au curseur, R replace le pic choisi,
+    Maj+R l'ajuste seul, U le supprime, Maj+F ajuste le spectre, Maj+T la sélection, Maj+A ajoute la phase
+    choisie, D la retire, M montre la détection, Ctrl+C et Ctrl+V copient et collent le modèle.
 - **Annuler** (Ctrl+Z, Ctrl+Y ; `Session.remember`, `undo`, `redo`) : toutes les modifications, l'analyse
   automatique et le traitement compris, 30 niveaux. On garde une copie de ce qui change (phases, pics libres,
   traitement), les grands tableaux étant partagés : une analyse de 1 600 spectres ne coûte pas de mémoire.

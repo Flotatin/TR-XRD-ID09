@@ -841,3 +841,71 @@ def test_residual_of_the_fit(compression_run):
     assert np.isfinite(curves.residual[inside]).all() and np.isnan(curves.residual[~inside]).all()
     expected = spectrum.intensity - spectrum.baseline - spectrum.model
     np.testing.assert_allclose(curves.residual[inside], expected[inside])  # on the raw signal, as the fit
+
+
+def test_a_worse_fit_can_be_refused(compression_run, monkeypatch):
+    from trxrd.gui.presenters.editing import EditingPresenter
+    from trxrd.services import editing
+
+    ice = "H2O_Ice_VII"
+    session, view, window = Session(), Recorder(chosen_phase=ice), Recorder(ask_yes_no=False)
+    presenter = EditingPresenter(session, view, window)
+    session.attach(compression_run, None)
+    session.select(5)
+    presenter.add(ice, 3.7)
+    lines = view.last("show_model")[0].lines
+    assert [line.label for line in lines] == ["110", "200"]  # the lines of the chosen phase
+    presenter.fit()
+    assert view.last("show_message")[0].startswith("Résidu : ") and window.count("ask_yes_no") == 0  # better: kept
+    pressure, model = session.spectrum.phases[0].pressure, session.spectrum.model.copy()
+
+    def spoil(run, index, settings):
+        run.spectra[index].phases[0].pressure = 99.0
+        run.spectra[index].model = np.zeros_like(model)
+
+    monkeypatch.setattr(editing, "fit_current", spoil)
+    presenter.fit()
+    assert window.last("ask_yes_no")[0] == "Ajustement moins bon" and view.last("show_message")[0].endswith("annulé")
+    assert session.spectrum.phases[0].pressure == pressure  # back to the previous fit
+    np.testing.assert_array_equal(session.spectrum.model, model)
+    window.answers["ask_yes_no"] = True
+    presenter.fit()
+    assert session.spectrum.phases[0].pressure == 99.0 and view.last("show_message")[0].endswith("gardé)")
+
+
+def test_lines_and_cursor_from_the_gui(compression_run):
+    from synthetic import GASKET
+    from trxrd.gui.presenters.editing import EditingPresenter, PeaksPresenter
+
+    ice = "H2O_Ice_VII"
+    session, view, window = Session(), Recorder(chosen_phase=ice), Recorder()
+    editing_presenter = EditingPresenter(session, view, window)
+    peaks_view, spectrum = Recorder(), Recorder()
+    presenter = PeaksPresenter(session, DisplaySettings(), peaks_view, spectrum, view)
+    session.attach(compression_run, None)
+    session.select(5)
+    editing_presenter.add(ice, 3.7)
+    editing_presenter.set_line(ice, (2, 0, 0), False)
+    assert [p.hkl for p in session.spectrum.phases[0].peaks] == [(1, 1, 0)] and session.undo_label == f"raies de {ice}"
+    assert [line.used for line in view.last("show_model")[0].lines] == [True, False]
+    session.undo()
+    assert len(session.spectrum.phases[0].peaks) == 2
+
+    label = session.undo_label
+    editing_presenter.add("H2O_Ice_VI", 500.0)  # no volume at that pressure
+    assert "hors du domaine" in view.last("show_message")[0] and session.undo_label == label  # nothing to undo
+    assert session.spectrum.phase_fit("H2O_Ice_VI") is None
+
+    presenter.confirm()
+    assert "Cliquer d'abord" in peaks_view.last("show_message")[0]
+    presenter.editing = True
+    presenter.set_cursor(GASKET, 900.0)  # a click on the spectrum
+    presenter.confirm()  # key C
+    assert presenter.selected == (None, 0) and session.undo_label == "pic ajouté"
+    presenter.set_cursor(GASKET + 0.03, 800.0)
+    presenter.replace()  # key R
+    free = session.spectrum.free_peaks[0]
+    assert free.center == GASKET + 0.03 and free.height == 800.0
+    presenter.selected = None
+    presenter.replace()
+    assert "Choisir un pic" in peaks_view.last("show_message")[0]

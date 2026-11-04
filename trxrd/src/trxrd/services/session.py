@@ -140,8 +140,8 @@ class Session:
 
     # ------------------------------------------------------------------ undo
 
-    def remember(self, indices: Iterable[int], label: str, merge: bool = False) -> None:
-        """Keep the spectra `indices` as they are, before an edit called `label`.
+    def remember(self, indices: Iterable[int], label: str, merge: bool = False) -> bool:
+        """Keep the spectra `indices` as they are, before an edit called `label`; False if nothing new was kept.
 
         `merge`: successive edits with this label on the same spectra (a value
         changed step by step) are undone together.
@@ -149,9 +149,15 @@ class Session:
         indices = list(indices)
         self._redo = []
         if merge and self._undo and self._undo[-1].label == label and set(self._undo[-1].spectra) == set(indices):
-            return
+            return False
         self._undo.append(Snapshot(label, {i: _kept(self.run.spectra[i]) for i in indices}))
         del self._undo[:-MAX_UNDO]
+        return True
+
+    def forget(self) -> None:
+        """Drop the last kept state: the edit failed and changed nothing."""
+        if self._undo:
+            self._undo.pop()
 
     @property
     def undo_label(self) -> Optional[str]:

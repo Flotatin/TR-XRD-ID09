@@ -110,8 +110,15 @@ class SpectrumView(QWidget):
         self.on_add_peak: Optional[Callable[[float, float], None]] = None
         self.on_move_peak: Optional[Callable[[object, float, float], None]] = None
         self.on_pick_peak: Optional[Callable[[object], None]] = None
+        self.on_cursor: Optional[Callable[[float, float], None]] = None
         self.handles: Optional[List[_PeakHandle]] = None  # None: not editing the peaks
         self.plot = pg.PlotWidget()
+        cross = pg.mkPen("#303030", width=1, style=Qt.PenStyle.DotLine)
+        self.cross_x = pg.InfiniteLine(angle=90, movable=False, pen=cross)  # cursor of the keys C and R
+        self.cross_y = pg.InfiniteLine(angle=0, movable=False, pen=cross)
+        for line in (self.cross_x, self.cross_y):
+            line.hide()
+            self.plot.addItem(line, ignoreBounds=True)
         self.plot.scene().sigMouseClicked.connect(self._clicked)
         self.plot.getAxis("left").setWidth(AXIS_WIDTH)  # aligned with the cake below
         self.plot.getAxis("bottom").setStyle(showValues=False)  # the x axis is under the band
@@ -185,13 +192,20 @@ class SpectrumView(QWidget):
         limit_view(self.plot)
 
     def _clicked(self, event) -> None:
-        """Ctrl + click while editing the peaks: a new peak there."""
-        control = event.modifiers() & Qt.KeyboardModifier.ControlModifier
-        if self.handles is None or self.on_add_peak is None or event.button() != Qt.MouseButton.LeftButton or not control:
-            return
+        """While editing the peaks: a click puts the cursor there, Ctrl + click adds a peak there."""
         box = self.plot.getPlotItem().vb
-        if box.sceneBoundingRect().contains(event.scenePos()):
-            point = box.mapSceneToView(event.scenePos())
+        if self.handles is None or event.button() != Qt.MouseButton.LeftButton:
+            return
+        if not box.sceneBoundingRect().contains(event.scenePos()):
+            return
+        point = box.mapSceneToView(event.scenePos())
+        self.cross_x.setPos(point.x())
+        self.cross_y.setPos(point.y())
+        for line in (self.cross_x, self.cross_y):
+            line.show()
+        if self.on_cursor is not None:
+            self.on_cursor(point.x(), point.y())
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier and self.on_add_peak is not None:
             self.on_add_peak(point.x(), point.y())
 
     def _handle_clicked(self, ref) -> None:
@@ -210,6 +224,8 @@ class SpectrumView(QWidget):
             self.plot.removeItem(item)
         if handles is None:
             self.handles = None
+            for line in (self.cross_x, self.cross_y):
+                line.hide()
             return
         self.handles = []
         for handle in handles:

@@ -75,12 +75,14 @@ def create_viewer(session: Optional[Session] = None, runner=None) -> Viewer:
     add("quit", FILE, "&Quitter", window.close, ["Ctrl+Q"])
     add("undo", EDIT, "&Annuler", main.undo, ["Ctrl+Z"])
     add("redo", EDIT, "&Rétablir", main.redo, ["Ctrl+Y", "Ctrl+Shift+Z"])
-    add("copy_model", EDIT, "&Copier le modèle du spectre", editing.copy, ["Ctrl+Shift+C"],
+    add("copy_model", EDIT, "&Copier le modèle du spectre", editing.copy, ["Ctrl+C", "Ctrl+Shift+C"],
         "Phases et pics libres du spectre courant, à coller sur d'autres spectres")
-    add("paste_model", EDIT, "C&oller le modèle sur la sélection", editing.paste, ["Ctrl+Shift+V"])
+    add("paste_model", EDIT, "C&oller le modèle sur la sélection", editing.paste, ["Ctrl+V", "Ctrl+Shift+V"])
     add("edit_peaks", EDIT, "Modifier les &pics à la souris", lambda: window.peaks.edit.setChecked(window.actions.get("edit_peaks").isChecked()),
         ["Ctrl+E"], checkable=True, tip="Poignées sur les pics du modèle ; Ctrl + clic pour ajouter un pic")
-    add("delete_peak", EDIT, "&Supprimer le pic choisi", peaks.remove, ["Del"])
+    add("confirm_peak", EDIT, "Ajouter un pic au curseur", peaks.confirm, ["C"], "Curseur : un clic sur le spectre")
+    add("replace_peak", EDIT, "Replacer le pic choisi au curseur", peaks.replace, ["R"])
+    add("delete_peak", EDIT, "&Supprimer le pic choisi", peaks.remove, ["Del", "U"])
     window.actions.get("delete_peak").setEnabled(False)  # the key stays free for the fields otherwise
     window.peaks.edit.toggled.connect(window.actions.get("edit_peaks").setChecked)
     window.peaks.edit.toggled.connect(window.actions.get("delete_peak").setEnabled)
@@ -115,12 +117,16 @@ def create_viewer(session: Optional[Session] = None, runner=None) -> Viewer:
     window.actions.get("cake").setChecked(True)
     add("auto", ANALYSIS, "Analyse &automatique…", analysis.start, ["Ctrl+R"],
         "Détecter les pics, trouver les phases et leurs pressions, ajuster (Pearson IV), avec suivi des pics")
-    add("fit", ANALYSIS, "A&juster le spectre", editing.fit, ["Ctrl+F"],
+    add("fit", ANALYSIS, "A&juster le spectre", editing.fit, ["Ctrl+F", "Shift+F"],
         "Ajuster les pics du spectre courant, puis sa maille et sa pression")
     add("fit_peak", ANALYSIS, "Ajuster le pic choisi", peaks.fit_peak, ["Shift+R"],
         "Le pic choisi seul, les autres étant soustraits (onglet Pics)")
     add("fit_selection", ANALYSIS, "Ajuster la &sélection", lambda: editing.fit_series("selection", window.phases.follow.isChecked()),
-        ["Ctrl+Shift+F"], "Ajuster la sélection de la liste, à partir du spectre courant")
+        ["Ctrl+Shift+F", "Shift+T"], "Ajuster la sélection de la liste, à partir du spectre courant")
+    add("add_phase", ANALYSIS, "Ajouter la phase choisie", window.phases.add.click, ["Shift+A"],
+        "La phase et la pression de l'onglet Phases, sur le spectre courant")
+    add("remove_phase", ANALYSIS, "Retirer la phase choisie", window.phases.remove.click, ["D"])
+    add("show_detection", ANALYSIS, "Voir la détection des pics", lambda: window.tabs.setCurrentWidget(window.detection), ["M"])
     add("calibration", TOOLS, "&Calibration du détecteur…", window.show_calibration, ["Ctrl+L"],
         "Calibrer la géométrie sur une image de LaB6 / CeO2 et enregistrer le .poni")
     add("shortcuts", HELP, "&Raccourcis clavier", window.show_shortcuts, ["F1"])

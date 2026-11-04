@@ -8,8 +8,8 @@ import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QAbstractItemView, QCheckBox, QComboBox, QDoubleSpinBox, QGridLayout, QHBoxLayout, QLabel, QPushButton, QSplitter,
-    QVBoxLayout, QWidget,
+    QAbstractItemView, QCheckBox, QComboBox, QDoubleSpinBox, QGridLayout, QHBoxLayout, QLabel, QListWidget,
+    QListWidgetItem, QPushButton, QSplitter, QVBoxLayout, QWidget,
 )
 
 from trxrd.gui.presenters.display import PEAK_MODELS
@@ -32,6 +32,8 @@ class PhasesPanel(QWidget):
         self.on_add: Optional[Callable[[str, float], None]] = None
         self.on_remove: Optional[Callable[[str], None]] = None
         self.on_pressure: Optional[Callable[[str, float], None]] = None
+        self.on_phase: Optional[Callable[[], None]] = None
+        self.on_line: Optional[Callable[[str, tuple, bool], None]] = None
         self.on_fit: Optional[Callable[[], None]] = None
         self.on_fit_series: Optional[Callable[[str, bool], None]] = None
         self.on_copy: Optional[Callable[[], None]] = None
@@ -43,6 +45,9 @@ class PhasesPanel(QWidget):
         self.table = RowsTable()
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table.itemSelectionChanged.connect(self._row_chosen)
+        self.lines = QListWidget()
+        self.lines.setToolTip("Raies de la phase choisie : cocher pour lui donner un pic, décocher pour le retirer")
+        self.lines.itemChanged.connect(self._line_changed)
         self.card = QComboBox()
         self.card.currentIndexChanged.connect(self._card_chosen)
         self.pressure = QDoubleSpinBox()
@@ -78,8 +83,12 @@ class PhasesPanel(QWidget):
         self.paste.clicked.connect(lambda: self.on_paste and self.on_paste())
         self.clear_model.clicked.connect(lambda: self.on_clear and self.on_clear())
 
+        split = QSplitter(Qt.Orientation.Vertical)
+        split.addWidget(self.table)
+        split.addWidget(self.lines)
+        split.setSizes([150, 150])
         layout = QVBoxLayout(self)
-        layout.addWidget(self.table, 1)
+        layout.addWidget(split, 1)
         layout.addLayout(_row(self.card, self.pressure))
         layout.addLayout(_row(self.add, self.remove, self.fit))
         layout.addLayout(_row(self.fit_selection, self.fit_all))
@@ -109,6 +118,25 @@ class PhasesPanel(QWidget):
             self._set_pressure(self._on_spectrum[name])
         self.remove.setEnabled(here)
         self.add.setEnabled(name is not None and not here)
+        if not self._showing and self.on_phase is not None:
+            self.on_phase()
+
+    def _show_lines(self, lines) -> None:
+        self.lines.blockSignals(True)
+        self.lines.clear()
+        for line in lines:
+            item = QListWidgetItem(f"{line.label}   {line.two_theta:.3f}°   {line.intensity:.0f} %")
+            item.setData(Qt.ItemDataRole.UserRole, line.hkl)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Checked if line.used else Qt.CheckState.Unchecked)
+            self.lines.addItem(item)
+        self.lines.blockSignals(False)
+
+    def _line_changed(self, item) -> None:
+        if self.on_line is not None:
+            used = item.checkState() == Qt.CheckState.Checked
+            hkl = tuple(int(i) for i in item.data(Qt.ItemDataRole.UserRole))
+            self.on_line(self.card.currentData(), hkl, used)
 
     def _set_pressure(self, value: float) -> None:
         self.pressure.blockSignals(True)
@@ -144,6 +172,7 @@ class PhasesPanel(QWidget):
                 self.card.setCurrentIndex(max(self.card.findData(chosen), 0))
                 self.card.blockSignals(False)
             self._card_chosen()
+            self._show_lines(choices.lines)
             self.fit_selection.setText(f"Ajuster la sélection ({choices.selected})")
             self.fit_all.setText(f"Ajuster tous ({choices.count})")
             self.paste.setEnabled(choices.copied_from is not None)
@@ -159,6 +188,7 @@ class PhasesPanel(QWidget):
 
     def clear(self) -> None:
         self.table.show_rows([], [])
+        self._show_lines([])
         self.card.clear()
         self._on_spectrum = {}
         self.message.setText("")

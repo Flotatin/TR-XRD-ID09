@@ -88,5 +88,5 @@ values). Never commit the user's data (raw scans, .CEDX) to the repository.
 ## Next steps
 
 See `docs/PASSATION.md` §6 (P1: GUI, viewer + run creation + cake + calibration + dDAC panel + raw-scan preview +
-automatic analysis + manual work on the phases and peaks done, next: zones with the mouse, mask editing; P2: remaining validation items; P4: v1 features not ported yet;
+automatic analysis + manual work and custom fit of phases and peaks done, next: zones with the mouse, mask editing; P2: remaining validation items; P4: v1 features not ported yet;
 P5: algorithm ideas; P6: repository split).
