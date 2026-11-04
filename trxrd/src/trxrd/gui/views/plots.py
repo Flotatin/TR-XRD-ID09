@@ -21,6 +21,7 @@ PALETTE = ("#1f77b4", "#d62728", "#2ca02c", "#9467bd", "#ff7f0e", "#8c564b", "#e
 RIGHT_AXIS_WIDTH = 56  # oscilloscope axis of the evolution plot; the map below keeps the same margin
 # detected peaks: used by the phase search, too broad (ignored), in an excluded zone (free peak)
 DETECTION_COLORS = {"used": "#2ca02c", "broad": "#ff7f0e", "excluded": "#7f7f7f"}
+THETA_COLOR = "#b8860b"  # 2θ chosen with a click, on the white spectrum; yellow on the dark images
 
 
 def phase_color(index: int) -> str:
@@ -159,6 +160,7 @@ class SpectrumView(QWidget):
         self.on_fit_zone: Optional[Callable[[float, float], None]] = None
         self.on_zone_moved: Optional[Callable[[int, float, float], None]] = None
         self.on_zone_picked: Optional[Callable[[int], None]] = None
+        self.on_theta: Optional[Callable[[float], None]] = None
         self.handles: Optional[List[_PeakHandle]] = None  # None: not editing the peaks
         self.plot = pg.PlotWidget()
         cross = pg.mkPen("#303030", width=1, style=Qt.PenStyle.DotLine)
@@ -167,6 +169,12 @@ class SpectrumView(QWidget):
         for line in (self.cross_x, self.cross_y):
             line.hide()
             self.plot.addItem(line, ignoreBounds=True)
+        # the 2θ chosen with a click, here or on the cake or the image
+        self.theta = pg.InfiniteLine(angle=90, movable=False, pen=pg.mkPen(THETA_COLOR, width=1.5), label="{value:.3f}",
+                                     labelOpts={"position": 0.95, "color": THETA_COLOR, "fill": (255, 255, 255, 200)})
+        self.theta.setZValue(12)
+        self.theta.hide()
+        self.plot.addItem(self.theta, ignoreBounds=True)
         self.plot.scene().sigMouseClicked.connect(self._clicked)
         self.plot.getAxis("left").setWidth(AXIS_WIDTH)  # aligned with the cake below
         self.plot.getAxis("bottom").setStyle(showValues=False)  # the x axis is under the band
@@ -256,17 +264,20 @@ class SpectrumView(QWidget):
         self._clear_ticks()
         self.show_detection(None)
         self.show_zones(None)
+        self.show_theta(None)
         self.plot.setTitle("")
         limit_view(self.plot)
 
     def _clicked(self, event) -> None:
-        """While editing the peaks: a click puts the cursor there, Ctrl + click adds a peak there."""
+        """A click chooses a 2θ. While editing the peaks, it puts the cursor there too, and Ctrl + click adds a peak."""
         box = self.plot.getPlotItem().vb
-        if self.handles is None or event.button() != Qt.MouseButton.LeftButton:
-            return
-        if not box.sceneBoundingRect().contains(event.scenePos()):
+        if event.button() != Qt.MouseButton.LeftButton or not box.sceneBoundingRect().contains(event.scenePos()):
             return
         point = box.mapSceneToView(event.scenePos())
+        if self.on_theta is not None:
+            self.on_theta(point.x())
+        if self.handles is None:
+            return
         self.cross_x.setPos(point.x())
         self.cross_y.setPos(point.y())
         for line in (self.cross_x, self.cross_y):
@@ -275,6 +286,12 @@ class SpectrumView(QWidget):
             self.on_cursor(point.x(), point.y())
         if event.modifiers() & Qt.KeyboardModifier.ControlModifier and self.on_add_peak is not None:
             self.on_add_peak(point.x(), point.y())
+
+    def show_theta(self, x: Optional[float]) -> None:
+        """The 2θ chosen, in the display unit; None: none."""
+        self.theta.setVisible(x is not None)
+        if x is not None:
+            self.theta.setValue(x)
 
     def _zone_drawing(self, start: float, stop: float, finished: bool, modifiers) -> None:
         fit_zone = bool(modifiers & Qt.KeyboardModifier.ControlModifier)
@@ -699,7 +716,7 @@ class RateView(QWidget):
         self.toggle = QPushButton("Zone de spectres")
         self.toggle.setCheckable(True)
         self.toggle.setToolTip("Zone de temps, à tirer sur l'un des trois graphes, ou à tracer avec Maj + glisser.\n"
-                               "Elle choisit les spectres (comme l'onglet Spectres : ajuster, coller, traiter, analyser…)\n"
+                               "Elle choisit les spectres (comme l'onglet Liste : ajuster, coller, traiter, analyser…)\n"
                                "et donne le dP/dt moyen : pente de la droite ajustée sur tous ses spectres.")
         self.copy = QPushButton("Copier")
         self.copy.setToolTip("Copier le dP/dt moyen de chaque courbe (tableau pour un tableur)")
@@ -866,6 +883,7 @@ class CakeView(QWidget):
     def __init__(self, link_to: Optional[pg.PlotWidget] = None, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.on_mode: Optional[Callable[[str], None]] = None
+        self.on_click: Optional[Callable[[float, float], None]] = None
         self.link_to = link_to
         self.mode = QComboBox()
         self.mode.addItem("cake (2θ × azimut)", "cake")
@@ -881,6 +899,16 @@ class CakeView(QWidget):
             self.panel.add_control(widget)
         self.panel.bar.addWidget(self.message)
         self.plot, self.image = self.panel.plot, self.panel.image
+        self.guides_shown = True
+        self._lines: List[pg.GraphicsObject] = []  # expected lines of the phases
+        pen = pg.mkPen("y", width=1.5)
+        self.theta = pg.InfiniteLine(angle=90, movable=False, pen=pen)  # the 2θ chosen: a line on the cake...
+        self.ring = pg.PlotDataItem(pen=pen, connect="finite")  # ...an arc on the image
+        for item in (self.theta, self.ring):
+            item.setZValue(10)
+            item.hide()
+            self.plot.addItem(item, ignoreBounds=True)
+        _scene_click(self.plot, lambda x, y: self.on_click and self.on_click(x, y))
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.panel)
@@ -888,10 +916,54 @@ class CakeView(QWidget):
     def clear(self) -> None:
         self.panel.clear()
         self.message.setText("")
+        self._hide_marks()
 
     def show_message(self, text: str) -> None:
         self.panel.clear()
         self.message.setText(text)
+        self._hide_marks()
+
+    def show_note(self, text: str) -> None:
+        """A message that leaves the image in place."""
+        self.message.setText(text)
+
+    def _hide_marks(self) -> None:
+        self.show_lines([])
+        self.show_theta(None)
+        self.show_ring(None)
+
+    def set_guides(self, shown: bool) -> None:
+        """Lines of the phases across the cake, like those across the spectrum."""
+        self.guides_shown = bool(shown)
+        for line in self._lines:
+            line.setVisible(self.guides_shown)
+
+    def show_lines(self, lines) -> None:
+        """Expected lines of each phase (display.Lines), dotted across the cake."""
+        for item in self._lines:
+            self.plot.removeItem(item)
+        self._lines = []
+        for phase in lines:
+            pen = pg.mkPen(pg.mkColor(phase_color(phase.color)).lighter(150), width=1.5,  # seen on a dark image
+                           style=Qt.PenStyle.DotLine)
+            for position, intensity in zip(phase.x, phase.intensity):
+                if intensity >= SpectrumView.GUIDE_MIN_INTENSITY:
+                    line = pg.InfiniteLine(pos=float(position), angle=90, movable=False, pen=pen)
+                    line.setZValue(5)
+                    line.setVisible(self.guides_shown)
+                    self.plot.addItem(line, ignoreBounds=True)
+                    self._lines.append(line)
+
+    def show_theta(self, x: Optional[float]) -> None:
+        self.theta.setVisible(x is not None)
+        if x is not None:
+            self.theta.setValue(x)
+
+    def show_ring(self, curve) -> None:
+        """(x, y) of the ring at the 2θ chosen, with NaN between its pieces; None: no ring."""
+        self.ring.setVisible(curve is not None)
+        if curve is not None:
+            self.ring.setData(*curve)
 
     def show_cake(self, data) -> None:
         self.message.setText("")

@@ -50,7 +50,7 @@ class MainWindow(QMainWindow):
         self.map.panel.on_histogram = lambda shown: self.align_plots()
 
         self.tabs = tables = QTabWidget()
-        tables.addTab(self.spectra, "Spectres")
+        tables.addTab(self.spectra, "Liste")
         tables.addTab(self.phases, "Phases")
         tables.addTab(self.peaks, "Pics")
         tables.addTab(self.processing, "Traitement")

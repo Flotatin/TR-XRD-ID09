@@ -136,6 +136,32 @@ def angle_maps(geometry: Geometry, shape: Tuple[int, int]) -> Tuple[np.ndarray, 
     return ai.center_array(shape, unit="2th_deg"), ai.center_array(shape, unit="chi_deg")
 
 
+def _crossings(field: np.ndarray, chi: np.ndarray, value: float) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """(row, column, azimuth) where `field` crosses `value` between two neighbours of a column, by interpolation."""
+    rows, columns = np.nonzero((field[:-1] - value) * (field[1:] - value) < 0)
+    first, second = field[rows, columns], field[rows + 1, columns]
+    part = (value - first) / (second - first)
+    turn = (chi[rows + 1, columns] - chi[rows, columns] + 180.0) % 360.0 - 180.0  # azimuth wraps at ±180°
+    return rows + part, columns.astype(float), chi[rows, columns] + part * turn
+
+
+def iso_curve(two_theta: np.ndarray, chi: np.ndarray, value: float, max_gap: float = 3.0) -> Tuple[np.ndarray, np.ndarray]:
+    """(x, y) of the curve 2θ = `value` on the detector; pixel (row i, column j) covers [j, j + 1] × [i, i + 1].
+
+    The exact curve from the 2θ of each pixel: it holds with a tilted detector
+    and with the beam outside it, where a circle does not. It runs by azimuth,
+    with a NaN where it leaves the detector and comes back (`max_gap`, pixels).
+    """
+    two_theta, chi = np.asarray(two_theta, dtype=float), np.asarray(chi, dtype=float)
+    rows, columns, azimuth = _crossings(two_theta, chi, float(value))
+    other_columns, other_rows, other_azimuth = _crossings(two_theta.T, chi.T, float(value))
+    order = np.argsort(np.concatenate([azimuth, other_azimuth]), kind="stable")
+    x = np.concatenate([columns, other_columns])[order] + 0.5
+    y = np.concatenate([rows, other_rows])[order] + 0.5
+    gaps = np.flatnonzero(np.hypot(np.diff(x), np.diff(y)) > max_gap) + 1
+    return np.insert(x, gaps, np.nan), np.insert(y, gaps, np.nan)
+
+
 def usable_pixels(image: np.ndarray, mask: Optional[np.ndarray] = None) -> np.ndarray:
     """Pixels to use: not masked, finite, not a negative detector artefact."""
     good = np.isfinite(image) & (image > -1.0)

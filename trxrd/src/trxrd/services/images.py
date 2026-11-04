@@ -13,6 +13,7 @@ import numpy as np
 from trxrd.domain import Run
 from trxrd.io import esrf
 from trxrd.io.calibration import calibration_from_files, read_mask
+from trxrd.processing.geometry import iso_curve
 from trxrd.processing.integration import Integrator, apply_flip, azimuthal_integrator
 from trxrd.services import raw_data
 
@@ -38,6 +39,7 @@ class FrameSource:
         self.image_file = raw_data.locate_raw_scan(run, near)
         self._stack = None
         self._integrator = None
+        self._maps: Optional[Tuple[np.ndarray, np.ndarray]] = None
         self._lock = threading.Lock()  # several worker threads may ask for frames of the same run
 
     @property
@@ -72,6 +74,29 @@ class FrameSource:
             if calibration.mask is not None and calibration.mask.shape == image.shape:
                 image = np.where(calibration.mask > 0, np.nan, image)
         return image
+
+    def _angles(self) -> Tuple[np.ndarray, np.ndarray]:
+        """(2θ, azimuth) in degrees of each pixel of the images as `frame` gives them; about a second the first time."""
+        if self.problem:
+            raise ValueError(self.problem)
+        with self._lock:
+            if self._maps is None:
+                shape = np.shape(self._raw(0))
+                integrator = azimuthal_integrator(self.run.calibration)
+                self._maps = tuple(np.asarray(integrator.center_array(shape, unit=unit), dtype=float)
+                                   for unit in ("2th_deg", "chi_deg"))
+            return self._maps
+
+    def two_theta_at(self, x: float, y: float) -> Optional[float]:
+        """2θ (deg) under the point (x, y) of the image; None outside it."""
+        two_theta = self._angles()[0]
+        row, column = int(np.floor(y)), int(np.floor(x))
+        inside = 0 <= row < two_theta.shape[0] and 0 <= column < two_theta.shape[1]
+        return float(two_theta[row, column]) if inside else None
+
+    def ring(self, two_theta: float) -> Tuple[np.ndarray, np.ndarray]:
+        """(x, y) on the image of the ring at `two_theta` (deg)."""
+        return iso_curve(*self._angles(), two_theta)
 
     def cake(self, index: int, n_azimuth: int = 360) -> Cake:
         if self.problem:

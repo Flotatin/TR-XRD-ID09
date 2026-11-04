@@ -13,7 +13,9 @@ Views expected (duck typing):
 - rates: show_rates(RateData), show_interval(IntervalData or None, region), set_marker(x), clear(),
   on_pick(x), on_options(by, half_window), on_interval(start, stop), on_interval_toggle(on)
 - map: show_map(TimeMapData), show_interval(region), set_marker(x), clear(), on_pick(x), on_interval(start, stop)
-- cake: show_cake(CakeData), show_image(array), show_message(text), clear(), on_mode(mode)
+- cake: show_cake(CakeData), show_image(array), show_message(text), show_note(text), clear(), on_mode(mode),
+  show_lines(lines), show_theta(x or None), show_ring((x, y) or None), on_click(x, y);
+  the spectrum view: show_theta(x or None), on_theta(x)
 - table: show_rows(columns, rows)
 - navigator: set_current(index, count, text), on_select(index)
 - list of the spectra: show_spectra(columns, rows), set_current(index, selection), on_select(index),
@@ -30,6 +32,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, List, Optional, Tuple
+
+import numpy as np
 
 from trxrd.gui.presenters import display
 from trxrd.services import rates, raw_data
@@ -325,24 +329,38 @@ class CakePresenter:
 
     The newest request wins: when the user scrolls through the spectra, the
     results of the older requests are dropped.
+
+    Over the cake: the expected lines of the phases. A click on the cake, on
+    the image or on the spectrum chooses a 2θ (`theta`), kept from one spectrum
+    to the next: a line on the spectrum and on the cake, an arc on the image.
     """
 
     MODES = ("cake", "image")
 
-    def __init__(self, session: Session, settings: DisplaySettings, view, runner=None) -> None:
-        self.session, self.settings, self.view = session, settings, view
+    def __init__(self, session: Session, settings: DisplaySettings, view, runner=None, spectrum_view=None) -> None:
+        self.session, self.settings, self.view, self.spectrum_view = session, settings, view, spectrum_view
         self.runner = runner or ImmediateRunner()
         self.mode = "cake"
         self.visible = True
+        self.theta: Optional[float] = None  # 2θ chosen with the mouse (deg)
         self._source = None
+        self._shown = ""  # "cake" or "image" once it is on screen
         self._ticket = 0
+        self._ring_ticket = 0
         view.on_mode = self.set_mode
+        view.on_click = self.clicked
+        if spectrum_view is not None:
+            spectrum_view.on_theta = self.spectrum_clicked
         session.subscribe(Event.RUN_CHANGED, self._new_run)
         session.subscribe(Event.SPECTRUM_CHANGED, self.refresh)
+        session.subscribe(Event.DATA_CHANGED, self.marks)  # the lines follow the pressure of the phases
         settings.subscribe(self.refresh)
+        settings.subscribe(self.marks)
 
     def _new_run(self, *_) -> None:
         self._source = None
+        self._shown = ""
+        self.theta = None
 
     def set_mode(self, mode: str) -> None:
         if mode not in self.MODES:
@@ -361,15 +379,12 @@ class CakePresenter:
         if run is None or not run.spectra:
             self.view.clear()
             return
-        index, unit, mode = self.session.index, self.settings.unit_for(run), self.mode
-        near = [self.session.path] if self.session.path is not None else []
+        index, unit, mode, near = self.session.index, self.settings.unit_for(run), self.mode, self._near()
         self._ticket += 1
         ticket = self._ticket
 
         def task(progress):
-            if self._source is None or self._source.run is not run:
-                self._source = FrameSource(run, near)
-            source = self._source
+            source = self._frames(run, near)
             if source.problem and not (mode == "image" and source.available):
                 return "message", source.problem
             if mode == "image":
@@ -378,6 +393,14 @@ class CakePresenter:
 
         self.runner.run(task, lambda result: self._show(ticket, result),
                         lambda message: self._show(ticket, ("message", message)))
+
+    def _frames(self, run, near) -> FrameSource:
+        if self._source is None or self._source.run is not run:
+            self._source = FrameSource(run, near)
+        return self._source
+
+    def _near(self) -> List[Path]:
+        return [self.session.path] if self.session.path is not None else []
 
     def _show(self, ticket: int, result) -> None:
         if ticket != self._ticket:
@@ -389,6 +412,62 @@ class CakePresenter:
             self.view.show_image(data)
         else:
             self.view.show_message(data)
+        self._shown = kind if kind in self.MODES else ""
+        self.marks()
+
+    # ------------------------------------------------------------------ marks over the cake and the image
+
+    def marks(self, *_) -> None:
+        """The lines of the phases over the cake; the 2θ chosen on the spectrum, the cake and the image."""
+        run, spectrum = self.session.run, self.session.spectrum
+        if spectrum is None:
+            return
+        unit = self.settings.unit_for(run)
+        x = float(display.to_unit(self.theta, unit, run)) if self.theta is not None else None
+        on_cake = self._shown == "cake"
+        self.view.show_lines(display.expected_lines(run, spectrum, unit) if on_cake else [])
+        self.view.show_theta(x if on_cake else None)
+        if self.spectrum_view is not None:
+            self.spectrum_view.show_theta(x)
+        self._show_ring()
+
+    def _show_ring(self) -> None:
+        self._ring_ticket += 1
+        ticket, value = self._ring_ticket, self.theta
+        if self._shown != "image" or value is None:
+            self.view.show_ring(None)
+            return
+        run, near = self.session.run, self._near()
+
+        def shown(curve) -> None:
+            if ticket == self._ring_ticket:
+                self.view.show_ring(curve)
+
+        self.runner.run(lambda progress: self._frames(run, near).ring(value), shown, self.view.show_note)
+
+    def set_theta(self, value: Optional[float]) -> None:
+        """2θ chosen (deg); None: none."""
+        self.theta = float(value) if value is not None and np.isfinite(value) else None
+        self.marks()
+
+    def spectrum_clicked(self, x: float) -> None:
+        self.set_theta(display.from_unit(x, self.settings.unit_for(self.session.run), self.session.run))
+
+    def clicked(self, x: float, y: float) -> None:
+        """A click on the cake gives 2θ by its x; on the image, by the pixel under it."""
+        run = self.session.run
+        if run is None or not run.spectra or not self._shown:
+            return
+        if self._shown == "cake":
+            self.spectrum_clicked(x)
+            return
+        near = self._near()
+
+        def found(value: Optional[float]) -> None:
+            if value is not None:
+                self.set_theta(value)
+
+        self.runner.run(lambda progress: self._frames(run, near).two_theta_at(x, y), found, self.view.show_note)
 
 
 class TablesPresenter:
@@ -421,7 +500,7 @@ class NavigatorPresenter:
 
 
 class SpectraListPresenter:
-    """List of the spectra (tab "Spectres"): one row goes to a spectrum, several choose them.
+    """List of the spectra (tab "Liste"): one row goes to a spectrum, several choose them.
 
     Moving the current spectrum (slider, keys, plots) never changes the
     selection. One row clears a selection, as in any list; a zone stays,

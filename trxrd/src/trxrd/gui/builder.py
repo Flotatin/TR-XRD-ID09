@@ -47,7 +47,7 @@ def create_viewer(session: Optional[Session] = None, runner=None) -> Viewer:
     settings = DisplaySettings()
     window = MainWindow()
     runner = runner or ThreadRunner()
-    cake = CakePresenter(session, settings, window.cake, runner)
+    cake = CakePresenter(session, settings, window.cake, runner, window.spectrum)
     rate_settings = RateSettings()  # shared by the dDAC plots and the list of the spectra (zone of spectra)
     presenters = [
         SpectrumPresenter(session, settings, window.spectrum),
@@ -124,8 +124,13 @@ def create_viewer(session: Optional[Session] = None, runner=None) -> Viewer:
     add("raw", VIEW, "Signal &brut (avec le fond)", lambda: settings.set_raw(window.actions.get("raw").isChecked()),
         ["Ctrl+B"], checkable=True,
         tip="Par défaut le spectre est montré filtré, fond soustrait : c'est sur ce signal qu'on cherche les pics")
-    add("guides", VIEW, "Raies sur le spec&tre", lambda: window.spectrum.set_guides(window.actions.get("guides").isChecked()),
-        ["Ctrl+G"], checkable=True, tip="Traits verticaux des raies attendues à travers le spectre, à tout zoom")
+    def toggle_guides() -> None:
+        shown = window.actions.get("guides").isChecked()
+        window.spectrum.set_guides(shown)
+        window.cake.set_guides(shown)
+
+    add("guides", VIEW, "Raies sur le spec&tre et le cake", toggle_guides, ["Ctrl+G"], checkable=True,
+        tip="Traits des raies attendues à travers le spectre et le cake, à tout zoom")
     window.actions.get("guides").setChecked(True)
     add("fills", VIEW, "Pics &remplis", lambda: window.spectrum.set_fills(window.actions.get("fills").isChecked()),
         ["Ctrl+P"], checkable=True, tip="Chaque pic du modèle rempli à la couleur de sa phase")
@@ -136,6 +141,8 @@ def create_viewer(session: Optional[Session] = None, runner=None) -> Viewer:
     add("cake", VIEW, "&Intégration sous le spectre (cake)", toggle_cake, ["Ctrl+K"], checkable=True,
         tip="Cake (2θ × azimut) ou image brute du spectre courant, calculé depuis les images de RAW_DATA")
     window.actions.get("cake").setChecked(True)
+    add("clear_theta", VIEW, "Effacer le repère 2θ", lambda: cake.set_theta(None), ["Esc"],
+        "Un clic sur le spectre, le cake ou l'image pose un repère : trait, ou arc de cercle sur l'image")
     add("auto", ANALYSIS, "Analyse &automatique…", analysis.start, ["Ctrl+R"],
         "Détecter les pics, trouver les phases et leurs pressions, ajuster (Pearson IV), avec suivi des pics")
     add("fit", ANALYSIS, "A&juster le spectre", editing.fit, ["Ctrl+F", "Shift+F"],

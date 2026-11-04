@@ -1,4 +1,4 @@
-"""Tables, the slider of the spectra (between two arrows) and their list (tab "Spectres")."""
+"""Tables, the slider of the spectra (between two arrows) and their list (tab "Liste")."""
 
 from __future__ import annotations
 

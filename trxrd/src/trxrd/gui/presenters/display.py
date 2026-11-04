@@ -385,7 +385,7 @@ def zone_note(outside: int, excluded: int) -> str:
     return "\n".join(notes)
 
 
-NO_SELECTION = ("Aucun spectre sélectionné : les choisir dans l'onglet Spectres (Maj + clic, Ctrl + clic), "
+NO_SELECTION = ("Aucun spectre sélectionné : les choisir dans l'onglet Liste (Maj + clic, Ctrl + clic), "
                 "ou tracer une zone de spectres sur un graphe dDAC (Maj + glisser).")
 
 

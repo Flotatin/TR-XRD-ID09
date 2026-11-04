@@ -970,8 +970,9 @@ def _pick_rows(window, rows):
 def test_the_list_is_a_tab_and_chooses_spectra(viewer, compression_run):
     window = _shown(viewer, compression_run)
     session, spectra = viewer.session, window.spectra
-    assert window.tabs.tabText(window.tabs.indexOf(spectra)) == "Spectres"
+    assert window.tabs.tabText(window.tabs.indexOf(spectra)) == "Liste"
     assert window.tabs.currentWidget() is window.phases  # the list is there when it is wanted
+    assert window.tabs.tabBar().sizeHint().width() <= window.tabs.width()  # every tab is seen, without scrolling
     assert spectra.table.rowCount() == 6 and spectra.selected_rows() == [0]
 
     _pick_rows(window, [1, 2, 4])  # spectra apart
@@ -1009,3 +1010,79 @@ def test_the_list_and_the_zone_follow_each_other(viewer, compression_run):
 def test_the_zone_is_seen_over_the_map(viewer, compression_run):
     window = _shown(viewer, compression_run)
     assert window.map.interval.region.zValue() > window.map.image.zValue()
+
+
+@pytest.fixture
+def raw_viewer(viewer, tmp_path, raw_root):
+    """The window on a run with its raw images, and a phase on the first spectrum."""
+    from conftest import DATA, LIBRARY
+    from trxrd.domain import PhaseFit
+    from trxrd.services.run_builder import build_and_save
+
+    scan = raw_root / "water02" / "water02_0001" / "scan0003" / "scan_jf1m_0000.h5"
+    built = build_and_save(scan, tmp_path / "analyse", DATA / "calib_THT8_correct_samedi.poni",
+                           DATA / "scan_jf1m_0000.mask", two_theta_range=(8, 25), phase_paths=[LIBRARY / "H2O"])
+    viewer.window.resize(1600, 950)
+    viewer.window.show()
+    viewer.main.open(str(built))
+    viewer.session.run.spectra[0].phases = [PhaseFit(phase="H2O_Ice_VII", pressure=3.0)]
+    viewer.session.modified()
+    QApplication.processEvents()
+    return viewer
+
+
+def test_lines_of_the_phases_dotted_on_the_cake(raw_viewer):
+    window = raw_viewer.window
+    cake = window.cake
+    assert cake._lines and all(line.isVisible() for line in cake._lines)
+    assert all(line.pen.style() == Qt.PenStyle.DotLine for line in cake._lines)
+    assert all(line.zValue() > cake.image.zValue() for line in cake._lines)
+    spectrum = sorted(guide.value() for guide in window.spectrum._guides)
+    assert sorted(line.value() for line in cake._lines) == pytest.approx(spectrum)  # the same lines, on the same axis
+    window.actions.get("guides").trigger()  # Ctrl+G: both at once
+    assert not any(line.isVisible() for line in cake._lines)
+    assert not any(guide.isVisible() for guide in window.spectrum._guides)
+    window.actions.get("guides").trigger()
+    assert all(line.isVisible() for line in cake._lines)
+
+
+def test_a_real_click_on_the_cake_and_on_the_spectrum(raw_viewer):
+    window = raw_viewer.window
+    spectrum, cake = window.spectrum, window.cake
+    assert not spectrum.theta.isVisible() and not cake.theta.isVisible()
+    _click(cake.plot, 15.0)
+    assert cake.theta.isVisible() and cake.theta.value() == pytest.approx(15.0, abs=0.05)
+    assert spectrum.theta.isVisible() and spectrum.theta.value() == cake.theta.value()
+    _click(spectrum.plot, 17.0)
+    assert spectrum.theta.value() == pytest.approx(17.0, abs=0.05) and cake.theta.value() == spectrum.theta.value()
+    window.actions.get("clear_theta").trigger()  # Esc
+    assert not spectrum.theta.isVisible() and not cake.theta.isVisible()
+
+
+def test_a_real_click_on_the_image_draws_an_arc(raw_viewer):
+    window = raw_viewer.window
+    cake = window.cake
+    cake.mode.setCurrentIndex(cake.mode.findData("image"))
+    QApplication.processEvents()
+    assert not cake._lines and not cake.theta.isVisible()
+    assert not cake.ring.isVisible()
+    low, high = cake.plot.getPlotItem().vb.viewRange()[0]
+    _click(cake.plot, (low + high) / 2)
+    assert cake.ring.isVisible() and window.spectrum.theta.isVisible()
+    x, y = cake.ring.getData()
+    assert np.isfinite(x).sum() > 100
+    chosen = window.spectrum.theta.value()
+    assert 8 < chosen < 25
+    window.actions.get("clear_theta").trigger()
+    assert not cake.ring.isVisible() and not window.spectrum.theta.isVisible()
+    _click(window.spectrum.plot, 15.0)  # from the spectrum to the image
+    assert cake.ring.isVisible()
+
+
+def test_a_click_still_leaves_the_peaks_alone(raw_viewer):
+    """Choosing a 2θ is no edit: nothing to save, nothing to undo."""
+    session = raw_viewer.session
+    undo = session.undo_label
+    dirty = session.dirty
+    _click(raw_viewer.window.spectrum.plot, 15.0)
+    assert session.undo_label == undo and session.dirty == dirty
