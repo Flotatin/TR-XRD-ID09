@@ -4,10 +4,16 @@ from __future__ import annotations
 
 from typing import Callable, List, Optional
 
+import numpy as np
+import pyqtgraph as pg
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QAbstractItemView, QCheckBox, QComboBox, QDoubleSpinBox, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget,
+    QAbstractItemView, QCheckBox, QComboBox, QDoubleSpinBox, QGridLayout, QHBoxLayout, QLabel, QPushButton, QSplitter,
+    QVBoxLayout, QWidget,
 )
 
+from trxrd.gui.presenters.display import PEAK_MODELS
+from trxrd.gui.views.images import AXIS_WIDTH, limit_view, span_of
 from trxrd.gui.views.panels import RowsTable
 
 
@@ -159,8 +165,18 @@ class PhasesPanel(QWidget):
         self.setEnabled(False)
 
 
+def _value_box(decimals: int, low: float, high: float, step: float, suffix: str = "") -> QDoubleSpinBox:
+    box = QDoubleSpinBox()
+    box.setKeyboardTracking(False)
+    box.setDecimals(decimals)
+    box.setRange(low, high)
+    box.setSingleStep(step)
+    box.setSuffix(suffix)
+    return box
+
+
 class PeaksPanel(QWidget):
-    """Peaks of the current spectrum; editing them with the mouse on the spectrum."""
+    """Peaks of the current spectrum: the chosen one, its parameters, its fit alone; editing with the mouse."""
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -168,34 +184,128 @@ class PeaksPanel(QWidget):
         self.on_row: Optional[Callable[[int], None]] = None
         self.on_remove: Optional[Callable[[], None]] = None
         self.on_toggle: Optional[Callable[[], None]] = None
+        self.on_model: Optional[Callable[[str], None]] = None
+        self.on_value: Optional[Callable[[str, float], None]] = None
+        self.on_shape: Optional[Callable[[int, float], None]] = None
+        self.on_fit_peak: Optional[Callable[[], None]] = None
+        self.on_fit_settings: Optional[Callable[..., None]] = None
+        self._showing = False
+
         self.table = RowsTable()
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table.itemSelectionChanged.connect(self._row_chosen)
-        self.edit = QCheckBox("Modifier les pics à la souris (Ctrl+E)")
-        self.edit.toggled.connect(lambda on: self.on_edit and self.on_edit(on))
+
+        self.zoom = pg.PlotWidget()  # the chosen peak alone
+        self.zoom.getAxis("left").setWidth(AXIS_WIDTH)
+        self.zoom.showGrid(x=True, y=True, alpha=0.15)
+        self.zoom.setMenuEnabled(False)
+        self.zoom.hideButtons()
+        self.zoom_data = self.zoom.plot(pen=pg.mkPen("#404040", width=1))
+        self.zoom_curve = self.zoom.plot(pen=pg.mkPen("#d62728", width=1.5), fillLevel=0, fillBrush=pg.mkBrush(214, 39, 40, 50))
+        self.zoom_left = pg.LinearRegionItem(movable=False, brush=pg.mkBrush(128, 128, 128, 50), pen=pg.mkPen(None))
+        self.zoom_right = pg.LinearRegionItem(movable=False, brush=pg.mkBrush(128, 128, 128, 50), pen=pg.mkPen(None))
+        for zone in (self.zoom_left, self.zoom_right):
+            zone.setZValue(-10)
+            self.zoom.addItem(zone, ignoreBounds=True)
+
+        self.title = QLabel("Aucun pic choisi")
+        self.model = QComboBox()
+        self.model.addItems(list(PEAK_MODELS))
+        self.model.setToolTip("Profil du pic choisi ; sans pic choisi, celui des prochains pics")
+        self.center = _value_box(3, 0.0, 180.0, 0.01, " °")
+        self.height_box = _value_box(1, 0.0, 1e9, 10.0)
+        self.width_box = _value_box(4, 0.0001, 20.0, 0.005, " °")
+        self.width_box.setToolTip("σ du profil. La largeur à mi-hauteur est affichée à côté du titre.")
+        self.shapes = [_value_box(3, -1000.0, 1000.0, 0.05) for _ in range(2)]
+        self.shape_labels = [QLabel("") for _ in range(2)]
+        self.fit_window = _value_box(1, 1.0, 50.0, 1.0, " σ")
+        self.fit_window.setToolTip("Ajustement d'un seul pic : points à moins de ce nombre de σ de son centre")
+        self.variation = _value_box(0, 1.0, 1000.0, 10.0, " %")
+        self.variation.setToolTip("Liberté de la largeur dans les ajustements : de w / (1 + Var) à w × (1 + Var)")
+        self.fit = QPushButton("Ajuster ce pic (Maj+R)")
         self.remove = QPushButton("Supprimer (Suppr)")
         self.toggle = QPushButton("Activer / désactiver")
         self.toggle.setToolTip("Un pic désactivé reste dans la liste, mais sort de la courbe, de l'ajustement et de la maille")
-        self.remove.clicked.connect(lambda: self.on_remove and self.on_remove())
-        self.toggle.clicked.connect(lambda: self.on_toggle and self.on_toggle())
-        hint = QLabel("Tirer une poignée : 2θ et hauteur. Ctrl + clic : ajouter un pic, sur la raie libre de la phase "
-                      "choisie (onglet Phases) s'il y en a une près, sinon pic libre. Puis Ctrl+F pour ajuster.")
-        hint.setWordWrap(True)
-        hint.setStyleSheet("color: #606060")
+        self.edit = QCheckBox("Modifier les pics à la souris (Ctrl+E)")
+        self.edit.setToolTip("Tirer une poignée : 2θ et hauteur. Clic : poser le curseur. Ctrl + clic ou C : ajouter un pic,\n"
+                             "sur la raie libre de la phase choisie (onglet Phases) s'il y en a une près, sinon pic libre.")
         self.message = QLabel("")
         self.message.setWordWrap(True)
         self.message.setStyleSheet("color: #8a5a00")
+
+        self.edit.toggled.connect(lambda on: self.on_edit and self.on_edit(on))
+        self.remove.clicked.connect(lambda: self.on_remove and self.on_remove())
+        self.toggle.clicked.connect(lambda: self.on_toggle and self.on_toggle())
+        self.fit.clicked.connect(lambda: self.on_fit_peak and self.on_fit_peak())
+        self.model.currentTextChanged.connect(self._model_chosen)
+        for name, box in (("center", self.center), ("height", self.height_box), ("width", self.width_box)):
+            box.valueChanged.connect(lambda value, name=name: self._value(name, value))
+        for position, box in enumerate(self.shapes):
+            box.valueChanged.connect(lambda value, position=position: self._shape(position, value))
+        self.fit_window.valueChanged.connect(lambda value: self._fit_setting(fit_window=float(value)))
+        self.variation.valueChanged.connect(lambda value: self._fit_setting(fit_variation=float(value) / 100))
+
+        grid = QGridLayout()
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.addWidget(QLabel("Modèle"), 0, 0)
+        grid.addWidget(self.model, 0, 1, 1, 3)
+        grid.addWidget(QLabel("2θ"), 1, 0)
+        grid.addWidget(self.center, 1, 1)
+        grid.addWidget(QLabel("Hauteur"), 1, 2)
+        grid.addWidget(self.height_box, 1, 3)
+        grid.addWidget(QLabel("σ"), 2, 0)
+        grid.addWidget(self.width_box, 2, 1)
+        grid.addWidget(self.shape_labels[0], 3, 0)
+        grid.addWidget(self.shapes[0], 3, 1)
+        grid.addWidget(self.shape_labels[1], 3, 2)
+        grid.addWidget(self.shapes[1], 3, 3)
+        grid.addWidget(QLabel("Fenêtre"), 4, 0)
+        grid.addWidget(self.fit_window, 4, 1)
+        grid.addWidget(QLabel("Var"), 4, 2)
+        grid.addWidget(self.variation, 4, 3)
+        settings = QWidget()
+        settings_layout = QVBoxLayout(settings)
+        settings_layout.setContentsMargins(0, 0, 0, 0)
+        settings_layout.addWidget(self.title)
+        settings_layout.addLayout(grid)
+        settings_layout.addLayout(_row(self.fit, self.remove, self.toggle))
+        settings_layout.addWidget(self.edit)
+        settings_layout.addWidget(self.message)
+
+        split = QSplitter(Qt.Orientation.Vertical)
+        split.addWidget(self.table)
+        split.addWidget(self.zoom)
+        split.addWidget(settings)
+        split.setSizes([130, 130, 240])
         layout = QVBoxLayout(self)
-        layout.addWidget(self.table, 1)
-        layout.addWidget(self.edit)
-        layout.addLayout(_row(self.remove, self.toggle))
-        layout.addWidget(hint)
-        layout.addWidget(self.message)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.addWidget(split)
+        self._show_shape_labels((), ())
+
+    # ------------------------------------------------------------------ gestures
 
     def _row_chosen(self) -> None:
         rows = self.table.selectionModel().selectedRows()
         if rows and self.on_row is not None:
             self.on_row(rows[0].row())
+
+    def _model_chosen(self, model: str) -> None:
+        if not self._showing and self.on_model is not None:
+            self.on_model(model)
+
+    def _value(self, name: str, value: float) -> None:
+        if not self._showing and self.on_value is not None:
+            self.on_value(name, float(value))
+
+    def _shape(self, position: int, value: float) -> None:
+        if not self._showing and self.on_shape is not None:
+            self.on_shape(position, float(value))
+
+    def _fit_setting(self, **change) -> None:
+        if not self._showing and self.on_fit_settings is not None:
+            self.on_fit_settings(**change)
+
+    # ------------------------------------------------------------------ presenter
 
     def show_rows(self, columns, rows) -> None:
         self.table.blockSignals(True)
@@ -209,6 +319,63 @@ class PeaksPanel(QWidget):
         else:
             self.table.selectRow(row)
         self.table.blockSignals(False)
+
+    def _show_shape_labels(self, labels, bounds) -> None:
+        for k, (label, box) in enumerate(zip(self.shape_labels, self.shapes)):
+            shown = k < len(labels)
+            label.setText(labels[k] if shown else "")
+            label.setVisible(shown)
+            box.setVisible(shown)
+            if shown:
+                box.setRange(*bounds[k])
+
+    def show_peak(self, detail, settings) -> None:
+        """The chosen peak (display.PeakDetail) or None, and the settings of the fits."""
+        self._showing = True
+        try:
+            if settings is not None:
+                self.fit_window.setValue(settings.fit_window)
+                self.variation.setValue(100 * (settings.fit_variation if settings.fit_variation is not None else 3.0))
+            for box in (self.center, self.height_box, self.width_box, *self.shapes):
+                box.setEnabled(detail is not None)
+            for button in (self.fit, self.remove, self.toggle):
+                button.setEnabled(detail is not None)
+            if detail is None:
+                self.title.setText("Aucun pic choisi")
+                self._show_shape_labels((), ())
+                if settings is not None:
+                    self.model.setCurrentText(settings.peak_model)
+                return
+            fwhm = f"  (largeur à mi-hauteur {detail.fwhm:.3f}°)" if np.isfinite(detail.fwhm) else ""
+            self.title.setText(f"{detail.title}{fwhm}")
+            self.model.setCurrentText(detail.model)
+            self.center.setValue(detail.center)
+            self.height_box.setValue(detail.height if np.isfinite(detail.height) else 0.0)
+            self.width_box.setValue(detail.width if np.isfinite(detail.width) else 0.0001)
+            self._show_shape_labels(detail.shape_labels, detail.shape_bounds)
+            for box, value in zip(self.shapes, detail.shape):
+                box.setValue(value)
+        finally:
+            self._showing = False
+
+    def show_zoom(self, zoom) -> None:
+        """The chosen peak alone (display.PeakZoom), or None."""
+        if zoom is None:
+            self.zoom_data.setData([], [])
+            self.zoom_curve.setData([], [])
+            for zone in (self.zoom_left, self.zoom_right):
+                zone.hide()
+            limit_view(self.zoom)
+            return
+        low, high = float(zoom.x[0]), float(zoom.x[-1])
+        limit_view(self.zoom, (low, high), span_of(zoom.data, zoom.curve, [0.0]))
+        self.zoom_data.setData(zoom.x, zoom.data)
+        self.zoom_curve.setData(zoom.x, zoom.curve)
+        self.zoom_left.setRegion((low, zoom.window[0]))
+        self.zoom_right.setRegion((zoom.window[1], high))
+        for zone in (self.zoom_left, self.zoom_right):
+            zone.show()
+        self.zoom.getPlotItem().enableAutoRange()
 
     def show_message(self, text: str) -> None:
         self.message.setText(text)

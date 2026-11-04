@@ -102,6 +102,7 @@ class SpectrumView(QWidget):
 
     ROW_HEIGHT = 16  # px, one row of the band
     AXIS_HEIGHT = 46  # px, the x axis and its label, under the band
+    RESIDUAL_HEIGHT = 80  # px
     GUIDE_MIN_INTENSITY = 5.0  # % of the card: weaker lines get no vertical line
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
@@ -121,6 +122,23 @@ class SpectrumView(QWidget):
         self.data = self.plot.plot(pen=pg.mkPen("#404040", width=1), name="filtré − fond")
         self.baseline = self.plot.plot(pen=pg.mkPen("#1f77b4", width=1, style=Qt.PenStyle.DashLine), name="fond")
         self.fit = self.plot.plot(pen=pg.mkPen("#d62728", width=1.5), name="ajustement")
+        self.residual = pg.PlotWidget()  # raw - background - model, on the same x axis
+        self.residual.getAxis("left").setWidth(AXIS_WIDTH)
+        self.residual.getAxis("bottom").setStyle(showValues=False)
+        self.residual.getAxis("bottom").setHeight(2)
+        self.residual.setLabel("left", "Résidu")
+        self.residual.showGrid(x=True, y=True, alpha=0.15)
+        self.residual.setMenuEnabled(False)
+        self.residual.hideButtons()
+        self.residual.setFixedHeight(self.RESIDUAL_HEIGHT)
+        self.residual.addItem(pg.InfiniteLine(pos=0, angle=0, pen=pg.mkPen("#b0b0b0")), ignoreBounds=True)
+        self.residual_curve = self.residual.plot(pen=pg.mkPen("#606060", width=1), connect="finite")
+        self.residual.getPlotItem().setXLink(self.plot.getPlotItem())
+        keep_in_limits(self.residual, self.plot)
+        self.residual_shown = True
+        self.residual.hide()
+        self.fills_shown = True
+        self._fills: List[pg.GraphicsObject] = []
         self.band = pg.PlotWidget()
         self.band.getAxis("left").setWidth(AXIS_WIDTH)
         self.band.getAxis("left").setStyle(tickLength=0)
@@ -150,14 +168,17 @@ class SpectrumView(QWidget):
         stacked.setContentsMargins(0, 0, 0, 0)
         stacked.setSpacing(0)
         stacked.addWidget(self.plot, 1)
+        stacked.addWidget(self.residual)
         stacked.addWidget(self.band)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addLayout(_row(plots, self.spacer))
 
     def clear(self) -> None:
-        for curve in (self.data, self.baseline, self.fit):
+        for curve in (self.data, self.baseline, self.fit, self.residual_curve):
             curve.setData([], [])
+        self.residual.hide()
+        self.show_peak_fills([], None)
         self._clear_ticks()
         self.show_detection(None)
         self.plot.setTitle("")
@@ -203,6 +224,30 @@ class SpectrumView(QWidget):
             item.sigPositionChangeFinished.connect(self._handle_moved)
             self.plot.addItem(item, ignoreBounds=True)
             self.handles.append(item)
+
+    def show_peak_fills(self, curves, selected) -> None:
+        """Each peak of the model filled in the colour of its phase (display.PeakCurve), the chosen one stronger."""
+        for item in self._fills:
+            self.plot.removeItem(item)
+        self._fills = []
+        for curve in curves if self.fills_shown else ():
+            color = pg.mkColor(phase_color(curve.color) if curve.color is not None else "#7f7f7f")
+            color.setAlpha(150 if curve.ref == selected else 60)
+            fill = pg.FillBetweenItem(pg.PlotCurveItem(curve.x, curve.top), pg.PlotCurveItem(curve.x, curve.bottom),
+                                      brush=pg.mkBrush(color))
+            fill.setZValue(-1)
+            self.plot.addItem(fill, ignoreBounds=True)
+            self._fills.append(fill)
+
+    def set_fills(self, shown: bool) -> None:
+        self.fills_shown = bool(shown)
+        for item in self._fills:
+            item.setVisible(self.fills_shown)
+
+    def set_residual(self, shown: bool) -> None:
+        self.residual_shown = bool(shown)
+        self.residual.setVisible(self.residual_shown and self.residual_curve.getData()[0] is not None
+                                 and len(self.residual_curve.getData()[0]) > 0)
 
     def set_guides(self, shown: bool) -> None:
         """Vertical lines of the expected reflections across the pattern."""
@@ -277,6 +322,12 @@ class SpectrumView(QWidget):
         self.data.setData(curves.x, curves.intensity)
         for item, y in ((self.baseline, curves.baseline), (self.fit, curves.fit)):
             item.setData(curves.x, y) if y is not None else item.setData([], [])
+        if curves.residual is not None:
+            self.residual_curve.setData(curves.x, curves.residual)
+            limit_view(self.residual, y=span_of(curves.residual, [0.0]))
+        else:
+            self.residual_curve.setData([], [])
+        self.residual.setVisible(self.residual_shown and curves.residual is not None)
         self._clear_ticks()
         rows = [lines for lines in curves.lines if len(lines.x)]
         names = []

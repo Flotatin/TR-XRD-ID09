@@ -581,3 +581,52 @@ def test_peaks_with_the_mouse_on_the_spectrum(viewer, compression_run):
     panel.edit.setChecked(False)
     assert view.handles is None and not delete.isEnabled() and not window.actions.get("edit_peaks").isChecked()
     assert editing.peak_refs(session.spectrum)  # the peaks stay
+
+
+def test_custom_fit_of_a_peak_in_the_window(viewer, compression_run):
+    from trxrd.services import analysis
+
+    window, session = viewer.window, viewer.session
+    session.attach(compression_run, None)
+    session.select(5)
+    window.phases.card.setCurrentIndex(window.phases.card.findData("H2O_Ice_VII"))
+    window.phases.pressure.setValue(3.7)
+    window.phases.add.click()
+    view, panel = window.spectrum, window.peaks
+    assert len(view._fills) == 2 and not panel.fit.isEnabled() and panel.title.text() == "Aucun pic choisi"
+    assert not view.residual.isHidden()
+    window.actions.get("residual").trigger()  # Ctrl+D
+    assert view.residual.isHidden()
+    window.actions.get("residual").trigger()
+    window.actions.get("fills").trigger()  # Ctrl+P
+    assert not any(item.isVisible() for item in view._fills)
+    window.actions.get("fills").trigger()
+
+    panel.table.selectRow(0)
+    assert panel.title.text().startswith("H2O_Ice_VII (110)") and panel.fit.isEnabled()
+    assert panel.zoom_data.getData()[0] is not None and panel.zoom_left.isVisible()
+    assert panel.model.currentText() == "PearsonIV" and panel.shape_labels[0].text() == "m"
+    assert not panel.shapes[1].isHidden()
+    panel.width_box.setValue(0.05)
+    assert session.spectrum.phases[0].peaks[0].width == 0.05
+    panel.shapes[0].setValue(1.8)
+    assert session.spectrum.phases[0].peaks[0].shape[0] == 1.8
+    panel.model.setCurrentText("Gaussian")
+    assert session.spectrum.phases[0].peaks[0].model == "Gaussian"
+    assert panel.shapes[0].isHidden() and panel.shape_labels[0].isHidden()
+    panel.model.setCurrentText("PseudoVoigt")
+    assert panel.shape_labels[0].text().startswith("α") and panel.shapes[1].isHidden()
+
+    window.actions.get("fit_peak").trigger()  # Maj+R
+    assert np.isfinite(session.spectrum.phases[0].peaks[0].center_err) and panel.message.text() == ""
+    panel.fit_window.setValue(8.0)
+    panel.variation.setValue(120.0)
+    kept = analysis.saved_settings(session.run)
+    assert kept.fit_window == 8.0 and kept.fit_variation == pytest.approx(1.2)
+    assert panel.variation.value() == 120.0  # shown back
+
+    panel.select_row(None)
+    viewer.peaks.selected = None
+    viewer.peaks.refresh()
+    panel.model.setCurrentText("Moffat")
+    assert analysis.saved_settings(session.run).peak_model == "Moffat" and panel.model.currentText() == "Moffat"

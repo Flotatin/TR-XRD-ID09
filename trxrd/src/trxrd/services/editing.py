@@ -23,7 +23,8 @@ from trxrd.physics import profiles
 from trxrd.processing import background
 from trxrd.processing.peaks import DetectedPeak
 from trxrd.services.analysis import AnalysisSettings
-from trxrd.services.fitting import FitOptions, fit_spectrum, refresh_model
+from trxrd.processing.peakfit import fit_peaks, total_curve
+from trxrd.services.fitting import FitOptions, corrected_signal, fit_spectrum, refresh_model, update_phase
 from trxrd.services.identification import Progress, analysis_window, detect
 
 STRONG_LINE = 10.0  # % of the card: a line this strong is kept even when no peak is detected there
@@ -198,6 +199,71 @@ def move_peak(run: Run, index: int, ref: PeakRef, center: float, height: Optiona
         peak.height, peak.height_err = max(float(height), 1.0), np.nan
     _cover(spectrum, [peak.center])
     refresh_model(spectrum)
+
+
+def set_peak(run: Run, index: int, ref: PeakRef, *, model: Optional[str] = None, center: Optional[float] = None,
+             height: Optional[float] = None, width: Optional[float] = None,
+             shape: Optional[Sequence[float]] = None) -> None:
+    """Parameters of a peak as the user sets them: the start of the next fit.
+
+    A new model keeps the position, the height and the full width at half
+    maximum, with the default shape of that model.
+    """
+    spectrum = run.spectra[index]
+    peak = get_peak(spectrum, ref)
+    if model is not None and model != peak.model:
+        profile = profiles.model(model)
+        full = profiles.fwhm(peak.model, peak.width, peak.shape) if np.isfinite(peak.width) and peak.width > 0 else None
+        peak.model, peak.shape = model, profile.shape_default
+        if full:
+            peak.width = profiles.width_from_fwhm(model, full, peak.shape)
+            if model == "SplitLorentzian":
+                peak.shape = (peak.width,)  # symmetric to start with
+    if center is not None:
+        peak.center, peak.center_err = float(center), np.nan
+    if height is not None:
+        peak.height, peak.height_err = max(float(height), 1.0), np.nan
+    if width is not None:
+        if not width > 0:
+            raise ValueError("La largeur d'un pic doit être positive")
+        peak.width, peak.width_err = float(width), np.nan
+    if shape is not None:
+        bounds = profiles.model(peak.model).shape_bounds
+        if len(shape) != len(bounds):
+            raise ValueError(f"{peak.model} : {len(bounds)} paramètre(s) de forme attendu(s)")
+        peak.shape = tuple(float(np.clip(v, low, high)) for v, (low, high) in zip(shape, bounds))
+    _cover(spectrum, [peak.center])
+    refresh_model(spectrum)
+
+
+def fit_peak(run: Run, index: int, ref: PeakRef, settings: Optional[AnalysisSettings] = None) -> Peak:
+    """Fit one peak alone, on the signal minus every other peak, within `fit_window` widths of its centre.
+
+    The other peaks do not move. Then the cell and the pressure of its phase
+    follow. ValueError when the fit fails: the peak stays as it was.
+    """
+    settings = settings or AnalysisSettings()
+    options = _fit_options(settings)
+    spectrum = run.spectra[index]
+    peak = get_peak(spectrum, ref)
+    x = np.asarray(spectrum.two_theta, dtype=float)
+    others = [p for r in peak_refs(spectrum) for p in [get_peak(spectrum, r)] if p is not peak]
+    signal = corrected_signal(spectrum) - total_curve(x, others)
+    step = float(np.median(np.abs(np.diff(x))))
+    half = max(settings.fit_window * peak.width, 4 * step)
+    near = np.abs(x - peak.center) <= half
+    start = dataclasses.replace(peak, inter=peak.inter if options.variation is None else options.variation)
+    result = fit_peaks(x[near], signal[near], [start], center_tolerance=options.center_tolerance)
+    if not result.success:
+        raise ValueError(f"Ajustement du pic impossible : {result.message}")
+    fitted = result.peaks[0]
+    _peaks_of(spectrum, ref[0])[ref[1]] = fitted
+    fit = spectrum.phase_fit(ref[0]) if ref[0] is not None else None
+    if fit is not None:
+        update_phase(run, fit, options)
+    _cover(spectrum, [fitted.center])
+    refresh_model(spectrum)
+    return fitted
 
 
 def remove_peak(run: Run, index: int, ref: PeakRef) -> None:

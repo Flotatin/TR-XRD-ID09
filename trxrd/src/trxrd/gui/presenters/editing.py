@@ -11,13 +11,16 @@ on_remove(phase), on_pressure(phase, pressure), on_fit(), on_fit_series(scope: "
 on_paste(), on_clear().
 Window: start_progress(text, on_cancel), set_progress(done, total), end_progress(), show_message(text),
 show_error(title, text).
-Peaks: view show_message(text), select_row(row or None); callbacks on_edit(on), on_row(row), on_remove(), on_toggle().
-Spectrum view: show_handles(handles or None, selected ref); callbacks on_add_peak(x, y), on_move_peak(ref, x, y),
-on_pick_peak(ref). Phases view: chosen_phase().
+Peaks: view show_message(text), select_row(row or None), show_peak(PeakDetail or None, settings),
+show_zoom(PeakZoom or None); callbacks on_edit(on), on_row(row), on_remove(), on_toggle(), on_model(model),
+on_value(name, value), on_shape(index, value), on_fit_peak(), on_fit_settings(**changes).
+Spectrum view: show_handles(handles or None, selected ref), show_peak_fills(curves, selected ref); callbacks
+on_add_peak(x, y), on_move_peak(ref, x, y), on_pick_peak(ref). Phases view: chosen_phase().
 """
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass
 from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
@@ -29,6 +32,9 @@ from trxrd.gui.presenters.viewer import DisplaySettings, ImmediateRunner
 from trxrd.services import analysis, editing
 from trxrd.services.editing import FitSeries
 from trxrd.services.session import Event, Session
+
+
+CHOOSE_A_PEAK = "Choisir d'abord un pic : le cliquer sur le spectre ou dans le tableau."
 
 
 @dataclass
@@ -214,6 +220,11 @@ class PeaksPresenter:
         view.on_row = self.pick_row
         view.on_remove = self.remove
         view.on_toggle = self.toggle
+        view.on_model = self.set_model
+        view.on_value = self.set_value
+        view.on_shape = self.set_shape
+        view.on_fit_peak = self.fit_peak
+        view.on_fit_settings = self.set_fit_settings
         spectrum_view.on_add_peak = self.add
         spectrum_view.on_move_peak = self.move
         spectrum_view.on_pick_peak = self.pick
@@ -228,16 +239,26 @@ class PeaksPresenter:
 
     def refresh(self, *_) -> None:
         run, spectrum = self.session.run, self.session.spectrum
-        if spectrum is None or not self.editing:
+        if spectrum is None:
+            self.selected = None
+            self.spectrum_view.show_peak_fills([], None)
             self.spectrum_view.show_handles(None, None)
             self.view.select_row(None)
+            self.view.show_peak(None, None)
+            self.view.show_zoom(None)
             return
         refs = editing.peak_refs(spectrum)
         if self.selected not in refs:
             self.selected = None
-        self.spectrum_view.show_handles(display.peak_handles(run, spectrum, self.settings.unit_for(run), self.settings.raw),
-                                        self.selected)
+        unit, raw = self.settings.unit_for(run), self.settings.raw
+        self.spectrum_view.show_peak_fills(display.peak_curves(run, spectrum, unit, raw), self.selected)
+        self.spectrum_view.show_handles(display.peak_handles(run, spectrum, unit, raw) if self.editing else None,
+                                        self.selected if self.editing else None)
         self.view.select_row(refs.index(self.selected) if self.selected is not None else None)
+        settings = analysis.saved_settings(run)
+        chosen = self.selected is not None
+        self.view.show_peak(display.peak_detail(spectrum, self.selected) if chosen else None, settings)
+        self.view.show_zoom(display.peak_zoom(run, spectrum, self.selected, settings.fit_window) if chosen else None)
 
     def pick(self, ref: editing.PeakRef) -> None:
         self.selected = ref
@@ -278,15 +299,70 @@ class PeaksPresenter:
 
     def remove(self) -> None:
         run, index, ref = self.session.run, self.session.index, self.selected
-        if ref is None or not self.editing:
-            self.view.show_message("Choisir d'abord un pic : le cliquer sur le spectre ou dans le tableau.")
+        if ref is None:
+            self.view.show_message(CHOOSE_A_PEAK)
             return
         self.selected = None
         self._edit("pic supprimé", lambda: editing.remove_peak(run, index, ref))
 
     def toggle(self) -> None:
         run, index, ref = self.session.run, self.session.index, self.selected
-        if ref is None or not self.editing:
-            self.view.show_message("Choisir d'abord un pic : le cliquer sur le spectre ou dans le tableau.")
+        if ref is None:
+            self.view.show_message(CHOOSE_A_PEAK)
             return
         self._edit("pic activé ou désactivé", lambda: editing.toggle_peak(run, index, ref))
+
+    def _set_settings(self, **changes) -> None:
+        """Settings of the manual work, kept in the run with those of the analysis."""
+        run = self.session.run
+        settings = analysis.saved_settings(run)
+        new = dataclasses.replace(settings, **changes)
+        if new != settings:
+            run.ui_state[analysis.UI_KEY] = new.to_dict()
+            self.session.modified()
+
+    def set_model(self, model: str) -> None:
+        """Profile of the chosen peak; with no peak chosen, that of the next peaks."""
+        if self.session.spectrum is None:
+            return
+        run, index, ref = self.session.run, self.session.index, self.selected
+        if ref is None:
+            self._set_settings(peak_model=model)
+        else:
+            apply_edit(self.session, self.view, [index], "paramètres du pic",
+                       lambda: editing.set_peak(run, index, ref, model=model), merge=True)
+
+    def set_value(self, name: str, value: float) -> None:
+        """New position ("center"), height or width of the chosen peak."""
+        if name not in ("center", "height", "width"):
+            raise ValueError(f"unknown peak parameter {name!r}")
+        run, index, ref = self.session.run, self.session.index, self.selected
+        if ref is not None:
+            apply_edit(self.session, self.view, [index], "paramètres du pic",
+                       lambda: editing.set_peak(run, index, ref, **{name: value}), merge=True)
+
+    def set_shape(self, position: int, value: float) -> None:
+        run, index, ref = self.session.run, self.session.index, self.selected
+        if ref is None:
+            return
+        shape = list(display.peak_detail(self.session.spectrum, ref).shape)
+        shape[position] = value
+        apply_edit(self.session, self.view, [index], "paramètres du pic",
+                   lambda: editing.set_peak(run, index, ref, shape=shape), merge=True)
+
+    def fit_peak(self) -> None:
+        """Fit the chosen peak alone."""
+        run, index, ref = self.session.run, self.session.index, self.selected
+        if ref is None:
+            self.view.show_message(CHOOSE_A_PEAK)
+            return
+        settings = analysis.saved_settings(run)
+        self._edit("ajustement d'un pic", lambda: editing.fit_peak(run, index, ref, settings))
+
+    def set_fit_settings(self, **changes) -> None:
+        """`fit_window` (widths) and `fit_variation` (ratio) of the fits."""
+        unknown = set(changes) - {"fit_window", "fit_variation"}
+        if unknown:
+            raise ValueError(f"unknown fit settings {sorted(unknown)}")
+        if self.session.run is not None:
+            self._set_settings(**changes)

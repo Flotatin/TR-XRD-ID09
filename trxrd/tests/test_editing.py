@@ -1,5 +1,7 @@
 """Manual work on the phases of the spectra (services.editing), free peaks and undo."""
 
+import dataclasses
+
 import numpy as np
 import pytest
 
@@ -164,6 +166,75 @@ def test_a_peak_added_by_hand_is_covered_and_fitted_wherever_it_is(run):
     editing.add_peak(run, 3, GASKET)
     editing.fit_current(run, 3)
     assert np.isfinite(only_free.free_peaks[0].height_err)
+
+
+def test_parameters_of_a_peak(run):
+    from trxrd.physics import profiles
+
+    editing.add_phase(run, 5, ICE_VII, 3.7)
+    spectrum = run.spectra[5]
+    ref = (ICE_VII, 0)
+    peak = editing.get_peak(spectrum, ref)
+    assert peak.model == "PearsonIV"
+    full = profiles.fwhm(peak.model, peak.width, peak.shape)
+    editing.set_peak(run, 5, ref, model="PseudoVoigt")  # same position, height and full width
+    assert peak.model == "PseudoVoigt" and peak.shape == (0.5,)
+    assert profiles.fwhm(peak.model, peak.width, peak.shape) == pytest.approx(full, rel=0.02)
+    editing.set_peak(run, 5, ref, model="SplitLorentzian")
+    assert peak.shape == (peak.width,)  # symmetric to start with
+    editing.set_peak(run, 5, ref, model="Gaussian")
+    assert peak.shape == ()
+    assert profiles.fwhm(peak.model, peak.width, peak.shape) == pytest.approx(full, rel=0.02)
+
+    editing.set_peak(run, 5, ref, model="PearsonIV", center=16.1, height=2000.0, width=0.08, shape=(1.5, 0.4))
+    assert (peak.center, peak.height, peak.width, peak.shape) == (16.1, 2000.0, 0.08, (1.5, 0.4))
+    editing.set_peak(run, 5, ref, shape=(100.0, -9.0))  # kept inside the bounds of the model
+    assert peak.shape == (20.0, -5.0)
+    assert spectrum.model.max() > 1000  # the curve follows
+    with pytest.raises(ValueError, match="positive"):
+        editing.set_peak(run, 5, ref, width=0.0)
+    with pytest.raises(ValueError, match="forme"):
+        editing.set_peak(run, 5, ref, shape=(1.0,))
+
+
+def test_fit_of_one_peak_alone(run):
+    editing.add_phase(run, 5, ICE_VII, 3.7)
+    spectrum = run.spectra[5]
+    fit = spectrum.phases[0]
+    other = dataclasses.replace(fit.peaks[1])
+    editing.set_peak(run, 5, (ICE_VII, 0), center=fit.peaks[0].center + 0.05, height=100.0)
+    fitted = editing.fit_peak(run, 5, (ICE_VII, 0), AnalysisSettings(fit_window=8.0))
+    assert fit.peaks[0] is fitted and fitted.height > 1000 and np.isfinite(fitted.center_err)
+    moved = fit.peaks[1]
+    assert (moved.center, moved.height, moved.width) == (other.center, other.height, other.width)  # the others stay
+    assert fit.pressure == pytest.approx(3.7, abs=0.05)  # and the phase follows
+
+    free = editing.add_peak(run, 5, GASKET)
+    assert editing.fit_peak(run, 5, free).center == pytest.approx(GASKET, abs=0.02)
+
+    spectrum.two_theta = spectrum.two_theta[:3]  # far too few points: an error, the peak stays
+    before = fit.peaks[0]
+    with pytest.raises(ValueError, match="impossible"):
+        spectrum.intensity, spectrum.baseline = spectrum.intensity[:3], spectrum.baseline[:3]
+        editing.fit_peak(run, 5, (ICE_VII, 0))
+    assert fit.peaks[0] is before
+
+
+def test_fit_variation_bounds_the_widths(run):
+    from trxrd.physics import profiles
+
+    editing.add_phase(run, 5, ICE_VII, 3.7)
+    spectrum = run.spectra[5]
+    start = spectrum.phases[0].peaks[0].width
+    editing.set_peak(run, 5, (ICE_VII, 0), width=start * 3)  # far too broad
+    tight = AnalysisSettings(fit_variation=0.1)
+    assert tight.options().fit.variation == 0.1
+    fitted = editing.fit_peak(run, 5, (ICE_VII, 0), tight)
+    assert fitted.width == pytest.approx(start * 3 / 1.1, rel=1e-3)  # it stops at the bound
+    assert profiles.model(fitted.model).function is not None
+    settings = AnalysisSettings(peak_model="Gaussian", fit_center_tolerance=0.1)
+    assert settings.options().fit.model == "Gaussian" and settings.options().fit.center_tolerance == 0.1
+    assert AnalysisSettings().options().fit.variation is None
 
 
 def test_undo_and_redo(run):

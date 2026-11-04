@@ -771,3 +771,73 @@ def test_peaks_with_the_mouse(compression_run):
 
     presenter.set_editing(False)
     assert spectrum.last("show_handles") == (None, None) and view.last("select_row") == (None,)
+
+
+def test_parameters_of_the_chosen_peak(compression_run):
+    from trxrd.gui.presenters.editing import PeaksPresenter
+    from trxrd.services import analysis, editing
+
+    ice = "H2O_Ice_VII"
+    session, settings, view, spectrum, phases = Session(), DisplaySettings(), Recorder(), Recorder(), Recorder(chosen_phase=ice)
+    presenter = PeaksPresenter(session, settings, view, spectrum, phases)
+    session.attach(compression_run, None)
+    session.select(5)
+    editing.add_phase(session.run, 5, ice, 3.7)
+    session.modified()
+    assert view.last("show_peak")[0] is None and view.last("show_zoom") == (None,)
+    assert len(spectrum.last("show_peak_fills")[0]) == 2  # each peak filled, with or without the handles
+    presenter.fit_peak()
+    assert "Choisir d'abord" in view.last("show_message")[0]
+
+    presenter.pick_row(0)  # the table works without the mouse mode
+    detail, fit_settings = view.last("show_peak")
+    peak = session.spectrum.phases[0].peaks[0]
+    assert detail.title == "H2O_Ice_VII (110)" and detail.model == "PearsonIV" and detail.center == peak.center
+    assert detail.shape_labels == ("m", "asymétrie") and detail.fwhm > 0 and fit_settings.fit_window == 5.0
+    zoom = view.last("show_zoom")[0]
+    assert zoom.window == pytest.approx((peak.center - 5 * peak.width, peak.center + 5 * peak.width))
+    assert zoom.curve.max() == pytest.approx(peak.height, rel=0.01) and zoom.x.size == zoom.data.size == zoom.curve.size
+    assert spectrum.last("show_peak_fills")[1] == (ice, 0)
+
+    original = peak.width
+    presenter.set_value("width", 0.06)
+    presenter.set_shape(1, 0.3)
+    presenter.set_value("center", peak.center + 0.01)
+    assert session.spectrum.phases[0].peaks[0].width == 0.06 and session.spectrum.phases[0].peaks[0].shape[1] == 0.3
+    session.undo()  # the values changed one after the other are undone together
+    assert session.spectrum.phases[0].peaks[0].width == original
+    presenter.set_model("Gaussian")
+    assert view.last("show_peak")[0].model == "Gaussian" and view.last("show_peak")[0].shape_labels == ()
+    session.undo()
+    with pytest.raises(ValueError):
+        presenter.set_value("pressure", 1.0)
+
+    presenter.pick_row(0)
+    presenter.fit_peak()
+    assert session.undo_label == "ajustement d'un pic" and session.spectrum.phases[0].pressure == pytest.approx(3.7, abs=0.05)
+    presenter.set_fit_settings(fit_window=8.0, fit_variation=1.2)
+    kept = analysis.saved_settings(session.run)
+    assert (kept.fit_window, kept.fit_variation) == (8.0, 1.2) and view.last("show_peak")[1].fit_window == 8.0
+    with pytest.raises(ValueError):
+        presenter.set_fit_settings(pmax=3)
+
+    presenter.selected = None
+    presenter.set_model("Moffat")  # with no peak chosen: the profile of the next peaks
+    assert analysis.saved_settings(session.run).peak_model == "Moffat"
+    presenter.editing = True
+    presenter.add(12.0)
+    assert editing.get_peak(session.spectrum, presenter.selected).model == "Moffat"
+
+
+def test_residual_of_the_fit(compression_run):
+    from trxrd.services import editing
+
+    editing.add_phase(compression_run, 5, "H2O_Ice_VII", 3.7)
+    assert display.spectrum_curves(compression_run, 4, "2th_deg").residual is None  # no model there
+    spectrum = compression_run.spectra[5]
+    spectrum.fit_range = (15.0, 17.0)
+    curves = display.spectrum_curves(compression_run, 5, "2th_deg")
+    inside = (spectrum.two_theta >= 15) & (spectrum.two_theta <= 17)
+    assert np.isfinite(curves.residual[inside]).all() and np.isnan(curves.residual[~inside]).all()
+    expected = spectrum.intensity - spectrum.baseline - spectrum.model
+    np.testing.assert_allclose(curves.residual[inside], expected[inside])  # on the raw signal, as the fit

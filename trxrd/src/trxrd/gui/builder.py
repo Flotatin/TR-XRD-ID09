@@ -104,6 +104,12 @@ def create_viewer(session: Optional[Session] = None, runner=None) -> Viewer:
     add("guides", VIEW, "Raies sur le spec&tre", lambda: window.spectrum.set_guides(window.actions.get("guides").isChecked()),
         ["Ctrl+G"], checkable=True, tip="Traits verticaux des raies attendues à travers le spectre, à tout zoom")
     window.actions.get("guides").setChecked(True)
+    add("fills", VIEW, "Pics &remplis", lambda: window.spectrum.set_fills(window.actions.get("fills").isChecked()),
+        ["Ctrl+P"], checkable=True, tip="Chaque pic du modèle rempli à la couleur de sa phase")
+    window.actions.get("fills").setChecked(True)
+    add("residual", VIEW, "Ré&sidu", lambda: window.spectrum.set_residual(window.actions.get("residual").isChecked()),
+        ["Ctrl+D"], checkable=True, tip="Signal brut moins le fond et l'ajustement, sous le spectre")
+    window.actions.get("residual").setChecked(True)
     add("cake", VIEW, "&Intégration sous le spectre (cake)", toggle_cake, ["Ctrl+K"], checkable=True,
         tip="Cake (2θ × azimut) ou image brute du spectre courant, calculé depuis les images de RAW_DATA")
     window.actions.get("cake").setChecked(True)
@@ -111,6 +117,8 @@ def create_viewer(session: Optional[Session] = None, runner=None) -> Viewer:
         "Détecter les pics, trouver les phases et leurs pressions, ajuster (Pearson IV), avec suivi des pics")
     add("fit", ANALYSIS, "A&juster le spectre", editing.fit, ["Ctrl+F"],
         "Ajuster les pics du spectre courant, puis sa maille et sa pression")
+    add("fit_peak", ANALYSIS, "Ajuster le pic choisi", peaks.fit_peak, ["Shift+R"],
+        "Le pic choisi seul, les autres étant soustraits (onglet Pics)")
     add("fit_selection", ANALYSIS, "Ajuster la &sélection", lambda: editing.fit_series("selection", window.phases.follow.isChecked()),
         ["Ctrl+Shift+F"], "Ajuster la sélection de la liste, à partir du spectre courant")
     add("calibration", TOOLS, "&Calibration du détecteur…", window.show_calibration, ["Ctrl+L"],

@@ -33,6 +33,8 @@ class FitOptions:
     # free peaks far from every phase peak do not matter to the phases and are left out, which is faster;
     # True: fit them too (peaks added by hand)
     fit_far_free_peaks: bool = False
+    # freedom of the width: it stays within [w / (1 + variation), w * (1 + variation)] (None: that of each peak)
+    variation: Optional[float] = None
     exclude: Optional[Sequence[Tuple[float, float]]] = None  # 2θ zones left out of the fit (gasket, diamond...)
     max_center_err: float = 0.1  # deg: peaks known worse than this do not enter the cell refinement
 
@@ -81,7 +83,8 @@ def _window(spectrum: Spectrum, fit_range: Optional[Tuple[float, float]]) -> Tup
     return float(np.nanmin(spectrum.two_theta)), float(np.nanmax(spectrum.two_theta))
 
 
-def _update_phase(run: Run, phase_fit: PhaseFit, options: FitOptions) -> None:
+def update_phase(run: Run, phase_fit: PhaseFit, options: FitOptions) -> None:
+    """Cell, volume and pressure of a phase from the positions of its peaks."""
     card = run.phases.get(phase_fit.phase)
     calib = run.calibration
     temperature = options.temperature
@@ -163,6 +166,9 @@ def fit_spectrum(
     active = [f for f in spectrum.phases if f.state == FitState.FITTED]
     peaks = [p for f in active for p in f.peaks if p.enabled and window[0] <= p.center <= window[1]]
     centers = [p.center for p in peaks]
+    if options.variation is not None:
+        for peak in [*peaks, *spectrum.free_peaks, *(extra_peaks or ())]:
+            peak.inter = options.variation
     reach = 2 * (options.local_window or np.inf)  # free peaks far from every phase peak are irrelevant
     free = list(spectrum.free_peaks if extra_peaks is None else extra_peaks)
     extra = [
@@ -178,7 +184,7 @@ def fit_spectrum(
     fitted = {id(old): new for old, new in zip(peaks + extra, result.peaks)}
     for phase_fit in active:
         phase_fit.peaks = [fitted.get(id(p), p) for p in phase_fit.peaks]
-        _update_phase(run, phase_fit, options)
+        update_phase(run, phase_fit, options)
     spectrum.free_peaks = [fitted.get(id(p), p) for p in free]
     refresh_model(spectrum)
     return spectrum

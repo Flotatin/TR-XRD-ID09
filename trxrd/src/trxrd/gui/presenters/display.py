@@ -17,7 +17,7 @@ from typing import List, Optional, Sequence, Tuple
 import numpy as np
 
 from trxrd.domain import PhaseCard, PhaseFit, Run, Spectrum, energy_to_wavelength
-from trxrd.physics import eos, lattice
+from trxrd.physics import eos, lattice, profiles
 from trxrd.physics.lattice import AXIS_LABELS, convert_two_theta
 from trxrd.services import editing, rates, treatment
 
@@ -83,6 +83,7 @@ class SpectrumCurves:
     intensity: np.ndarray  # filtered - background, or raw (raw=True)
     baseline: Optional[np.ndarray] = None  # only with the raw signal
     fit: Optional[np.ndarray] = None  # fitted model (+ background with the raw signal)
+    residual: Optional[np.ndarray] = None  # raw - background - model, NaN outside the fit range
     lines: List[Lines] = field(default_factory=list)
     raw: bool = False
     data_label: str = "filtré − fond"
@@ -135,6 +136,10 @@ def spectrum_curves(run: Run, index: int, unit: str, raw: bool = False) -> Spect
     else:
         curves.intensity = treatment.corrected(spectrum)[0]
         curves.fit = model
+    if model is not None:
+        two_theta = np.asarray(spectrum.two_theta, dtype=float)
+        low, high = spectrum.fit_range or (float(two_theta.min()), float(two_theta.max()))
+        curves.residual = np.where((two_theta >= low) & (two_theta <= high), treatment.corrected(spectrum)[1] - model, np.nan)
     return curves
 
 
@@ -179,6 +184,107 @@ def peak_handles(run: Run, spectrum: Spectrum, unit: str, raw: bool = False) -> 
             tip=f"{name}{hkl}  2θ = {peak.center:.3f}°" + ("" if peak.enabled else "  (désactivé)"),
         ))
     return handles
+
+
+PEAK_MODELS = ("PearsonIV", "PseudoVoigt", "Moffat", "SplitLorentzian", "Gaussian")
+SHAPE_LABELS = {"fraction": "α (0 Gauss, 1 Lorentz)", "m": "m", "skew": "asymétrie", "beta": "β", "width_right": "σ droite"}
+CURVE_WIDTHS = 12.0  # a peak is drawn this many widths around its centre
+
+
+@dataclass
+class PeakDetail:
+    """The chosen peak, as the Pics tab shows it."""
+
+    title: str
+    model: str
+    center: float
+    height: float
+    width: float
+    fwhm: float
+    shape: Tuple[float, ...]
+    shape_labels: Tuple[str, ...]
+    shape_bounds: Tuple[Tuple[float, float], ...]
+
+
+def peak_detail(spectrum: Spectrum, ref) -> PeakDetail:
+    peak = editing.get_peak(spectrum, ref)
+    profile = profiles.model(peak.model)
+    hkl = " (" + "".join(str(i) for i in peak.hkl) + ")" if peak.hkl is not None else ""
+    shape = tuple(peak.shape) or profile.shape_default
+    width = float(peak.width) if np.isfinite(peak.width) and peak.width > 0 else np.nan
+    return PeakDetail(
+        title=f"{ref[0] if ref[0] is not None else 'pic libre'}{hkl}",
+        model=peak.model, center=float(peak.center), height=float(peak.height), width=width,
+        fwhm=profiles.fwhm(peak.model, width, shape) if np.isfinite(width) else np.nan, shape=shape,
+        shape_labels=tuple(SHAPE_LABELS[name] for name in profile.shape_names), shape_bounds=profile.shape_bounds,
+    )
+
+
+def _peak_values(peak, x: np.ndarray) -> np.ndarray:
+    return profiles.evaluate(peak.model, x, peak.center, peak.height, peak.width, peak.shape)
+
+
+def _drawable(peak) -> bool:
+    return peak.enabled and bool(np.isfinite([peak.center, peak.height, peak.width]).all())
+
+
+@dataclass
+class PeakCurve:
+    """One peak of the model, filled between its curve and what it sits on."""
+
+    ref: Tuple[Optional[str], int]
+    x: np.ndarray  # display unit
+    top: np.ndarray
+    bottom: np.ndarray
+    color: Optional[int]  # index in phase_order, None for a free peak
+
+
+def peak_curves(run: Run, spectrum: Spectrum, unit: str, raw: bool = False) -> List[PeakCurve]:
+    order = phase_order(run)
+    x = np.asarray(spectrum.two_theta, dtype=float)
+    baseline = np.asarray(spectrum.baseline, dtype=float) if raw and spectrum.baseline is not None else np.zeros_like(x)
+    out = []
+    for ref in editing.peak_refs(spectrum):
+        peak = editing.get_peak(spectrum, ref)
+        if not _drawable(peak):
+            continue
+        near = np.abs(x - peak.center) <= CURVE_WIDTHS * peak.width
+        if near.sum() < 2:
+            continue
+        out.append(PeakCurve(ref, to_unit(x[near], unit, run), _peak_values(peak, x[near]) + baseline[near], baseline[near],
+                             order.index(ref[0]) if ref[0] in order else None))
+    return out
+
+
+@dataclass
+class PeakZoom:
+    """The chosen peak alone: the raw signal minus the background and every other peak."""
+
+    x: np.ndarray  # 2θ (deg)
+    data: np.ndarray
+    curve: np.ndarray
+    window: Tuple[float, float]  # points of the fit of this peak alone
+    color: Optional[int]
+
+
+def peak_zoom(run: Run, spectrum: Spectrum, ref, fit_window: float) -> Optional[PeakZoom]:
+    peak = editing.get_peak(spectrum, ref)
+    if not np.isfinite([peak.center, peak.width]).all() or peak.width <= 0:
+        return None
+    x = np.asarray(spectrum.two_theta, dtype=float)
+    others = np.zeros_like(x)
+    for other in editing.peak_refs(spectrum):
+        item = editing.get_peak(spectrum, other)
+        if other != ref and _drawable(item):
+            others += _peak_values(item, x)
+    half = fit_window * peak.width
+    near = np.abs(x - peak.center) <= 1.5 * half
+    if near.sum() < 2:
+        return None
+    curve = _peak_values(peak, x[near]) if _drawable(peak) else np.zeros(int(near.sum()))
+    order = phase_order(run)
+    return PeakZoom(x[near], (treatment.corrected(spectrum)[1] - others)[near], curve,
+                    (peak.center - half, peak.center + half), order.index(ref[0]) if ref[0] in order else None)
 
 
 # ---------------------------------------------------------------------------- peak detection (to check it)

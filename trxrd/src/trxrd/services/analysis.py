@@ -63,13 +63,18 @@ class AnalysisSettings:
     exclude: List[Zone] = field(default_factory=list)  # 2θ zones of no phase (gasket, diamond...)
     window: Optional[Zone] = None  # 2θ range analysed (None: whole pattern)
     track: bool = True  # peak tracking
+    peak_model: str = "PearsonIV"  # profile of the new peaks
+    fit_window: float = 5.0  # fit of one peak: points within this many widths of its centre
+    fit_variation: Optional[float] = None  # freedom of the widths in a fit, 1.2 = 120 % (None: 3)
+    fit_center_tolerance: float = 0.3  # deg: how far a peak may move in a manual fit
 
     def options(self) -> AutoOptions:
         temperature = self.temperature or T_REF  # search and fit at the same T
         return AutoOptions(
             detection=DetectionOptions(min_snr=self.min_snr, max_fwhm=self.max_fwhm, noise_window=self.noise_window,
                                        shoulders=self.shoulders, spectrum_filter=self.spectrum_filter),
-            fit=FitOptions(temperature=temperature),
+            fit=FitOptions(model=self.peak_model, temperature=temperature, variation=self.fit_variation,
+                           center_tolerance=self.fit_center_tolerance),
             search=SearchOptions(
                 pressure_range=tuple(self.pressure_range), tolerance=self.tolerance, max_phases=self.max_phases,
                 max_pressure_step=self.max_step, max_pressure_spread=self.max_spread, temperature=temperature,
