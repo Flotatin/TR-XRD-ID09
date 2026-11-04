@@ -11,7 +11,7 @@ import dataclasses
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, DefaultDict, Dict, Iterable, List, Optional, Tuple, Union
+from typing import Any, Callable, DefaultDict, Dict, Iterable, List, Optional, Tuple, Union
 
 from trxrd.domain import Calibration, Run, Spectrum
 from trxrd.io import h5store, legacy
@@ -28,6 +28,7 @@ class Snapshot:
 
     label: str  # what was done, for the menu
     spectra: Dict[int, Spectrum]
+    ui_state: Optional[Dict[str, Any]] = None  # the settings of the run, for an edit that changes them
 
 
 def _kept(spectrum: Spectrum) -> Spectrum:
@@ -140,17 +141,19 @@ class Session:
 
     # ------------------------------------------------------------------ undo
 
-    def remember(self, indices: Iterable[int], label: str, merge: bool = False) -> bool:
+    def remember(self, indices: Iterable[int], label: str, merge: bool = False, state: bool = False) -> bool:
         """Keep the spectra `indices` as they are, before an edit called `label`; False if nothing new was kept.
 
         `merge`: successive edits with this label on the same spectra (a value
-        changed step by step) are undone together.
+        changed step by step) are undone together. `state`: the edit changes
+        the settings kept in the run too (excluded zones).
         """
         indices = list(indices)
         self._redo = []
         if merge and self._undo and self._undo[-1].label == label and set(self._undo[-1].spectra) == set(indices):
             return False
-        self._undo.append(Snapshot(label, {i: _kept(self.run.spectra[i]) for i in indices}))
+        kept_state = copy.deepcopy(self.run.ui_state) if state else None
+        self._undo.append(Snapshot(label, {i: _kept(self.run.spectra[i]) for i in indices}, kept_state))
         del self._undo[:-MAX_UNDO]
         return True
 
@@ -172,6 +175,8 @@ class Session:
         replaced = Snapshot(snapshot.label, {i: self.run.spectra[i] for i in snapshot.spectra})
         for index, spectrum in snapshot.spectra.items():
             self.run.spectra[index] = spectrum
+        if snapshot.ui_state is not None:
+            replaced.ui_state, self.run.ui_state = self.run.ui_state, snapshot.ui_state
         return replaced
 
     def undo(self) -> Optional[str]:

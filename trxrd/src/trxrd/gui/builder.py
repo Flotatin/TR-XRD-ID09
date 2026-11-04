@@ -19,6 +19,7 @@ from trxrd.gui.presenters.viewer import (
     CakePresenter, DisplaySettings, EvolutionPresenter, MainPresenter, MapPresenter, NavigatorPresenter,
     RatePresenter, RateSettings, SpectrumPresenter, TablesPresenter,
 )
+from trxrd.gui.presenters.zones import SpectraZonePresenter, ZonesPresenter
 from trxrd.gui.tasks import ThreadRunner
 from trxrd.gui.views.main_window import MainWindow, application
 from trxrd.services.session import Session
@@ -36,6 +37,7 @@ class Viewer:
     analysis: AnalysisPresenter
     editing: EditingPresenter
     peaks: PeaksPresenter
+    zones: ZonesPresenter
     presenters: List[object]
 
 
@@ -46,15 +48,16 @@ def create_viewer(session: Optional[Session] = None, runner=None) -> Viewer:
     window = MainWindow()
     runner = runner or ThreadRunner()
     cake = CakePresenter(session, settings, window.cake, runner)
-    rate_settings = RateSettings()  # dP/dt: shared by the evolution and dP/dt plots (interval of the mean)
+    rate_settings = RateSettings()  # shared by the dDAC plots and the list of the spectra (zone of spectra)
     presenters = [
         SpectrumPresenter(session, settings, window.spectrum),
         cake,
         EvolutionPresenter(session, window.evolution, rate_settings),
         RatePresenter(session, window.dpdt, rate_settings),
-        MapPresenter(session, settings, window.map),
+        MapPresenter(session, settings, window.map, rate_settings),
         TablesPresenter(session, window.phases, window.peaks),
-        NavigatorPresenter(session, window.navigator),
+        NavigatorPresenter(session, window.navigator, rate_settings),
+        SpectraZonePresenter(session, rate_settings),
         ProcessingPresenter(session, window.processing),
         DetectionPresenter(session, settings, window.detection, window.spectrum),
     ]
@@ -62,6 +65,7 @@ def create_viewer(session: Optional[Session] = None, runner=None) -> Viewer:
     analysis = AnalysisPresenter(session, window, runner)
     editing = EditingPresenter(session, window.phases, window, runner)
     peaks = PeaksPresenter(session, settings, window.peaks, window.spectrum, window.phases)
+    zones = ZonesPresenter(session, settings, window.zones, window.spectrum)
     window.on_close_request = main.may_discard
     window.on_unit = main.set_unit
 
@@ -82,10 +86,26 @@ def create_viewer(session: Optional[Session] = None, runner=None) -> Viewer:
         ["Ctrl+E"], checkable=True, tip="Poignées sur les pics du modèle ; Ctrl + clic pour ajouter un pic")
     add("confirm_peak", EDIT, "Ajouter un pic au curseur", peaks.confirm, ["C"], "Curseur : un clic sur le spectre")
     add("replace_peak", EDIT, "Replacer le pic choisi au curseur", peaks.replace, ["R"])
-    add("delete_peak", EDIT, "&Supprimer le pic choisi", peaks.remove, ["Del", "U"])
-    window.actions.get("delete_peak").setEnabled(False)  # the key stays free for the fields otherwise
-    window.peaks.edit.toggled.connect(window.actions.get("edit_peaks").setChecked)
-    window.peaks.edit.toggled.connect(window.actions.get("delete_peak").setEnabled)
+    add("edit_zones", EDIT, "Modifier les &zones à la souris", lambda: window.zones.edit.setChecked(window.actions.get("edit_zones").isChecked()),
+        ["Z"], checkable=True, tip="Zone d'ajustement et zones exclues ; Maj + glisser pour tracer une zone exclue")
+    add("delete_peak", EDIT, "&Supprimer le pic ou la zone choisie",
+        lambda: zones.remove() if window.zones.edit.isChecked() and zones.chosen is not None else peaks.remove(),
+        ["Del", "U"])
+
+    def edit_modes_changed() -> None:
+        window.actions.get("edit_peaks").setChecked(window.peaks.edit.isChecked())
+        window.actions.get("edit_zones").setChecked(window.zones.edit.isChecked())
+        # the key stays free for the fields otherwise
+        window.actions.get("delete_peak").setEnabled(window.peaks.edit.isChecked() or window.zones.edit.isChecked())
+
+    def zones_toggled(on: bool) -> None:
+        edit_modes_changed()
+        if on:
+            window.tabs.setCurrentWidget(window.zones)
+
+    edit_modes_changed()
+    window.peaks.edit.toggled.connect(lambda _: edit_modes_changed())
+    window.zones.edit.toggled.connect(zones_toggled)
     add("previous", NAVIGATION, "Spectre &précédent", lambda: main.step(-1), ["Ctrl+Left", "PgUp"])
     add("next", NAVIGATION, "Spectre &suivant", lambda: main.step(+1), ["Ctrl+Right", "PgDown"])
     add("first", NAVIGATION, "P&remier spectre", main.first, ["Ctrl+Home"])
@@ -132,7 +152,7 @@ def create_viewer(session: Optional[Session] = None, runner=None) -> Viewer:
     add("shortcuts", HELP, "&Raccourcis clavier", window.show_shortcuts, ["F1"])
     window.build_menus(toolbar=("new_run", "open", "save", "|", "previous", "next", "|", "raw", "auto"))
     main.update()  # the unit actions exist now
-    return Viewer(session, settings, window, main, analysis, editing, peaks, presenters)
+    return Viewer(session, settings, window, main, analysis, editing, peaks, zones, presenters)
 
 
 def run(argv: Optional[Sequence[str]] = None) -> int:

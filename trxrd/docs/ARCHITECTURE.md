@@ -152,7 +152,7 @@ trxrd/
 │       ├── tasks.py            calculs longs dans un thread, résultat rendu au thread de l'interface
 │       ├── builder.py          assemblage : fenêtre + presenters + actions
 │       └── app.py              point d'entrée léger : journal et affichage des erreurs (sans console)
-└── tests/                      268 tests ; data/ = scan TUTO, calibration, ancien fichier .CEDX d'exemple
+└── tests/                      313 tests ; data/ = scan TUTO, calibration, ancien fichier .CEDX d'exemple
 ```
 
 ## 5. Le format de fichier `trxrd-run` (HDF5)
@@ -686,8 +686,9 @@ reste aligné sur le cake, et la courbe sur la carte. Les tests de l'interface �
   bruit des deux spectres sur dP/dt. Les erreurs annoncées de P ne servent pas de poids, car elles sont
   souvent trop petites (`docs/PASSATION.md` §5, point 1). Le calcul passe par des sommes cumulées : 6 ms pour
   1 600 spectres.
-- **dP/dt moyen sur un intervalle** (« Moyenne sur un intervalle ») : on déplace un intervalle, sur le graphe
-  de la grandeur ou sur celui de dP/dt, et le calcul suit en direct. Deux valeurs par courbe :
+- **dP/dt moyen sur la zone de spectres** (« Zone de spectres ») : on tire la zone, sur l'un des trois graphes,
+  ou on la trace avec Maj + glisser, et le calcul suit en direct. Comme dans la v1, c'est la même zone qui choisit
+  les spectres (voir **Zones** plus bas). Deux valeurs par courbe :
   - la **pente** de la droite ajustée sur tous les spectres de l'intervalle, avec son erreur, tracée en
     pointillés sur P(t) ;
   - **ΔP/Δt** entre le premier et le dernier spectre de l'intervalle, sur la pression lissée par la droite
@@ -761,7 +762,7 @@ sur D2O_03_0001_scan0006 ; `services/treatment.py`, `gui/presenters/treatment.py
   - gris : dans une zone exclue, ajustés comme pics libres ;
   - triangle vide : épaulement ;
   - pointillés : le seuil (niveau local + seuil × bruit) ;
-  - bandes grises : les zones exclues.
+  - les zones exclues restent visibles en rouge, avec ou sans cet onglet (voir **Zones**).
 
   Le tableau donne 2θ, SNR, hauteur, largeur et la raison d'un rejet.
 - **Sélection** : la liste des spectres accepte une sélection multiple (`Session.selection`), qui servira
@@ -817,7 +818,8 @@ Ce qu'on a appris sur D2O_03_0001_scan0006 :
   - Ctrl+F ajuste ensuite à partir de ces pics. Un clic sans Ctrl ne fait rien : la navigation ne change pas.
 
   Deux points viennent de l'essai sur Water05. La zone d'ajustement d'un fichier v1 peut être étroite (13 à 16°) :
-  elle s'étend pour couvrir ce qu'on ajoute (`_cover`), sinon le pic serait ignoré. Et l'ajustement manuel prend
+  elle s'étend pour couvrir un pic qu'on ajoute (`_cover`), sinon il serait ignoré ; une phase, elle, reste dans
+  la zone (voir **Zones**). Et l'ajustement manuel prend
   tous les pics libres actifs, même loin des raies des phases (`FitOptions.fit_far_free_peaks`) ; l'analyse
   automatique les laisse de côté pour aller vite. Les poignées sont en unité d'affichage (2θ, Q ou d) et sur le
   signal montré : `display.from_unit` et `signal_offset` reviennent à 2θ et à la hauteur au-dessus du fond.
@@ -844,13 +846,47 @@ Ce qu'on a appris sur D2O_03_0001_scan0006 :
   automatique et le traitement compris, 30 niveaux. On garde une copie de ce qui change (phases, pics libres,
   traitement), les grands tableaux étant partagés : une analyse de 1 600 spectres ne coûte pas de mémoire.
   Les changements successifs d'une même valeur (P d'une phase, traitement d'un spectre) s'annulent d'un coup.
-  Les fiches ajoutées au run et les réglages de l'analyse ne sont pas annulés.
+  Les fiches ajoutées au run et les réglages de l'analyse ne sont pas annulés, sauf ceux que changent les zones
+  (`remember(..., state=True)`, qui garde `Run.ui_state`).
 
 Essai sur D2O_03_0001_scan0006, réintégré avec le `.poni` de Dioptas : glace VII à 5,7 GPa sur le spectre 1,
 ajustement, propagation aux spectres 0 à 8, puis glace VI à 0,6 GPa sur le spectre 9 et propagation jusqu'au
 spectre 13. Les pressions restent à moins de 0,05 GPa de l'analyse manuelle de la v1, sauf le spectre 4
 (3,75 contre 3,66 GPa). Le spectre 0, que l'analyse automatique mettait à −0,18 GPa, sort à 5,75 GPa (5,79).
 Il faut 0,3 s pour les 9 premiers spectres et 1,9 s pour les 5 suivants.
+
+**Zones** (onglet Zones, ou Z ; `gui/presenters/zones.py`, `gui/views/zones.py`). La v1 en avait trois sortes ; le
+format ne change pas, tout était déjà stocké.
+
+| Zone | Portée | Geste | Stockage |
+|---|---|---|---|
+| d'ajustement (v1 : par jauge) | le spectre, puis la sélection ou tous | deux traits à tirer, Ctrl + Maj + glisser, ou les champs | `Spectrum.fit_range` |
+| exclue (v1 : `theta2_range`, à l'inverse) | le run | Maj + glisser, tirer, clic puis Suppr | `AnalysisSettings.exclude` |
+| de spectres (v1 : `zone_multi_*`) | le run | tirer, ou Maj + glisser sur P(t), dP/dt ou la carte | `RateSettings.interval`, non enregistrée |
+
+- **Zone d'ajustement.** Le gris marque ce qui est dehors. Un pic hors de la zone reste sur le spectre, mais il n'est
+  ni ajusté, ni tracé, et ne compte plus dans la maille : `update_phase` reçoit la zone, sinon son ancienne position
+  continuerait de peser sur P sans jamais être ajustée. Une phase placée ou déplacée (molette) reste dans la zone ;
+  un pic posé à la main l'élargit, car c'est un geste explicite. Donnée à tous, la zone devient aussi la plage de
+  l'analyse automatique (`AnalysisSettings.window`) : sans cela, l'analyse rendrait tout le diagramme aux spectres.
+  Une zone donnée à quelques spectres seulement ne survit donc pas à une analyse, qui prend la plage du run.
+- **Zones exclues.** Elles agissent à la prochaine analyse et au prochain placement d'une phase (`add_phase` n'attribue
+  plus de raie à un pic qui s'y trouve) ; un pic de phase déjà dedans reste, et l'onglet le signale. Les zones qui se
+  chevauchent sont réunies (`merged_zones`). La zone d'ajustement et les zones exclues sont en 2θ : `from_unit` y
+  ramène ce qu'on trace en Q ou en d, où l'axe s'inverse.
+- **Zone de spectres.** Comme dans la v1, c'est une seule zone pour les trois graphes : elle sert à la fois au dP/dt
+  moyen et à choisir les spectres, ce qui évite deux bandes superposées. `SpectraZonePresenter` fait suivre la zone et
+  la sélection l'une de l'autre, sans écho. Tant que la zone est là, on peut parcourir les spectres, même hors de la
+  zone, sans la perdre (`Navigator.set_current(keep=True)`), et un clic sur une ligne de la liste ne fait que changer de
+  spectre : il en faut plusieurs pour déplacer la zone. `region_of` s'arrête à mi-chemin du spectre voisin, pour ne
+  prendre que les spectres voulus ; `mean_dpdt` n'utilise que les spectres dedans, donc les pentes n'en dépendent pas.
+  Elle marche aussi sans temps (en numéro de spectre), où il n'y a pas de dP/dt moyen.
+- **Tracer.** `plots.drag_draws` reprend le glissement de la vue quand Maj est tenue au début du geste ; un Maj relâché
+  en route ne le coupe pas.
+
+Sur Water01_scan0074 (1 600 spectres) : 27 ms par déplacement de la zone (45 au pire) pour 200 spectres choisis, liste
+comprise ; 0,2 s pour donner une zone d'ajustement à tous. Water05 scan 9 est inchangé (15/16, glaces ≤ 0,029 GPa,
+Sn 0,169 GPa).
 
 **Limites de zoom** (demandées par l'utilisateur ; `limit_view`, `keep_in_limits`, `ImagePanel.update_limits`) :
 on ne peut pas dézoomer au-delà des données de chaque graphe, avec 3 % de marge. Deux pièges :
@@ -874,8 +910,7 @@ d'entrée est écrit dans `trxrd-gui.exe`. Avec `trxrd.gui.launch:main`, le nouv
 l'exécutable est refusé, `python -m trxrd.gui` lance la même chose.
 
 **Ensuite** :
-- étape 3 (suite) : zones d'ajustement et zones exclues dessinées à la souris, note du run
-  (`docs/PASSATION.md` §6, P1).
+- étape 3 (suite) : note du run (`docs/PASSATION.md` §6, P1).
 
 ## 10. Séparation en deux dépôts
 

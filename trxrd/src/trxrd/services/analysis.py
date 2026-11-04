@@ -100,6 +100,17 @@ class AnalysisSettings:
         return cls(**values)
 
 
+def merged_zones(zones: Iterable[Zone]) -> List[Zone]:
+    """Zones in order, those that overlap made into one."""
+    merged: List[Zone] = []
+    for low, high in sorted(tuple(sorted(float(v) for v in zone)) for zone in zones):
+        if merged and low <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], high))
+        else:
+            merged.append((low, high))
+    return merged
+
+
 def saved_settings(run: Run) -> AnalysisSettings:
     """The last settings of this run; the temperature defaults to that of its existing fits (old analyses)."""
     settings = AnalysisSettings.from_dict(run.ui_state.get(UI_KEY))

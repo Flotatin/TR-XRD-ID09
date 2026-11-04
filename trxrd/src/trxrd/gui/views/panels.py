@@ -93,11 +93,14 @@ class Navigator(QWidget):
         self.slider.setEnabled(bool(rows))
         self.slider.blockSignals(False)
 
-    def set_current(self, index: int, count: int, selection: Sequence[int] = ()) -> None:
-        """Current spectrum `index`, inside the selection; elsewhere (keys, slider, plots) it is selected alone."""
+    def set_current(self, index: int, count: int, selection: Sequence[int] = (), keep: bool = False) -> None:
+        """Current spectrum `index`, inside the selection; elsewhere (keys, slider, plots) it is selected alone.
+
+        `keep`: the selection stays wherever the current spectrum goes (a zone of spectra chose it).
+        """
         for widget in (self.table, self.slider):
             widget.blockSignals(True)
-        rows = list(selection) if index in selection else [index]
+        rows = list(selection) if keep or index in selection else [index]
         if count:
             if rows != self.selected_rows():
                 chosen = QItemSelection()

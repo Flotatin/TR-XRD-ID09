@@ -83,8 +83,12 @@ def _window(spectrum: Spectrum, fit_range: Optional[Tuple[float, float]]) -> Tup
     return float(np.nanmin(spectrum.two_theta)), float(np.nanmax(spectrum.two_theta))
 
 
-def update_phase(run: Run, phase_fit: PhaseFit, options: FitOptions) -> None:
-    """Cell, volume and pressure of a phase from the positions of its peaks."""
+def update_phase(run: Run, phase_fit: PhaseFit, options: FitOptions,
+                 window: Optional[Tuple[float, float]] = None) -> None:
+    """Cell, volume and pressure of a phase from the positions of its peaks.
+
+    Peaks outside `window` were not fitted: their old positions do not count.
+    """
     card = run.phases.get(phase_fit.phase)
     calib = run.calibration
     temperature = options.temperature
@@ -92,7 +96,9 @@ def update_phase(run: Run, phase_fit: PhaseFit, options: FitOptions) -> None:
     for peak in phase_fit.peaks:
         badly_known = np.isfinite(peak.center_err) and peak.center_err > options.max_center_err
         vanished = np.isfinite(peak.height) and peak.height <= 0
-        if peak.enabled and peak.hkl is not None and np.isfinite(peak.center) and not badly_known and not vanished:
+        outside = window is not None and not window[0] <= peak.center <= window[1]
+        if (peak.enabled and peak.hkl is not None and np.isfinite(peak.center) and not badly_known and not vanished
+                and not outside):
             sigma = peak.center_err if np.isfinite(peak.center_err) else 0.0
             if calib is not None and calib.sigma_distance_m:
                 geometric = sigma_two_theta_from_distance(peak.center, calib.distance_m, calib.sigma_distance_m)
@@ -184,7 +190,7 @@ def fit_spectrum(
     fitted = {id(old): new for old, new in zip(peaks + extra, result.peaks)}
     for phase_fit in active:
         phase_fit.peaks = [fitted.get(id(p), p) for p in phase_fit.peaks]
-        update_phase(run, phase_fit, options)
+        update_phase(run, phase_fit, options, window)
     spectrum.free_peaks = [fitted.get(id(p), p) for p in free]
     refresh_model(spectrum)
     return spectrum

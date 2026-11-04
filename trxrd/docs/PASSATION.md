@@ -66,13 +66,13 @@ Ne pas les remettre en cause sans lui en parler.
 | `8cc1c8c` | Validation sur un run réel (Water05) et cinq corrections qui en découlent ; nommage v1 / v2 |
 | `e135918` | Documentation : commit de référence de la v1 |
 | `68a1b7c` | Suivi des pics ; `trxrd compare` ; `CLAUDE.md` ; environnement virtuel séparé |
-| branche `gui-viewer` | Interface :<br>- étape 1, le lecteur : `trxrd-gui`, presenters sans Qt, registre d'actions, ouverture en arrière-plan (`Session.read` / `attach`) ;<br>- étape 2 : nouveaux runs depuis RAW_DATA, cake sous le spectre, calibration à la Dioptas validée sur le LaB6 réel ; aperçu du scan brut pour choisir la plage 2θ ; analyse automatique depuis l'interface (Ctrl+R) ; spectre affiché filtré, fond soustrait, onglets Traitement et Détection, sélection de spectres ;<br>- étape 3 : travail manuel sur les phases (ajout, P, ajustement, série avec suivi, modèle copié), pics libres gardés, annuler / rétablir ;<br>- étape 2 (suite) : panneau dDAC de la v1 (grandeur au choix P, V, a, b, c, c/a, b/a, T, ou X/X₀, avec le piézo ; dP/dt par échantillon, moyen sur un intervalle ; carte des diffractogrammes en fonction du temps), images à échelle, niveaux et couleurs réglables |
+| branche `gui-viewer` | Interface :<br>- étape 1, le lecteur : `trxrd-gui`, presenters sans Qt, registre d'actions, ouverture en arrière-plan (`Session.read` / `attach`) ;<br>- étape 2 : nouveaux runs depuis RAW_DATA, cake sous le spectre, calibration à la Dioptas validée sur le LaB6 réel ; aperçu du scan brut pour choisir la plage 2θ ; analyse automatique depuis l'interface (Ctrl+R) ; spectre affiché filtré, fond soustrait, onglets Traitement et Détection, sélection de spectres ;<br>- étape 3 : travail manuel sur les phases (ajout, P, ajustement, série avec suivi, modèle copié), pics libres gardés, annuler / rétablir ;<br>- étape 2 (suite) : panneau dDAC de la v1 (grandeur au choix P, V, a, b, c, c/a, b/a, T, ou X/X₀, avec le piézo ; dP/dt par échantillon, moyen sur un intervalle ; carte des diffractogrammes en fonction du temps), images à échelle, niveaux et couleurs réglables ;<br>- étape 3 (suite) : pics à la souris, ajustement personnalisé, zones à la souris (ajustement, exclues, zone de spectres) |
 | branche `p2-validation-2026` | Validation sur les 143 runs de janvier 2026 (61 % → 81 % de spectres aux mêmes phases) : conversion des runs Jungfrau « continu », `Vmin` de la v1 non repris, coût d'apparition d'une famille nul, suivi interrompu par un pic fort inexpliqué, pics larges ignorés, tri des pics fixes, `--temperature`, familles sans casse, CLI sous Windows |
 
 ### 3.2 Par fonctionnalité
 
-Tout est testé : `python -m pytest trxrd` compte 268 tests. Les 7 comparaisons numériques avec la v1 sont
-ignorées quand la v1 n'est pas importable, par exemple dans `.venv-v2`, qui n'a pas PyQt5 : 261 tests
+Tout est testé : `python -m pytest trxrd` compte 313 tests. Les 7 comparaisons numériques avec la v1 sont
+ignorées quand la v1 n'est pas importable, par exemple dans `.venv-v2`, qui n'a pas PyQt5 : 306 tests
 passent alors.
 
 | Fonctionnalité | Où | État / preuve |
@@ -102,6 +102,7 @@ passent alors.
 | Travail manuel sur les phases : ajouter, retirer, changer P, ajuster le spectre, ajuster une série en suivant à partir du spectre courant, copier le modèle ; pics libres gardés et tracés ; annuler / rétablir | `services/editing.py`, `Session.remember`, `gui/presenters/editing.py`, `gui/views/editing.py` | ✅ D2O_03 scan 6 : 14 spectres à moins de 0,05 GPa de la v1, sauf le spectre 4 (0,09 GPa), en 2 s |
 | Ajustement personnalisé : paramètres et modèle de chaque pic, ajustement d'un pic seul, vue zoomée, pics remplis, résidu, cases par raie, comparaison au fit précédent, touches de la v1 | `editing.set_peak`, `fit_peak`, `set_line`, `misfit`, `PeaksPresenter`, `PeaksPanel` | ✅ D2O_03 scan 6 #0 : résidu 4,45e6 → 2,17e6, P = 5,75 GPa ; le résidu montre la bosse non expliquée vers 19° |
 | Pics à la souris : poignées, ajout (raie ou pic libre), suppression, désactivation | `editing.add_peak`, `PeaksPresenter`, `SpectrumView.show_handles` | ✅ Water05 scan 9 #8 : pic du joint ajouté, ajusté à 18,64° ; Sn passe de 2,07 à 2,01 GPa |
+| Zones à la souris : zone d'ajustement d'un spectre (propagée à la sélection ou à tous), zones exclues du run, zone de spectres sur les trois graphes dDAC, qui choisit la sélection et donne le dP/dt moyen | `editing.set_fit_range`, `analysis.merged_zones`, `gui/presenters/zones.py`, `gui/views/zones.py`, `plots.drag_draws` | ✅ Water01_scan0074 (1 600 spectres) : 27 ms par déplacement de la zone, 0,2 s pour une zone donnée à tous ; Water05 inchangé |
 | Limites de zoom de tous les graphes | `limit_view`, `keep_in_limits`, `ImagePanel.update_limits` | ✅ |
 | Cake / image brute sous le spectre | `services/images.py`, `CakePresenter` | ✅ image brute d'un `.CEDX` retrouvée par le nom du run ; 0,03 s par spectre |
 | Panneau dDAC : grandeur de chaque phase en fonction du temps (P, V, a, b, c, c/a, b/a, T, ou ÷ fiche), piézo, carte des diffractogrammes sur le même axe du temps | `gui/presenters/display.py`, `EvolutionPresenter`, `MapPresenter`, `gui/views/plots.py` | ✅ Water05 scan 9 ; carte de Water01_scan0074 (1 600 spectres) en 0,03 s |
@@ -219,19 +220,27 @@ run par run, avec une passe sans exclusion puis une passe avec les zones fixes r
     voir ce qui se passe au lancement : `%LOCALAPPDATA%\trxrd\trxrd-gui.log`, et le journal CodeIntegrity.
 26. **Un long texte élargit toute la fenêtre.** Le message de dP/dt et le chemin de la barre d'état l'amenaient
     à 2 196 pixels, hors de l'écran : retour à la ligne, ou texte coupé avec une infobulle.
+27. **Un pic hors de la zone d'ajustement ne doit plus compter.** Il n'était pas ajusté, mais sa vieille position
+    entrait encore dans la maille : P dépendait d'un pic que personne ne regardait. De même, placer une phase élargissait
+    la zone à chaque cran de molette, et pouvait attribuer une raie à un pic de zone exclue.
+28. **Tester la souris avec de vrais événements, et vérifier que le test attrape le défaut.** `QTest.mouseMove` déplace
+    le curseur sans bouton tenu : pyqtgraph ne voit aucun glissement. Il faut des `QMouseEvent`, et `mouseRateLimit` à −1,
+    car pyqtgraph jette les mouvements à moins de 10 ms d'intervalle (`test_gui_window.py`, `_drag`). Remettre un défaut
+    corrigé pour voir un test tomber a aussi servi : le premier test du point 27 passait avec le défaut, sa tolérance de
+    0,1 GPa étant trop lâche. Il compare maintenant P pour deux positions du pic hors de la zone.
 
 ## 6. Reste à faire (par priorité)
 
-**Où on en est (fin de séance du 4 novembre 2026).** L'utilisateur a essayé l'ajustement personnalisé et en est
-content. Ses deux dernières remarques sont traitées : à la molette, seules les raies expliquées par un pic détecté
-se cochent ; la voie de l'oscilloscope choisie reste d'un rafraîchissement à l'autre. Pour reprendre :
-1. Lui demander ce qui manque encore par rapport à sa façon de travailler dans la v1 (P1, étape 3).
-2. Zones d'ajustement et zones exclues dessinées à la souris, zone sur le graphe dDAC pour choisir les spectres.
+**Où on en est (4 novembre 2026).** Les zones à la souris sont faites, mais l'utilisateur ne les a pas encore
+essayées. Pour reprendre :
+1. Recueillir son avis sur les zones. À lui demander : la zone d'ajustement est par spectre, alors que la v1 en avait une
+   par jauge. Les cases par raie suffisent-elles ?
+2. Lui demander ce qui manque encore par rapport à sa façon de travailler dans la v1 (P1, étape 3).
 3. Défaut de la recherche sur D2O_03 scan 6 #0 (P5, poids des pics forts).
 4. Outil de calibration : `test.poni` faux de 4,4 mm. L'utilisateur n'a pas encore dit sur quelle image et quels
    anneaux il l'a fait.
-5. « Ne se lance plus avec l'exe » (P1) : cause non trouvée, l'utilisateur a repris le travail sans préciser ; voir
-   `trxrd-gui.log` si cela revient.
+5. « Ne se lance plus avec l'exe » (P1) : pas revu. Le journal `trxrd-gui.log` montre des lancements normaux depuis
+   (4 novembre, 02:22, 02:44 et 03:02, fermés avec le code 0). À regarder si cela revient.
 6. Les pull requests `p2-validation-2026` puis `gui-viewer` vers `main` restent à ouvrir par l'utilisateur (`gh` n'est
    pas installé).
 
@@ -292,6 +301,8 @@ Seul `trxrd/gui/` a le droit d'importer PySide6/pyqtgraph (règle vérifiée par
 - la voie « piézo » : `ch6` (`Channel3`) varie de 0 à 7,4 V, c'est probablement la consigne du piézo. Il est
   montré par défaut, mais il faut le confirmer avec l'utilisateur. Le rôle de `ch2` est inconnu ;
 - des icônes pour la barre d'outils ;
+- la largeur minimale de la fenêtre : 1 841 pixels, imposés par les barres de réglages du cake (748) et de la carte
+  (695). Elle tient sur 1 920 pixels, pas sur un écran plus étroit ;
 - le zoom du panneau dDAC, qui revient à la plage des spectres à chaque modification du run ;
 - aperçu du scan brut, à peaufiner à la fin si besoin : raies attendues des phases sur le diagramme,
   contour de la plage sur l'image ;
@@ -309,8 +320,8 @@ Seul `trxrd/gui/` a le droit d'importer PySide6/pyqtgraph (règle vérifiée par
 - [x] ajustement personnalisé, comme dans la v1 : modèle et paramètres de chaque pic, ajustement d'un seul pic
   (Maj+R, fenêtre en σ, Var), vue zoomée, pics remplis, résidu, cases par raie, comparaison avec le fit
   précédent, curseur et touches de la v1 ;
-- [ ] zones d'ajustement / zones exclues dessinées à la souris (à stocker dans `Run.ui_state` ou dans le modèle) ;
-  dans la v1, une zone par jauge, et une zone sur le graphe dDAC pour choisir les spectres ;
+- [x] zones d'ajustement et zones exclues dessinées à la souris (onglet Zones, Z), zone sur les graphes dDAC pour
+  choisir les spectres. La zone d'ajustement est par spectre et non par jauge comme dans la v1, à confirmer avec lui ;
 - [x] copier / coller le modèle de phases d'un spectre sur une sélection de spectres ; supprimer les phases d'une zone de spectres ;
 - [x] détection automatique des pics affichée (marqueurs), avec SNR (onglet Détection) ;
 - [ ] note du run.

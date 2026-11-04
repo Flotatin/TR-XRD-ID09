@@ -303,7 +303,6 @@ class DetectionMarks:
     tips: List[str]
     threshold_x: np.ndarray
     threshold_y: np.ndarray  # a peak must rise above this curve
-    zones: List[Tuple[float, float]]  # excluded zones, display unit
     summary: str
 
 
@@ -336,7 +335,6 @@ def detection_marks(run: Run, detection, unit: str, raw: bool = False) -> Detect
     positions = np.array([p.position for p in detection.peaks], dtype=float)
     offset = detection.baseline if raw else np.zeros_like(detection.x)
     tops = np.interp(positions, detection.x, detection.smoothed + offset) if positions.size else positions
-    zones = [tuple(sorted(to_unit(np.array(zone, dtype=float), unit, run))) for zone in detection.exclude]
     tips = []
     for k, peak in enumerate(detection.peaks):
         fwhm = f"{peak.fwhm:.3f}°" if np.isfinite(peak.fwhm) else "—"
@@ -346,8 +344,64 @@ def detection_marks(run: Run, detection, unit: str, raw: bool = False) -> Detect
         x=to_unit(positions, unit, run), y=tops, kinds=[_kind(detection, k) for k in range(len(detection.peaks))],
         shoulder=[p.shoulder for p in detection.peaks], tips=tips,
         threshold_x=to_unit(detection.x, unit, run), threshold_y=detection.threshold + offset,
-        zones=zones, summary=detection_summary(detection),
+        summary=detection_summary(detection),
     )
+
+
+# ---------------------------------------------------------------------------- zones
+
+
+@dataclass
+class ZoneMarks:
+    """Zones of a spectrum in the display unit, each with its low end first."""
+
+    limits: Tuple[float, float]  # the whole pattern
+    fit: Tuple[float, float]  # fit zone
+    excluded: List[Tuple[float, float]]
+
+
+def pattern_limits(spectrum: Spectrum) -> Tuple[float, float]:
+    x = np.asarray(spectrum.two_theta, dtype=float)
+    return float(x.min()), float(x.max())
+
+
+def zone_marks(run: Run, index: int, exclude: Sequence[Tuple[float, float]], unit: str) -> ZoneMarks:
+    def shown(zone) -> Tuple[float, float]:
+        return tuple(float(v) for v in sorted(to_unit(np.array(zone, dtype=float), unit, run)))
+
+    spectrum = run.spectra[index]
+    limits = pattern_limits(spectrum)
+    return ZoneMarks(shown(limits), shown(spectrum.fit_range or limits), [shown(zone) for zone in exclude])
+
+
+def zone_note(outside: int, excluded: int) -> str:
+    """What the zones leave behind on the current spectrum."""
+    notes = []
+    if outside:
+        notes.append(f"{outside} pic(s) de phases hors de la zone d'ajustement : ni ajustés, ni comptés dans la pression.")
+    if excluded:
+        notes.append(f"{excluded} pic(s) de phases dans une zone exclue : ils restent jusqu'à la prochaine analyse, "
+                     "ou décocher leur raie.")
+    return "\n".join(notes)
+
+
+def spectra_in(x_of_spectra: Sequence[float], region: Tuple[float, float]) -> List[int]:
+    """Spectra whose time (or index) is inside `region`."""
+    x = np.asarray(x_of_spectra, dtype=float)
+    low, high = sorted(region)
+    return [int(i) for i in np.flatnonzero((x >= low) & (x <= high))]
+
+
+def region_of(x_of_spectra: Sequence[float], indices: Sequence[int]) -> Optional[Tuple[float, float]]:
+    """Range holding the spectra `indices`, and no other: it stops halfway to the next spectrum on each side."""
+    x = np.asarray(x_of_spectra, dtype=float)
+    if not len(indices) or not len(x):
+        return None
+    first, last = min(indices), max(indices)
+    step = float(np.median(np.abs(np.diff(x)))) if len(x) > 1 else 1.0
+    start = (x[first - 1] + x[first]) / 2 if first > 0 else x[first] - step / 2
+    stop = (x[last] + x[last + 1]) / 2 if last + 1 < len(x) else x[last] + step / 2
+    return float(start), float(stop)
 
 
 def detection_rows(detection) -> List[Tuple[str, ...]]:

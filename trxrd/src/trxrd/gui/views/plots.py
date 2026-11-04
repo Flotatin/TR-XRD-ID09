@@ -39,6 +39,32 @@ def _scene_click(plot: pg.PlotWidget, callback: Callable[[float, float], None]) 
     plot.scene().sigMouseClicked.connect(clicked)
 
 
+def drag_draws(plot: pg.PlotWidget, on_draw: Callable[..., None], active: Optional[Callable[[], bool]] = None) -> None:
+    """Shift + left drag draws an interval on `plot` instead of moving the view.
+
+    on_draw(start, stop, finished, modifiers), in data coordinates, the keys being those held at the start of the
+    drag. `active`: when False the view moves as usual.
+    """
+    box = plot.getPlotItem().vb
+    move = box.mouseDragEvent
+    held = None  # modifiers of the drag in progress; None: it moves the view
+
+    def drag(event, axis=None) -> None:
+        nonlocal held
+        if event.isStart():
+            wanted = (axis is None and event.button() == Qt.MouseButton.LeftButton
+                      and event.modifiers() & Qt.KeyboardModifier.ShiftModifier and (active is None or active()))
+            held = event.modifiers() if wanted else None
+        if held is None:
+            move(event, axis=axis)
+            return
+        event.accept()
+        start = box.mapSceneToView(event.buttonDownScenePos()).x()
+        on_draw(start, box.mapSceneToView(event.scenePos()).x(), event.isFinish(), held)
+
+    box.mouseDragEvent = drag
+
+
 def _row(plot: QWidget, margin: QWidget) -> QHBoxLayout:
     row = QHBoxLayout()
     row.setSpacing(0)
@@ -48,12 +74,12 @@ def _row(plot: QWidget, margin: QWidget) -> QHBoxLayout:
 
 
 class MovableRegion:
-    """Interval on a plot that the user drags (mean dP/dt, 2θ range). Reports the user's drags, not the program's moves."""
+    """Interval on a plot that the user drags (zone of spectra, 2θ range). Reports the user's drags, not the program's moves."""
 
     def __init__(self, plot: pg.PlotWidget, on_change: Callable[[float, float], None],
-                 brush=(255, 170, 0, 45), pen: str = "#c07000") -> None:
+                 brush=(255, 170, 0, 45), pen: str = "#c07000", z: float = -10) -> None:
         self.region = pg.LinearRegionItem(brush=pg.mkBrush(*brush), pen=pg.mkPen(pen, width=1.5))
-        self.region.setZValue(-10)
+        self.region.setZValue(z)
         self.region.hide()
         plot.addItem(self.region, ignoreBounds=True)
         self.on_change = on_change
@@ -92,6 +118,21 @@ class _PeakHandle(pg.TargetItem):
             super().mouseClickEvent(event)
 
 
+class _Zone(pg.LinearRegionItem):
+    """Excluded zone on the spectrum: dragged or clicked while the zones are edited."""
+
+    def __init__(self, row: int, on_click: Callable[[int], None], **options) -> None:
+        super().__init__(**options)
+        self.row, self.on_click = row, on_click
+
+    def mouseClickEvent(self, event) -> None:
+        if self.movable and event.button() == Qt.MouseButton.LeftButton:
+            event.accept()
+            self.on_click(self.row)
+        else:
+            super().mouseClickEvent(event)
+
+
 class SpectrumView(QWidget):
     """Data, background and fit; under them a band with one row of ticks per phase (height ~ intensity).
 
@@ -104,6 +145,9 @@ class SpectrumView(QWidget):
     AXIS_HEIGHT = 46  # px, the x axis and its label, under the band
     RESIDUAL_HEIGHT = 80  # px
     GUIDE_MIN_INTENSITY = 5.0  # % of the card: weaker lines get no vertical line
+    OUTSIDE_BRUSH = (0, 0, 0, 28)  # outside the fit zone
+    EXCLUDED_BRUSH = (214, 39, 40, 45)
+    CHOSEN_BRUSH = (214, 39, 40, 95)
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -111,6 +155,10 @@ class SpectrumView(QWidget):
         self.on_move_peak: Optional[Callable[[object, float, float], None]] = None
         self.on_pick_peak: Optional[Callable[[object], None]] = None
         self.on_cursor: Optional[Callable[[float, float], None]] = None
+        self.on_zone_drawn: Optional[Callable[[float, float, bool], None]] = None
+        self.on_fit_zone: Optional[Callable[[float, float], None]] = None
+        self.on_zone_moved: Optional[Callable[[int, float, float], None]] = None
+        self.on_zone_picked: Optional[Callable[[int], None]] = None
         self.handles: Optional[List[_PeakHandle]] = None  # None: not editing the peaks
         self.plot = pg.PlotWidget()
         cross = pg.mkPen("#303030", width=1, style=Qt.PenStyle.DotLine)
@@ -167,7 +215,26 @@ class SpectrumView(QWidget):
         self.detected.setZValue(10)
         for item in (self.threshold, self.detected):
             self.plot.addItem(item)
-        self._zones: List[pg.GraphicsObject] = []
+        # zones: what is outside the fit zone is grey; excluded zones are red; drawn with Shift while they are edited
+        self.zones_edited = False
+        self._limits = (0.0, 0.0)
+        self.outside = [pg.LinearRegionItem(movable=False, brush=pg.mkBrush(*self.OUTSIDE_BRUSH), pen=pg.mkPen(None))
+                        for _ in range(2)]
+        self.fit_edges = [pg.InfiniteLine(angle=90, movable=True, pen=pg.mkPen("#303030", width=2),
+                                          hoverPen=pg.mkPen("#ff9000", width=3)) for _ in range(2)]
+        self.sketch = pg.LinearRegionItem(movable=False, pen=pg.mkPen(None))  # the zone being drawn
+        for item in (*self.outside, self.sketch):
+            item.setZValue(-20)
+            item.hide()
+            self.plot.addItem(item, ignoreBounds=True)
+        for line in self.fit_edges:
+            line.setZValue(15)
+            line.hide()
+            line.sigPositionChanged.connect(self._fit_edge_moving)
+            line.sigPositionChangeFinished.connect(self._fit_edge_moved)
+            self.plot.addItem(line, ignoreBounds=True)
+        self._excluded: List[_Zone] = []
+        drag_draws(self.plot, self._zone_drawing, lambda: self.zones_edited)
         self.spacer = spacer()  # shown with the histogram of the cake, so that both x axes line up
         self.spacer.hide()
         plots = QWidget()
@@ -188,6 +255,7 @@ class SpectrumView(QWidget):
         self.show_peak_fills([], None)
         self._clear_ticks()
         self.show_detection(None)
+        self.show_zones(None)
         self.plot.setTitle("")
         limit_view(self.plot)
 
@@ -207,6 +275,64 @@ class SpectrumView(QWidget):
             self.on_cursor(point.x(), point.y())
         if event.modifiers() & Qt.KeyboardModifier.ControlModifier and self.on_add_peak is not None:
             self.on_add_peak(point.x(), point.y())
+
+    def _zone_drawing(self, start: float, stop: float, finished: bool, modifiers) -> None:
+        fit_zone = bool(modifiers & Qt.KeyboardModifier.ControlModifier)
+        self.sketch.setBrush(pg.mkBrush(*(self.OUTSIDE_BRUSH if fit_zone else self.CHOSEN_BRUSH)))
+        self.sketch.setRegion((min(start, stop), max(start, stop)))
+        self.sketch.setVisible(not finished)
+        if finished and self.on_zone_drawn is not None:
+            QTimer.singleShot(0, lambda: self.on_zone_drawn(start, stop, fit_zone))
+
+    def _fit_edge_moving(self) -> None:
+        self._show_outside(sorted(line.value() for line in self.fit_edges))
+
+    def _fit_edge_moved(self) -> None:
+        start, stop = sorted(line.value() for line in self.fit_edges)
+        if self.on_fit_zone is not None:
+            QTimer.singleShot(0, lambda: self.on_fit_zone(start, stop))
+
+    def _zone_moved(self, zone: _Zone) -> None:
+        start, stop = zone.getRegion()
+        if self.on_zone_moved is not None:  # later: the zones are redrawn, this one is still in its mouse event
+            QTimer.singleShot(0, lambda: self.on_zone_moved(zone.row, start, stop))
+
+    def _zone_clicked(self, row: int) -> None:
+        if self.on_zone_picked is not None:
+            QTimer.singleShot(0, lambda: self.on_zone_picked(row))
+
+    def _show_outside(self, fit) -> None:
+        low, high = self._limits
+        for item, region in zip(self.outside, ((low, fit[0]), (fit[1], high))):
+            item.setRegion(region)
+            item.setVisible(region[1] > region[0])
+
+    def show_zones(self, marks, edited: bool = False, chosen: Optional[int] = None) -> None:
+        """Fit zone and excluded zones (display.ZoneMarks), or None; `edited`: the mouse moves and draws them."""
+        for item in self._excluded:
+            self.plot.removeItem(item)
+        self._excluded = []
+        self.zones_edited = marks is not None and edited
+        if marks is None:
+            for item in (*self.outside, *self.fit_edges):
+                item.hide()
+            return
+        self._limits = marks.limits
+        self._show_outside(marks.fit)
+        for line, value in zip(self.fit_edges, marks.fit):
+            line.blockSignals(True)
+            line.setBounds(marks.limits)
+            line.setValue(value)
+            line.blockSignals(False)
+            line.setVisible(edited)
+        for row, zone in enumerate(marks.excluded):
+            brush = self.CHOSEN_BRUSH if row == chosen else self.EXCLUDED_BRUSH
+            item = _Zone(row, self._zone_clicked, values=zone, movable=edited, brush=pg.mkBrush(*brush),
+                         pen=pg.mkPen("#d62728", width=1))
+            item.setZValue(-15)
+            item.sigRegionChangeFinished.connect(self._zone_moved)
+            self.plot.addItem(item, ignoreBounds=True)
+            self._excluded.append(item)
 
     def _handle_clicked(self, ref) -> None:
         # later: the handles are redrawn, and this one must not disappear inside its own mouse event
@@ -286,9 +412,6 @@ class SpectrumView(QWidget):
 
     def show_detection(self, marks) -> None:
         """Detected peaks (display.DetectionMarks), or None to hide them."""
-        for item in self._zones:
-            self.plot.removeItem(item)
-        self._zones = []
         if marks is None:
             self.detected.setData([])
             self.threshold.setData([], [])
@@ -300,12 +423,6 @@ class SpectrumView(QWidget):
                           "brush": pg.mkBrush(None) if shoulder else pg.mkBrush(color)})
         self.detected.setData(spots)
         self.threshold.setData(marks.threshold_x, marks.threshold_y)
-        for low, high in marks.zones:
-            zone = pg.LinearRegionItem((low, high), movable=False, brush=pg.mkBrush(128, 128, 128, 40),
-                                       pen=pg.mkPen(None))
-            zone.setZValue(-20)
-            self.plot.addItem(zone, ignoreBounds=True)
-            self._zones.append(zone)
 
     def _clear_ticks(self) -> None:
         for item in self._ticks:
@@ -443,6 +560,7 @@ class EvolutionView(QWidget):
         self._traces: Dict[str, object] = {}
         self._data = None
         self.interval = MovableRegion(self.plot, lambda start, stop: self.on_interval and self.on_interval(start, stop))
+        drag_draws(self.plot, lambda start, stop, *_: self.on_interval and start != stop and self.on_interval(start, stop))
         _scene_click(self.plot, lambda x, y: self.on_pick and self.on_pick(x))
         self.spacer = spacer()  # same right margin as the map below when its histogram is shown
         layout = QVBoxLayout(self)
@@ -513,7 +631,7 @@ class EvolutionView(QWidget):
         self._set_range()
 
     def show_interval(self, region, segments) -> None:
-        """The interval of the mean dP/dt (None: hidden) and the straight line of each curve over it."""
+        """The zone of spectra (None: hidden) and the straight line of the mean dP/dt of each curve over it."""
         self.interval.show(region)
         for item in self._segments:
             self.plot.removeItem(item)
@@ -553,9 +671,10 @@ class EvolutionView(QWidget):
 class RateView(QWidget):
     """dP/dt of every sample (or phase) versus time, on the time axis of the evolution plot (as in the v1).
 
-    "Moyenne sur un intervalle" shows an interval to drag, here or on the
-    evolution plot: the mean dP/dt of every curve over it is written under the
-    plot (and copied as a table with "Copier").
+    "Zone de spectres" shows a time zone, the same on the three dDAC plots, to
+    drag or to draw with Shift + drag. It chooses the spectra, and the mean
+    dP/dt of every curve over it is written under the plot (and copied as a
+    table with "Copier").
     """
 
     GROUPINGS = (("par échantillon", "family"), ("par phase", "phase"))
@@ -577,10 +696,11 @@ class RateView(QWidget):
         self.window.setSuffix(" spectres")
         self.window.setToolTip("dP/dt = pente d'une droite ajustée sur le spectre et ses voisins de chaque côté :\n"
                                "plus de spectres, courbe plus lisse mais moins résolue en temps.")
-        self.toggle = QPushButton("Moyenne sur un intervalle")
+        self.toggle = QPushButton("Zone de spectres")
         self.toggle.setCheckable(True)
-        self.toggle.setToolTip("dP/dt moyen = pente de la droite ajustée sur tous les spectres de l'intervalle,\n"
-                               "à déplacer ici ou sur le graphe du dessus.")
+        self.toggle.setToolTip("Zone de temps, à tirer sur l'un des trois graphes, ou à tracer avec Maj + glisser.\n"
+                               "Elle choisit les spectres (la sélection de la liste, pour ajuster, coller, traiter…)\n"
+                               "et donne le dP/dt moyen : pente de la droite ajustée sur tous ses spectres.")
         self.copy = QPushButton("Copier")
         self.copy.setToolTip("Copier le dP/dt moyen de chaque courbe (tableau pour un tableur)")
         self.copy.setEnabled(False)
@@ -614,6 +734,7 @@ class RateView(QWidget):
         self.marker = pg.InfiniteLine(angle=90, movable=False, pen=pg.mkPen("#808080", style=Qt.PenStyle.DotLine))
         self.plot.addItem(self.marker, ignoreBounds=True)
         self.interval = MovableRegion(self.plot, lambda start, stop: self.on_interval and self.on_interval(start, stop))
+        drag_draws(self.plot, lambda start, stop, *_: self.on_interval and start != stop and self.on_interval(start, stop))
         self._items: List[pg.GraphicsObject] = []
         self._means: List[pg.GraphicsObject] = []
         self._table = ""
@@ -668,11 +789,11 @@ class RateView(QWidget):
         limit_view(self.plot, y=span_of(*values))
         self.plot.enableAutoRange(axis=pg.ViewBox.YAxis)  # x follows the evolution plot
 
-    def show_interval(self, found) -> None:
-        """Mean dP/dt over the interval (display.IntervalData), or None when the interval is off."""
-        self.interval.show(None if found is None else (found.start, found.stop))
+    def show_interval(self, found, region=None) -> None:
+        """The zone of spectra (None: off) and the mean dP/dt over it (display.IntervalData; None without times)."""
+        self.interval.show(region)
         self.toggle.blockSignals(True)
-        self.toggle.setChecked(found is not None)
+        self.toggle.setChecked(region is not None)
         self.toggle.blockSignals(False)
         self._remove(self._means)
         self._table = found.table if found is not None and found.means else ""
@@ -699,6 +820,7 @@ class TimeMapView(QWidget):
     def __init__(self, link_to: Optional[pg.PlotWidget] = None, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.on_pick: Optional[Callable[[float], None]] = None
+        self.on_interval: Optional[Callable[[float, float], None]] = None
         self.panel = ImagePanel("map", scale="log")  # a gasket peak 100 times stronger hides the sample otherwise
         self.panel.add_control(QLabel("Diffractogrammes intégrés —"))
         self.plot, self.image = self.panel.plot, self.panel.image
@@ -711,6 +833,9 @@ class TimeMapView(QWidget):
             keep_in_limits(self.plot, link_to)
         self.marker = pg.InfiniteLine(angle=90, movable=False, pen=pg.mkPen("w", width=1, style=Qt.PenStyle.DashLine))
         self.plot.addItem(self.marker, ignoreBounds=True)
+        self.interval = MovableRegion(self.plot, lambda start, stop: self.on_interval and self.on_interval(start, stop),
+                                      z=10)  # over the image
+        drag_draws(self.plot, lambda start, stop, *_: self.on_interval and start != stop and self.on_interval(start, stop))
         _scene_click(self.plot, lambda x, y: self.on_pick and self.on_pick(x))
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -718,6 +843,9 @@ class TimeMapView(QWidget):
 
     def clear(self) -> None:
         self.panel.clear()
+
+    def show_interval(self, region) -> None:
+        self.interval.show(region)
 
     def show_map(self, data) -> None:
         x_step = (data.x[-1] - data.x[0]) / (len(data.x) - 1) if len(data.x) > 1 else 1.0

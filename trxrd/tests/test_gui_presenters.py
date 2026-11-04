@@ -88,7 +88,7 @@ def test_open_shows_every_panel(viewer, sample_run):
     np.testing.assert_allclose(patterns.x, [0, 1, 2, 3, 4])  # one column per spectrum, on the time axis
     assert views["map"].last("set_marker") == (0.0,)
     assert views["navigator"].last("show_spectra")[1][2] == ("2", "2", "Ice VII 4.00, Ice VI 1.50")
-    assert views["navigator"].last("set_current") == (0, 5, [])
+    assert views["navigator"].last("set_current") == (0, 5, [], False)
     assert views["phases"].last("show_rows")[1][0][:3] == ("H2O_Ice_VII", "2.000", "0.050")
     assert [r[1] for r in views["peaks"].last("show_rows")[1]] == ["110", "200"]
 
@@ -193,7 +193,7 @@ def test_new_runs_from_raw_data(viewer, raw_root, tmp_path):
     assert progress[-1] == (2000, 2000) and window.count("end_progress") == 1
     assert session.run.name == "water02_0001_scan0003" and len(session.run) == 3 and not session.dirty
     assert session.path == tmp_path / "analyse" / "water02_0001_scan0003.trxrd.h5"
-    assert window.last("show_info")[0] == "Runs créés" and views["navigator"].last("set_current") == (0, 3, [])
+    assert window.last("show_info")[0] == "Runs créés" and views["navigator"].last("set_current") == (0, 3, [], False)
 
 
 def test_new_run_cancelled_or_failing(viewer, raw_root, tmp_path):
@@ -392,14 +392,14 @@ def test_dpdt_presenter_and_shared_interval(tmp_path, sample_run):
     session.open(save_run(sample_run, tmp_path / "run.trxrd.h5"))
     data = rates_view.last("show_rates")[0]
     assert data.by == "family" and data.half_window == 2 and [s.name for s in data.series] == ["H2O"]
-    assert rates_view.last("show_interval") == (None,) and evolution.last("show_interval") == (None, [])
+    assert rates_view.last("show_interval") == (None, None) and evolution.last("show_interval") == (None, [])
 
-    rates_view.on_interval_toggle(True)  # the whole range of the spectra
-    assert settings.interval == (0.0, 4.0)
+    rates_view.on_interval_toggle(True)  # the whole range of the spectra, half a step beyond each end
+    assert settings.interval == (-0.5, 4.5)
     found = rates_view.last("show_interval")[0]
-    assert (found.start, found.stop) == (0.0, 4.0) and [m.name for m in found.means] == ["H2O"]
+    assert (found.start, found.stop) == (-0.5, 4.5) and [m.name for m in found.means] == ["H2O"]
     region, segments = evolution.last("show_interval")
-    assert region == (0.0, 4.0) and len(segments) == 1  # the straight line over P(t)
+    assert region == (-0.5, 4.5) and len(segments) == 1  # the straight line over P(t)
     evolution.on_interval(2.0, 0.5)  # dragged on the evolution plot
     assert settings.interval == (0.5, 2.0) and rates_view.last("show_interval")[0].start == 0.5
     evolution.on_quantity("V", False)
@@ -413,7 +413,7 @@ def test_dpdt_presenter_and_shared_interval(tmp_path, sample_run):
     assert session.index == 3 and rates_view.last("set_marker") == (3.0,)
 
     session.open(save_run(sample_run, tmp_path / "other.trxrd.h5"))  # a new run: no interval
-    assert settings.interval is None and rates_view.last("show_interval") == (None,)
+    assert settings.interval is None and rates_view.last("show_interval") == (None, None)
     rates_view.on_interval_toggle(False)
     with pytest.raises(ValueError):
         settings.update(by="sample")
@@ -590,7 +590,7 @@ def test_detection_presenter_shows_the_peaks_and_keeps_its_settings(compression_
     assert columns[0] == "2θ (°)" and len(rows) == len(marks.x) == len(presenter.detection.peaks) >= 3
     assert [r[4] for r in rows if abs(float(r[0]) - GASKET) < 0.05] == ["zone exclue : pic libre"]
     assert summary.endswith("(1 en zone exclue)") and marks.kinds.count("excluded") == 1
-    assert marks.zones == [(GASKET - 0.1, GASKET + 0.1)] and marks.threshold_x.size == marks.threshold_y.size
+    assert marks.threshold_x.size == marks.threshold_y.size
     assert view.last("show_options")[0].min_snr == 5.0
 
     first = len(rows)

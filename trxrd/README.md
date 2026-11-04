@@ -18,7 +18,7 @@ Un environnement virtuel dédié, séparé de celui de la v1 : PyQt5 (v1) et PyS
 python -m venv .venv-v2
 .venv-v2\Scripts\activate                    # Windows ; Linux/macOS : source .venv-v2/bin/activate
 pip install -e "./trxrd[notebook,gui,dev]"  # depuis la racine du dépôt
-python -m pytest trxrd                      # 268 tests
+python -m pytest trxrd                      # 313 tests
 ```
 
 ## Interface graphique
@@ -34,7 +34,9 @@ Le lecteur ouvre un `.trxrd.h5` ou un ancien `.CEDX`, et affiche :
   dessous son cake ou son image brute ;
 - à droite, comme le panneau dDAC de la v1, sur le même axe du temps :
   - P, V, a, b, c, c/a… (ou X/X₀) de chaque phase en fonction du temps, avec le piézo ;
-  - dP/dt de chaque échantillon, et le dP/dt moyen sur un intervalle qu'on déplace ;
+  - dP/dt de chaque échantillon, et le dP/dt moyen sur la zone de spectres ;
+  - une zone de temps, la même sur les trois graphes, à tirer ou à tracer (Maj + glisser) : elle choisit les
+    spectres sur lesquels ajuster, coller ou traiter ;
   - la carte des diffractogrammes intégrés.
 
 Les images ont un histogramme pour régler les niveaux, une échelle log / linéaire / racine et un choix de
@@ -54,6 +56,8 @@ L'interface sait aussi :
   ajuster le spectre (Ctrl+F), propager à la sélection ou à tous à partir du spectre courant, copier le
   modèle ; tout s'annule (Ctrl+Z) ;
 - modifier les pics à la souris (Ctrl+E) : tirer une poignée, Ctrl + clic pour ajouter un pic, Suppr ;
+- dessiner les zones sur le spectre (onglet Zones, ou Z) : zone d'ajustement d'un spectre, à propager à la
+  sélection ou à tous, et zones exclues du run (joint, diamant) ;
 - régler chaque pic (onglet Pics) : modèle, position, largeur, forme, ajustement du pic seul (Maj+R), vue zoomée ;
   choisir les raies d'une phase par des cases ; pics remplis et résidu sous le spectre ;
 - afficher sous le spectre le cake ou l'image brute du spectre courant (Ctrl+K) ;

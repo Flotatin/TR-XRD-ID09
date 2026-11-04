@@ -3,9 +3,11 @@
 Add a phase at a starting pressure, move it, remove it; add, move, disable
 or remove single peaks; fit the spectrum; fit a series from the current
 spectrum outwards, each spectrum starting from its neighbour; copy the model
-of a spectrum onto others. A phase or a peak is placed on the peaks the
-detection finds (position, height, width): the fit starts from what is really
-there, with the settings of the automatic analysis.
+of a spectrum onto others; choose the fit zone. A phase or a peak is placed on
+the peaks the detection finds (position, height, width): the fit starts from
+what is really there, with the settings of the automatic analysis. A phase
+stays inside the fit zone and away from the excluded zones; a peak placed by
+hand goes where the user wants it, and the fit zone follows.
 """
 
 from __future__ import annotations
@@ -29,6 +31,7 @@ from trxrd.services.identification import Progress, analysis_window, detect
 
 LINE_REACH = 0.3  # deg: a peak added this close to a line of the phase, not yet used, takes that line
 RANGE_MARGIN = 0.5  # deg kept around a peak at the end of the fit range
+MIN_ZONE = 0.05  # deg: narrower than this, a zone is a slip of the mouse
 NO_PEAK = "Aucun pic à ajuster : amener les raies sur des pics détectés (pression), ou cocher une raie"
 PeakRef = Tuple[Optional[str], int]  # (phase, or None for a free peak; position in its list of peaks)
 
@@ -90,8 +93,10 @@ def add_phase(run: Run, index: int, phase: str, pressure: float, settings: Optio
     settings = settings or AnalysisSettings()
     options = settings.options()
     spectrum = run.spectra[index]
-    window = analysis_window(run, options)
-    detected = detect(run, index, window, options.detection)
+    analysed = analysis_window(run, options)
+    window = spectrum.fit_range or analysed
+    detected = [p for p in detect(run, index, analysed, options.detection)
+                if window[0] <= p.position <= window[1] and not in_zones(p.position, options.exclude)]
     taken = [p.center for f in spectrum.phases if f.phase != phase for p in f.peaks]
     taken += [p.center for p in spectrum.free_peaks]
     temperature = options.fit.temperature
@@ -103,9 +108,49 @@ def add_phase(run: Run, index: int, phase: str, pressure: float, settings: Optio
         spectrum.phases[names.index(phase)] = fit
     else:
         spectrum.phases.append(fit)
-    _cover(spectrum, [p.center for p in peaks], window)
+    spectrum.fit_range = window
     refresh_model(spectrum)
     return fit
+
+
+def in_zones(position: float, zones: Optional[Iterable[Tuple[float, float]]]) -> bool:
+    return any(low <= position <= high for low, high in zones or ())
+
+
+def set_fit_range(run: Run, indices: Iterable[int], zone: Optional[Tuple[float, float]]) -> List[int]:
+    """Fit zone of the spectra `indices`, kept inside their patterns; None: the whole pattern.
+
+    It applies from the next fit on. Peaks left outside stay on the spectrum,
+    but they are not fitted and no longer count in the cell.
+    """
+    indices = list(indices)
+    ranges = []
+    for index in indices:
+        x = np.asarray(run.spectra[index].two_theta, dtype=float)
+        low, high = (float(x.min()), float(x.max())) if zone is None else (
+            max(min(zone), float(x.min())), min(max(zone), float(x.max())))
+        if high - low < MIN_ZONE:
+            raise ValueError("Zone d'ajustement trop étroite, ou hors du spectre")
+        ranges.append((low, high))
+    for index, window in zip(indices, ranges):
+        spectrum = run.spectra[index]
+        spectrum.fit_range = window
+        if spectrum.model is not None:
+            refresh_model(spectrum)
+    return indices
+
+
+def peaks_outside(spectrum: Spectrum) -> int:
+    """Peaks of the phases left out of the fit zone."""
+    if spectrum.fit_range is None:
+        return 0
+    low, high = spectrum.fit_range
+    return sum(not low <= p.center <= high for fit in spectrum.phases for p in fit.peaks)
+
+
+def peaks_excluded(spectrum: Spectrum, zones: Sequence[Tuple[float, float]]) -> int:
+    """Peaks of the phases inside excluded zones: a zone only acts on what is placed afterwards."""
+    return sum(in_zones(p.center, zones) for fit in spectrum.phases for p in fit.peaks)
 
 
 def remove_phase(run: Run, index: int, phase: str) -> None:
@@ -324,10 +369,10 @@ def fit_peak(run: Run, index: int, ref: PeakRef, settings: Optional[AnalysisSett
         raise ValueError(f"Ajustement du pic impossible : {result.message}")
     fitted = result.peaks[0]
     _peaks_of(spectrum, ref[0])[ref[1]] = fitted
+    _cover(spectrum, [fitted.center])
     fit = spectrum.phase_fit(ref[0]) if ref[0] is not None else None
     if fit is not None:
-        update_phase(run, fit, options)
-    _cover(spectrum, [fitted.center])
+        update_phase(run, fit, options, spectrum.fit_range)
     refresh_model(spectrum)
     return fitted
 

@@ -7,14 +7,15 @@ presenter sets (`view.on_pick`, `view.on_select`); it never changes the data.
 
 Views expected (duck typing):
 - spectrum: show_spectrum(SpectrumCurves, reset: bool), show_detection(DetectionMarks or None), clear()
+  (zones: see zones.py)
 - evolution: show_evolution(EvolutionData), set_marker(x), clear(), show_interval(region, segments),
   on_pick(x), on_quantity(key, relative), on_interval(start, stop)
-- rates: show_rates(RateData), show_interval(IntervalData or None), set_marker(x), clear(),
+- rates: show_rates(RateData), show_interval(IntervalData or None, region), set_marker(x), clear(),
   on_pick(x), on_options(by, half_window), on_interval(start, stop), on_interval_toggle(on)
-- map: show_map(TimeMapData), set_marker(x), clear(), on_pick(x)
+- map: show_map(TimeMapData), show_interval(region), set_marker(x), clear(), on_pick(x), on_interval(start, stop)
 - cake: show_cake(CakeData), show_image(array), show_message(text), clear(), on_mode(mode)
 - table: show_rows(columns, rows)
-- navigator: show_spectra(columns, rows), set_current(index, count, selection), on_select(index),
+- navigator: show_spectra(columns, rows), set_current(index, count, selection, keep), on_select(index),
   on_selection(indices)
 - window: set_title, set_status, set_units(available, current), set_busy(text or None),
   set_undo(undo label or None, redo label or None), show_message(text),
@@ -105,12 +106,13 @@ class DisplaySettings:
 
 
 class RateSettings:
-    """dP/dt settings shared by the dDAC plots: curves per sample or per phase, smoothing, interval (ms)."""
+    """dP/dt settings shared by the dDAC plots: curves per sample or per phase, smoothing, time zone."""
 
     def __init__(self) -> None:
         self.by = "family"
         self.half_window = 2  # spectra on each side of the sliding straight line
-        self.interval: Optional[Tuple[float, float]] = None  # mean dP/dt over this time range; None: off
+        # zone of the dDAC plots (ms, or spectra without times): mean dP/dt, spectra chosen; None: off
+        self.interval: Optional[Tuple[float, float]] = None
         self._listeners: List[Callable[["RateSettings"], None]] = []
 
     def subscribe(self, listener: Callable[["RateSettings"], None]) -> None:
@@ -195,12 +197,12 @@ class EvolutionPresenter:
         self.interval()
 
     def interval(self, *_) -> None:
-        """The interval of the mean dP/dt, and its straight lines when P itself is shown."""
+        """The time zone, and the straight lines of the mean dP/dt when P itself is shown."""
         if self.session.run is None:
             return
         found = display.interval_data(self.session.run, self.rates.interval, self.rates.by, self.rates.half_window)
         segments = found.segments if found is not None and self._shows_pressure else []
-        self.view.show_interval(self.rates.interval if found is not None else None, segments)
+        self.view.show_interval(self.rates.interval, segments)
 
     def marker(self, *_) -> None:
         if len(self._x):
@@ -240,11 +242,11 @@ class RatePresenter:
             self.interval()
 
     def toggle_interval(self, on: bool) -> None:
-        """On: the interval starts over the whole range of the spectra; off: no mean dP/dt."""
+        """On: the zone starts over the selection, or over all the spectra; off: no zone, no mean dP/dt."""
         run = self.session.run
-        if on and display.has_time_base(run):
-            times = run.times * 1e3
-            self.rates.update(interval=(float(times.min()), float(times.max())))
+        if on and run is not None and len(run):
+            chosen = self.session.selection if len(self.session.selection) > 1 else range(len(run))
+            self.rates.update(interval=display.region_of(display.spectrum_axis(run)[0], chosen))
         else:
             self.rates.update(interval=None)
 
@@ -262,7 +264,8 @@ class RatePresenter:
 
     def interval(self, *_) -> None:
         self.view.show_interval(
-            display.interval_data(self.session.run, self.rates.interval, self.rates.by, self.rates.half_window))
+            display.interval_data(self.session.run, self.rates.interval, self.rates.by, self.rates.half_window),
+            self.rates.interval)
 
     def marker(self, *_) -> None:
         if len(self._x):
@@ -277,14 +280,18 @@ class RatePresenter:
 class MapPresenter:
     """Integrated patterns versus time (x, shared with the evolution plot) and 2θ / Q / d (y)."""
 
-    def __init__(self, session: Session, settings: DisplaySettings, view) -> None:
+    def __init__(self, session: Session, settings: DisplaySettings, view,
+                 rate_settings: Optional[RateSettings] = None) -> None:
         self.session, self.settings, self.view = session, settings, view
+        self.rates = rate_settings or RateSettings()
         self._x = []
         view.on_pick = self.pick
+        view.on_interval = lambda start, stop: self.rates.update(interval=(start, stop))
         session.subscribe(Event.RUN_CHANGED, self.refresh)
         session.subscribe(Event.DATA_CHANGED, self.refresh)
         session.subscribe(Event.SPECTRUM_CHANGED, self.marker)
         settings.subscribe(self.refresh)
+        self.rates.subscribe(self.interval)
 
     def refresh(self, *_) -> None:
         run = self.session.run
@@ -292,10 +299,15 @@ class MapPresenter:
         if data is None:
             self._x = []
             self.view.clear()
+            self.interval()
             return
         self._x = display.spectrum_axis(run)[0]
         self.view.show_map(data)
         self.marker()
+        self.interval()
+
+    def interval(self, *_) -> None:
+        self.view.show_interval(self.rates.interval)
 
     def marker(self, *_) -> None:
         if len(self._x):
@@ -395,13 +407,26 @@ class TablesPresenter:
 class NavigatorPresenter:
     """List of the spectra and slider; several spectra can be chosen together (the selection)."""
 
-    def __init__(self, session: Session, view) -> None:
+    def __init__(self, session: Session, view, rate_settings: Optional[RateSettings] = None) -> None:
         self.session, self.view = session, view
+        self.rates = rate_settings or RateSettings()
         view.on_select = session.select
-        view.on_selection = session.set_selection
+        view.on_selection = self.chosen
         session.subscribe(Event.RUN_CHANGED, self.refresh)
         session.subscribe(Event.DATA_CHANGED, self.refresh)
         session.subscribe(Event.SPECTRUM_CHANGED, self.current)
+        session.subscribe(Event.SELECTION_CHANGED, self._selection_moved)
+
+    def chosen(self, rows: List[int]) -> None:
+        """While a time zone is shown, one row only moves the current spectrum: it takes several to change the zone."""
+        if self.rates.interval is not None and len(rows) == 1:
+            self.current()
+        else:
+            self.session.set_selection(rows)
+
+    def _selection_moved(self, *_) -> None:
+        if self.rates.interval is not None:  # chosen by the zone: the list shows it
+            self.current()
 
     def refresh(self, *_) -> None:
         run = self.session.run
@@ -410,7 +435,8 @@ class NavigatorPresenter:
 
     def current(self, *_) -> None:
         run = self.session.run
-        self.view.set_current(self.session.index, len(run) if run is not None else 0, self.session.selection)
+        self.view.set_current(self.session.index, len(run) if run is not None else 0, self.session.selection,
+                              self.rates.interval is not None)
 
 
 class MainPresenter:

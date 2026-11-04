@@ -50,18 +50,22 @@ class ModelChoices:
 
 
 def apply_edit(session: Session, view, indices: Iterable[int], label: str, action: Callable[[], object],
-               merge: bool = False) -> None:
-    """Do `action` on the spectra `indices`, which can then be undone; its errors are shown, not raised."""
-    kept = session.remember(list(indices), label, merge)
+               merge: bool = False, state: bool = False) -> bool:
+    """Do `action` on the spectra `indices`, which can then be undone; its errors are shown, not raised.
+
+    `state`: it changes the settings kept in the run too. Returns True when it was done.
+    """
+    kept = session.remember(list(indices), label, merge, state)
     try:
         action()
     except (ValueError, KeyError) as exc:
         if kept:
             session.forget()
         view.show_message(str(exc))
-        return
+        return False
     view.show_message("")
     session.modified()
+    return True
 
 
 class EditingPresenter:

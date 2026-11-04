@@ -17,6 +17,7 @@ from trxrd.gui.views.editing import PeaksPanel, PhasesPanel
 from trxrd.gui.views.panels import Navigator, RowsTable
 from trxrd.gui.views.plots import CakeView, EvolutionView, RateView, SpectrumView, TimeMapView
 from trxrd.gui.views.treatment import DetectionPanel, ProcessingPanel
+from trxrd.gui.views.zones import ZonesPanel
 from trxrd.physics.lattice import AXIS_LABELS
 
 FILE_FILTER = "Runs (*.trxrd.h5 *.h5 *.CEDX *.CEDXUp *.cedx);;Tous les fichiers (*)"
@@ -42,6 +43,7 @@ class MainWindow(QMainWindow):
         self.peaks = PeaksPanel()
         self.processing = ProcessingPanel()
         self.detection = DetectionPanel()
+        self.zones = ZonesPanel()
         # a histogram beside an image narrows its plot: the plot stacked above gets the same margin
         self.cake.panel.on_histogram = lambda shown: self.align_plots()
         self.map.panel.on_histogram = lambda shown: self.align_plots()
@@ -51,6 +53,7 @@ class MainWindow(QMainWindow):
         tables.addTab(self.peaks, "Pics")
         tables.addTab(self.processing, "Traitement")
         tables.addTab(self.detection, "Détection")
+        tables.addTab(self.zones, "Zones")
         left = QSplitter(Qt.Orientation.Vertical)
         left.addWidget(self.navigator)
         left.addWidget(tables)

@@ -6,8 +6,16 @@ import pytest
 pytest.importorskip("PySide6")
 pytest.importorskip("pyqtgraph")
 
+from PySide6.QtCore import QEvent, QPointF, Qt  # noqa: E402
+from PySide6.QtGui import QMouseEvent  # noqa: E402
+from PySide6.QtWidgets import QApplication  # noqa: E402
+
+import pyqtgraph as pg  # noqa: E402
+
 from trxrd.gui.presenters.viewer import ImmediateRunner  # noqa: E402
 from trxrd.io.h5store import save_run  # noqa: E402
+
+pg.setConfigOption("mouseRateLimit", -1)  # the mouse events of these tests follow each other within microseconds
 
 
 @pytest.fixture
@@ -244,8 +252,9 @@ def test_dpdt_view_with_its_interval(viewer):
     assert dpdt.by.currentData() == "family" and dpdt.window.value() == 2 and len(dpdt._items) == 2  # bars + curve
     assert not dpdt.interval.region.isVisible() and not dpdt.copy.isEnabled()
     dpdt.toggle.setChecked(True)
-    assert dpdt.interval.region.getRegion() == pytest.approx((0.0, 4.0))
-    assert window.evolution.interval.region.getRegion() == pytest.approx((0.0, 4.0))  # the same interval above
+    assert dpdt.interval.region.getRegion() == pytest.approx((-0.5, 4.5))
+    assert window.evolution.interval.region.getRegion() == pytest.approx((-0.5, 4.5))  # the same interval above
+    assert window.map.interval.region.getRegion() == pytest.approx((-0.5, 4.5))  # and on the map
     assert "H2O (Ice_VII, Ice_VI) : pente" in dpdt.result.text() and len(window.evolution._segments) == 1
     window.evolution.interval.region.setRegion((0.5, 2.5))  # dragged on the evolution plot
     assert dpdt.interval.region.getRegion() == pytest.approx((0.5, 2.5)) and "de 0.5 à 2.5 ms" in dpdt.result.text()
@@ -720,3 +729,190 @@ def test_the_oscilloscope_channel_chosen_stays(viewer):
     view.wanted_channel = "ch9"  # a run without that channel: the default, and the choice is kept for the next run
     session.modified()
     assert view.channel.currentText() == "Channel3" and view.wanted_channel == "ch9"
+
+
+def _shown(viewer, compression_run):
+    """The window on screen (offscreen), with the compression run: the mouse needs real geometry."""
+    window = viewer.window
+    viewer.session.attach(compression_run, None)
+    window.resize(1600, 950)
+    window.show()
+    QApplication.processEvents()
+    return window
+
+
+def _point(plot, x):
+    """Point of the viewport at x (data coordinates), at mid height."""
+    box = plot.getPlotItem().vb
+    low, high = box.viewRange()[1]
+    return plot.mapFromScene(box.mapViewToScene(QPointF(x, (low + high) / 2)))
+
+
+def _mouse(plot, kind, point, buttons, modifiers):
+    """A mouse event with its button held: QTest.mouseMove moves the cursor, and pyqtgraph would see no drag."""
+    viewport = plot.viewport()
+    left = Qt.MouseButton.LeftButton
+    button = Qt.MouseButton.NoButton if kind == QEvent.Type.MouseMove else left
+    position = QPointF(point)
+    QApplication.sendEvent(viewport, QMouseEvent(kind, position, QPointF(viewport.mapToGlobal(point)), button, buttons,
+                                                 modifiers))
+    QApplication.processEvents()
+
+
+def _settle():
+    for _ in range(3):  # the callbacks wait for the end of the mouse event
+        QApplication.processEvents()
+
+
+def _drag(plot, start, stop, modifiers=Qt.KeyboardModifier.NoModifier):
+    """A real left drag on `plot`, from x = start to x = stop."""
+    left, none = Qt.MouseButton.LeftButton, Qt.MouseButton.NoButton
+    points = [_point(plot, start + k * (stop - start) / 4) for k in range(5)]
+    _mouse(plot, QEvent.Type.MouseMove, points[0], none, modifiers)
+    _mouse(plot, QEvent.Type.MouseButtonPress, points[0], left, modifiers)
+    for point in points[1:]:
+        _mouse(plot, QEvent.Type.MouseMove, point, left, modifiers)
+    _mouse(plot, QEvent.Type.MouseButtonRelease, points[-1], none, modifiers)
+    _settle()
+
+
+def _click(plot, x, modifiers=Qt.KeyboardModifier.NoModifier):
+    left, none = Qt.MouseButton.LeftButton, Qt.MouseButton.NoButton
+    point = _point(plot, x)
+    _mouse(plot, QEvent.Type.MouseMove, point, none, modifiers)
+    _mouse(plot, QEvent.Type.MouseButtonPress, point, left, modifiers)
+    _mouse(plot, QEvent.Type.MouseButtonRelease, point, none, modifiers)
+    _settle()
+
+
+def test_zones_with_the_mouse_on_the_spectrum(viewer, compression_run):
+    from trxrd.services import analysis
+
+    window = _shown(viewer, compression_run)
+    plot = window.spectrum.plot
+    shift = Qt.KeyboardModifier.ShiftModifier
+
+    before = plot.getPlotItem().vb.viewRange()[0]
+    _drag(plot, 17.0, 18.0, shift)  # not in the zone mode: the view moves, nothing is drawn
+    assert analysis.saved_settings(compression_run).exclude == []
+    assert plot.getPlotItem().vb.viewRange()[0] != pytest.approx(before)
+    plot.getPlotItem().vb.setXRange(*before, padding=0)
+
+    window.actions.get("edit_zones").trigger()  # the key Z
+    assert window.zones.edit.isChecked() and window.tabs.currentWidget() is window.zones
+    assert window.actions.get("delete_peak").isEnabled()
+    assert all(line.isVisible() for line in window.spectrum.fit_edges)
+    _drag(plot, 18.4, 18.8, shift)
+    (low, high), = analysis.saved_settings(compression_run).exclude
+    assert (low, high) == pytest.approx((18.4, 18.8), abs=0.05)
+    assert window.zones.table.rowCount() == 1 and window.zones.remove.isEnabled()
+    assert len(window.spectrum._excluded) == 1 and not window.spectrum.sketch.isVisible()
+
+    view = plot.getPlotItem().vb.viewRange()[0]
+    _drag(plot, 11.0, 20.0, shift | Qt.KeyboardModifier.ControlModifier)
+    spectrum = viewer.session.spectrum
+    assert spectrum.fit_range == pytest.approx((11.0, 20.0), abs=0.05)
+    assert len(analysis.saved_settings(compression_run).exclude) == 1
+    assert plot.getPlotItem().vb.viewRange()[0] == pytest.approx(view)  # drawing does not move the view
+    assert all(item.isVisible() for item in window.spectrum.outside)  # grey on both sides
+    assert window.zones.low.value() == pytest.approx(spectrum.fit_range[0], abs=1e-3)
+
+    window.spectrum.fit_edges[1].setValue(19.0)  # what a drag does, then its end
+    window.spectrum.fit_edges[1].sigPositionChangeFinished.emit(window.spectrum.fit_edges[1])
+    QApplication.processEvents()
+    assert spectrum.fit_range[1] == pytest.approx(19.0)
+
+    _click(plot, 18.6)  # chooses the zone...
+    assert viewer.zones.chosen == 0 and window.zones.table.selectionModel().selectedRows()
+    window.actions.get("delete_peak").trigger()  # ...and Del removes it
+    assert analysis.saved_settings(compression_run).exclude == [] and window.spectrum._excluded == []
+    window.actions.get("undo").trigger()
+    assert len(analysis.saved_settings(compression_run).exclude) == 1 and len(window.spectrum._excluded) == 1
+
+    window.actions.get("edit_zones").trigger()
+    assert not window.zones.edit.isChecked() and not window.actions.get("delete_peak").isEnabled()
+    assert not any(line.isVisible() for line in window.spectrum.fit_edges)
+    assert len(window.spectrum._excluded) == 1 and not window.spectrum._excluded[0].movable  # shown, not movable
+
+
+def test_an_excluded_zone_dragged_with_the_mouse(viewer, compression_run):
+    from trxrd.services import analysis
+
+    window = _shown(viewer, compression_run)
+    window.zones.edit.setChecked(True)
+    viewer.zones.drawn(18.0, 18.4)
+    QApplication.processEvents()
+    _drag(window.spectrum.plot, 18.2, 18.7)
+    (low, high), = analysis.saved_settings(compression_run).exclude
+    assert (low, high) == pytest.approx((18.5, 18.9), abs=0.05)
+
+
+def test_delete_still_removes_a_peak_with_both_modes(viewer, compression_run):
+    from trxrd.services import editing
+
+    window = _shown(viewer, compression_run)
+    editing.add_phase(compression_run, 0, "H2O_Ice_VI", 1.0)
+    viewer.session.modified()
+    window.peaks.edit.setChecked(True)
+    window.zones.edit.setChecked(True)
+    window.peaks.edit.setChecked(False)
+    assert window.actions.get("delete_peak").isEnabled()  # the zones still use the key
+    window.zones.edit.setChecked(False)
+    assert not window.actions.get("delete_peak").isEnabled()
+    window.peaks.edit.setChecked(True)
+    viewer.peaks.pick(("H2O_Ice_VI", 0))
+    count = len(compression_run.spectra[0].phases[0].peaks)
+    window.actions.get("delete_peak").trigger()
+    assert len(compression_run.spectra[0].phases[0].peaks) == count - 1
+
+
+@pytest.mark.parametrize("plot_of", [lambda w: w.evolution.plot, lambda w: w.dpdt.plot, lambda w: w.map.plot],
+                         ids=["evolution", "dpdt", "map"])
+def test_zone_of_spectra_drawn_on_a_ddac_plot(viewer, compression_run, plot_of):
+    window = _shown(viewer, compression_run)
+    assert not window.dpdt.toggle.isChecked()
+    _drag(plot_of(window), 0.6, 3.4, Qt.KeyboardModifier.ShiftModifier)
+    assert viewer.session.selection == [1, 2, 3] and window.dpdt.toggle.isChecked()
+    assert window.navigator.selected_rows() == [1, 2, 3]
+    for view in (window.evolution, window.dpdt, window.map):
+        assert view.interval.region.isVisible()
+        assert view.interval.region.getRegion() == pytest.approx((0.6, 3.4), abs=0.1)
+
+
+@pytest.mark.parametrize("plot_of", [lambda w: w.evolution.plot, lambda w: w.dpdt.plot, lambda w: w.map.plot],
+                         ids=["evolution", "dpdt", "map"])
+def test_zone_of_spectra_dragged_with_the_mouse(viewer, compression_run, plot_of):
+    """On the evolution plot the oscilloscope has its own view box, over the one of the zone."""
+    window = _shown(viewer, compression_run)
+    viewer.session.set_selection([1, 2])
+    window.dpdt.toggle.setChecked(True)
+    assert window.evolution.interval.region.getRegion() == pytest.approx((0.5, 2.5))
+    view = window.evolution.plot.getPlotItem().vb.viewRange()[0]
+    _drag(plot_of(window), 1.5, 3.5)  # its body, two spectra further
+    assert viewer.session.selection == [3, 4] and window.navigator.selected_rows() == [3, 4]
+    assert window.map.interval.region.getRegion() == pytest.approx((2.5, 4.5), abs=0.1)
+    assert window.evolution.plot.getPlotItem().vb.viewRange()[0] == pytest.approx(view)  # the plot stays
+    _drag(plot_of(window), 4.5, 5.5)  # its right edge
+    assert viewer.session.selection == [3, 4, 5]
+
+
+def test_zone_of_spectra_survives_browsing_in_the_real_list(viewer, compression_run):
+    window = _shown(viewer, compression_run)
+    _drag(window.evolution.plot, 0.6, 3.4, Qt.KeyboardModifier.ShiftModifier)
+    window.actions.get("last").trigger()
+    assert viewer.session.index == 5 and viewer.session.selection == [1, 2, 3]
+    assert window.navigator.selected_rows() == [1, 2, 3]
+    window.navigator.table.selectRow(0)  # a click on one row of the list
+    QApplication.processEvents()
+    assert viewer.session.index == 0 and viewer.session.selection == [1, 2, 3]
+    assert window.navigator.selected_rows() == [1, 2, 3]
+    window.dpdt.toggle.setChecked(False)
+    window.actions.get("next").trigger()  # no zone any more: the list works as before
+    assert viewer.session.index == 1
+    window.actions.get("last").trigger()
+    assert viewer.session.selection == [5] and window.navigator.selected_rows() == [5]
+
+
+def test_the_zone_is_seen_over_the_map(viewer, compression_run):
+    window = _shown(viewer, compression_run)
+    assert window.map.interval.region.zValue() > window.map.image.zValue()
