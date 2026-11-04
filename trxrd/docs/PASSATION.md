@@ -55,6 +55,7 @@ Ne pas les remettre en cause sans lui en parler.
 | Liste des spectres | Dans un onglet (novembre 2026) : en haut de la colonne elle prenait trop de place, mais elle reste utile pour choisir des spectres. En haut, un curseur entre deux flèches, sans boutons précédent / suivant dans la barre d'outils |
 | Mode Live | Utile, repris de la v1 (novembre 2026). Rien ne bascule à l'écran tant que le run affiché a des modifications non enregistrées |
 | Affichage du spectre et détection | Montrer par défaut le signal filtré, fond soustrait, le brut seulement sur demande ; chercher les pics sur ce signal filtré (novembre 2026). L'ajustement reste sur le brut moins le fond (§5, point 1) |
+| Peritheos (bibliothèque d'EoS de Clemens Prescher) | Pas de dépendance, `physics/eos.py` reste (novembre 2026). Son catalogue sert à vérifier nos fiches et à en créer une de temps en temps, quand un matériau utile y apparaît (§7) |
 
 ## 3. Ce qui est fait
 
@@ -356,7 +357,12 @@ console Python intégrée, qui n'est pas prioritaire.
 - [ ] **Encore à décider avec l'utilisateur** (`docs/ARCHITECTURE.md` §13) :
   - Sn bcc (fiche P[9,100]) : il se fait passer pour un Sn γ texturé ; le remonter vers 35 GPa ?
   - phase non cubique vue sur une seule raie : la signaler « présente, P indéterminée » ?
-  - fiches `Bi-BetaSn` et `Ga_liq`.
+  - fiches `Bi-BetaSn` et `Ga_liq` ;
+  - fiche `Cr` : elle annonce « EoS Anzellini » avec V0 = 23,985 Å³, alors que le catalogue Peritheos donne 24,08 pour
+    Anzellini 2022 (table 3), avec les mêmes K0 et K0'. Cela fait +0,8 GPa à 5 GPa et +1,6 GPa à 50 GPa. À vérifier dans
+    l'article ;
+  - glace VII au-dessus de 10 GPa : la fiche suit Bezacier 2014 (mesures jusqu'à 10,1 GPa), mais donne environ 1 GPa de
+    moins que Frank 2004 à 14 GPa (Water11). Comparer la glace et Sn d'une même cellule avant de choisir.
 - [ ] Intégrer le script de validation d'une campagne (dossier de `.CEDX` → tableau par famille) dans le
   dépôt, par exemple `trxrd compare` sur un dossier.
 - [ ] Mesurer aussi les campagnes 2023, 2024 et 2025 (fichiers `.CEDXUp`, section 7).
@@ -430,6 +436,8 @@ l'onglet Détection), `vslmfit` (lmfit abandonné), Maj+U (Ctrl+Z), Maj+B (le fo
       Water01_scan0074. Paralléliser n'est pas nécessaire.
 - [ ] **Fiche Ga-II** (K0' = 0) : P(V) plafonne à 0,93 GPa alors que la fiche annonce 1–10 GPa. À signaler à
       l'utilisateur, qui doit vérifier la fiche.
+- [ ] **Erreur de l'EoS dans σP** : σP ne tient compte que de l'erreur sur V. Pour la glace VII, à 6 GPa, les erreurs de
+      Bezacier 2014 sur V0 et K0 pèsent 0,03 et 0,05 GPa (sans la covariance). À faire dans notre code, si l'utilisateur le veut.
 
 ### P6 — Dépôt et versions
 
@@ -454,6 +462,19 @@ l'onglet Détection), `vslmfit` (lmfit abandonné), Maj+U (Ctrl+Z), Maj+B (le fo
   banc de spectroscopie, probablement inutiles pour la v2. Les données brutes sont dans `RAW_DATA\<échantillon>\<dataset>\scanNNNN\`.
 - Données de test dans le dépôt : `trxrd/tests/data/` (scan TUTO, sa calibration, un `.CEDX` d'exemple
   généré par `make_legacy_sample.py`).
+- Catalogue Peritheos : `pip download peritheos --no-deps --only-binary :all: -d <dossier>` donne un `.whl`, qui est un zip.
+  Ses fichiers `peritheos/data/materials/*.eosmat` sont du JSON : on les lit sans exécuter Peritheos, donc sans son module
+  Rust non signé (jamais essayé sur ce PC). Vérifié sur la version 0.17.4, pour faire une fiche :
+  - V0 est en Å³ par maille conventionnelle, comme `VOLUME` ;
+  - prendre un enregistrement `BM3`, ou `BM2` avec K0' = 4 : nos fiches ne connaissent que Birch-Murnaghan, et 191 des
+    685 enregistrements sont en Vinet ;
+  - calculer `A` à partir de V0 : le bloc `lattice` peut décrire un autre état (V0/a³ = 1,155 pour l'argon) ;
+  - noter le domaine, l'échelle de pression (`pressure_calibration`) et l'article d'origine, à relire pour une fiche de
+    référence ;
+  - les raies : seuls 13 matériaux sur 234 en ont (`peaks`). Pour les autres, il faut les calculer à partir de la structure
+    (`atom_sites`, 187 matériaux), ce que `trxrd` ne sait pas faire ;
+  - droits : le code est sous MIT, mais les données ont des conditions propres à chaque source, parfois restreintes ou non
+    précisées (`peritheos/data/LICENSING.md`). Reprendre fiche par fiche en citant la publication, jamais tout le catalogue.
 
 ## 8. Façon de travailler attendue
 
