@@ -141,6 +141,9 @@ class EditingPresenter:
         if not self.session.spectrum.phases and not self.session.spectrum.free_peaks:
             self.view.show_message("Aucune phase sur ce spectre : en ajouter une avant d'ajuster.")
             return
+        if not editing.has_peaks(self.session.spectrum):
+            self.view.show_message(editing.NO_PEAK)
+            return
         settings = self._settings()
         before = editing.misfit(self.session.spectrum)
         self._edit([index], "ajustement du spectre", lambda: editing.fit_current(run, index, settings))

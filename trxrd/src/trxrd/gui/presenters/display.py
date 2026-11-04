@@ -522,7 +522,9 @@ def evolution_data(run: Run, quantity: str = "P", relative: bool = False) -> Evo
     if timed and run.oscilloscope is not None and len(run.oscilloscope.time):
         t = np.asarray(run.oscilloscope.time, dtype=float) * 1e3
         for name, values in run.oscilloscope.channels.items():
-            traces.append(Trace(name, t, np.asarray(values, dtype=float), name == run.oscilloscope.trigger_channel))
+            # some v1 files do not name it: at ID09 the trigger is on Channel2
+            trigger = run.oscilloscope.trigger_channel or "Channel2"
+            traces.append(Trace(name, t, np.asarray(values, dtype=float), name == trigger))
     y_label = info.relative_label if relative else info.label
     return EvolutionData(label, y_label, x, series, traces, quantity, relative, quantities)
 

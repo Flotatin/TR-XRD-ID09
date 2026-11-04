@@ -43,11 +43,16 @@ def test_a_phase_is_placed_on_the_detected_peaks_then_fitted(run):
 
 
 def test_lines_without_a_peak_and_peaks_of_other_phases(run):
-    far = editing.add_phase(run, 5, ICE_VII, 8.0)  # nothing there: only the strong lines, at their expected place
-    card = run.phases[ICE_VII]
-    strong = [r.hkl for t, r in card.two_theta_lines(8.0, run.calibration.energy_ev)
-              if r.intensity >= editing.STRONG_LINE and 8 <= t <= 25]
-    assert sorted(p.hkl for p in far.peaks) == sorted(strong) and all(np.isnan(p.height) for p in far.peaks)
+    far = editing.add_phase(run, 5, ICE_VII, 8.0)  # nothing detected near its lines: they get no peak
+    assert far.peaks == [] and not editing.has_peaks(run.spectra[5])
+    assert [line.used for line in editing.phase_lines(run, 5, ICE_VII)] == [False, False]  # but they are shown
+    with pytest.raises(ValueError, match="Aucun pic"):
+        editing.fit_current(run, 5)
+    moved = editing.add_phase(run, 5, ICE_VII, 3.72)  # the wheel brings the lines onto the detected peaks
+    assert [p.hkl for p in moved.peaks] == [(1, 1, 0), (2, 0, 0)]
+    close = editing.add_phase(run, 5, ICE_VII, 4.3)  # (200) moves faster: only (110) is still explained
+    assert [p.hkl for p in close.peaks] == [(1, 1, 0)]
+    assert [line.used for line in editing.phase_lines(run, 5, ICE_VII)] == [True, False]
 
     editing.remove_phase(run, 5, ICE_VII)
     first = editing.add_phase(run, 5, ICE_VII, 3.7)

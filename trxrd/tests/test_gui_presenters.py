@@ -909,3 +909,24 @@ def test_lines_and_cursor_from_the_gui(compression_run):
     presenter.selected = None
     presenter.replace()
     assert "Choisir un pic" in peaks_view.last("show_message")[0]
+
+
+def test_trigger_of_files_that_do_not_name_it(sample_run):
+    sample_run.oscilloscope.trigger_channel = ""  # some v1 files
+    traces = {t.name: t.trigger for t in display.evolution_data(sample_run).traces}
+    assert traces == {"Channel2": True, "Channel3": False}  # so Channel2 is not shown first
+
+
+def test_a_phase_without_peak_cannot_be_fitted(compression_run):
+    from trxrd.gui.presenters.editing import EditingPresenter
+
+    session, view, window = Session(), Recorder(chosen_phase="H2O_Ice_VII"), Recorder()
+    presenter = EditingPresenter(session, view, window)
+    session.attach(compression_run, None)
+    session.select(5)
+    presenter.add("H2O_Ice_VII", 8.0)  # the lines fall on nothing
+    assert [line.used for line in view.last("show_model")[0].lines] == [False, False]
+    presenter.fit()
+    assert view.last("show_message")[0].startswith("Aucun pic à ajuster")
+    presenter.move("H2O_Ice_VII", 3.7)  # the wheel: the lines explained get their boxes
+    assert [line.used for line in view.last("show_model")[0].lines] == [True, True]

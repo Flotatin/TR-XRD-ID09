@@ -696,3 +696,27 @@ def test_lines_of_the_phase_and_keys_of_the_v1(viewer, compression_run):
     assert QKeySequence("Ctrl+V") in keys["paste_model"]
     window.actions.get("show_detection").trigger()  # M
     assert window.tabs.currentWidget() is window.detection
+
+
+def test_the_oscilloscope_channel_chosen_stays(viewer):
+    window, session = viewer.window, viewer.session
+    viewer.main.open(str(viewer.path))
+    view = window.evolution
+    assert view.channel.currentText() == "Channel3"  # by default the channel that is not the trigger
+    for choice in ("Channel2", "aucun", "Channel3"):
+        view.channel.setCurrentText(choice)
+        session.modified()  # any refresh
+        session.select(1)
+        assert view.channel.currentText() == choice and view.wanted_channel == choice
+    view.channel.setCurrentText("aucun")
+    session.modified()
+    assert len(view.trace.getData()[0] if view.trace.getData()[0] is not None else []) == 0  # nothing drawn
+
+    view.channel.setCurrentText("Channel2")
+    window.actions.get("close").trigger()  # the choice survives the run
+    assert view.channel.count() == 0
+    viewer.main.open(str(viewer.path))
+    assert view.channel.currentText() == "Channel2"
+    view.wanted_channel = "ch9"  # a run without that channel: the default, and the choice is kept for the next run
+    session.modified()
+    assert view.channel.currentText() == "Channel3" and view.wanted_channel == "ch9"

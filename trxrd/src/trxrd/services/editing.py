@@ -27,9 +27,9 @@ from trxrd.processing.peakfit import fit_peaks, total_curve
 from trxrd.services.fitting import FitOptions, corrected_signal, fit_spectrum, refresh_model, update_phase
 from trxrd.services.identification import Progress, analysis_window, detect
 
-STRONG_LINE = 10.0  # % of the card: a line this strong is kept even when no peak is detected there
 LINE_REACH = 0.3  # deg: a peak added this close to a line of the phase, not yet used, takes that line
 RANGE_MARGIN = 0.5  # deg kept around a peak at the end of the fit range
+NO_PEAK = "Aucun pic à ajuster : amener les raies sur des pics détectés (pression), ou cocher une raie"
 PeakRef = Tuple[Optional[str], int]  # (phase, or None for a free peak; position in its list of peaks)
 
 
@@ -62,12 +62,12 @@ def _lines(card: PhaseCard, pressure: float, energy_ev: float, temperature: floa
 def place_peaks(card: PhaseCard, pressure: float, energy_ev: float, temperature: float, window: Tuple[float, float],
                 detected: Sequence[DetectedPeak], taken: Sequence[float], tolerance: float,
                 model: str, width: float) -> List[Peak]:
-    """Peaks of `card` at `pressure`, on the detected peaks within `tolerance` of its lines.
+    """Peaks of `card` at `pressure`: only the lines a detected peak explains, within `tolerance`.
 
     A detected peak goes to the strongest line near it: sharing it would make
-    the fit degenerate. So do the peaks already explained by another phase
-    (`taken`, 2θ): those lines are left out. Strong lines without any
-    detected peak are kept at their expected position.
+    the fit degenerate. Peaks already explained by another phase (`taken`,
+    2θ) are left out for the same reason. The other lines get no peak: while
+    the pressure is moved they simply follow, and a box can still add one.
     """
     shape = profiles.model(model).shape_default
     free = [p for p in detected if not any(abs(p.position - t) <= tolerance for t in taken)]
@@ -80,8 +80,6 @@ def place_peaks(card: PhaseCard, pressure: float, energy_ev: float, temperature:
             fwhm = match.fwhm if np.isfinite(match.fwhm) else None
             peaks.append(Peak(name, model, center=match.position, height=match.height, shape=shape, hkl=reflection.hkl,
                               width=profiles.width_from_fwhm(model, fwhm, shape) if fwhm else width))
-        elif reflection.intensity >= STRONG_LINE and not any(abs(two_theta - t) <= tolerance for t in taken):
-            peaks.append(Peak(name, model, center=two_theta, width=width, shape=shape, hkl=reflection.hkl))
     return sorted(peaks, key=lambda p: p.center)
 
 
@@ -350,11 +348,17 @@ def toggle_peak(run: Run, index: int, ref: PeakRef) -> bool:
     return peak.enabled
 
 
+def has_peaks(spectrum: Spectrum) -> bool:
+    return bool(spectrum.free_peaks) or any(fit.peaks for fit in spectrum.phases)
+
+
 def fit_current(run: Run, index: int, settings: Optional[AnalysisSettings] = None) -> Spectrum:
     """Fit spectrum `index` from the peaks it holds."""
     spectrum = run.spectra[index]
     if not spectrum.phases and not spectrum.free_peaks:
         raise ValueError("Aucune phase sur ce spectre : en ajouter une avant d'ajuster")
+    if not has_peaks(spectrum):
+        raise ValueError(NO_PEAK)
     return fit_spectrum(run, index, options=_fit_options(settings))
 
 

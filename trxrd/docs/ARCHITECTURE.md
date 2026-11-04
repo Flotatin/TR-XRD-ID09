@@ -152,7 +152,7 @@ trxrd/
 │       ├── tasks.py            calculs longs dans un thread, résultat rendu au thread de l'interface
 │       ├── builder.py          assemblage : fenêtre + presenters + actions
 │       └── app.py              point d'entrée léger : journal et affichage des erreurs (sans console)
-└── tests/                      265 tests ; data/ = scan TUTO, calibration, ancien fichier .CEDX d'exemple
+└── tests/                      268 tests ; data/ = scan TUTO, calibration, ancien fichier .CEDX d'exemple
 ```
 
 ## 5. Le format de fichier `trxrd-run` (HDF5)
@@ -796,9 +796,10 @@ Ce qu'on a appris sur D2O_03_0001_scan0006 :
 - **Phases d'un spectre** : on choisit une fiche du run et une pression, puis « Ajouter ». Les pics de la phase
   se posent sur les pics détectés à moins de la tolérance de ses raies (position, hauteur, largeur), avec les
   réglages de l'analyse. Un pic détecté va à la raie la plus forte, et les pics déjà expliqués par une autre
-  phase ou par un pic libre ne sont pas repris (§5 de PASSATION, point 7). Les raies fortes (≥ 10 %) sans pic
-  détecté restent à leur position attendue. Pour une phase du spectre, changer P déplace ses raies tout de
-  suite ; la courbe suit les pics replacés.
+  phase ou par un pic libre ne sont pas repris (§5 de PASSATION, point 7). Seules les raies qu'un pic détecté
+  explique reçoivent un pic : à la molette de pression, les raies se déplacent et leurs cases ne se cochent
+  qu'en arrivant sur un pic détecté (demande de l'utilisateur). Une raie sans pic reste tracée, et sa case permet
+  de lui en donner un. La courbe suit les pics replacés.
 - **Ajustement** (Ctrl+F) : « Ajuster ce spectre » part des pics posés, phases et pics libres ensemble.
 - **Série** (Ctrl+Maj+F) : « Ajuster la sélection » ou « Ajuster tous », dans un thread, sur des copies, avec
   progression et arrêt. Avec « suivre », le modèle part du spectre courant vers les spectres suivants, puis

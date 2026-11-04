@@ -404,7 +404,8 @@ class EvolutionView(QWidget):
             self.span.addItem(label, key)
         self.quantity.currentIndexChanged.connect(self._quantity_chosen)
         self.relative.toggled.connect(self._quantity_chosen)
-        self.channel.currentTextChanged.connect(self._show_trace)
+        self.wanted_channel: Optional[str] = None  # the user's choice: it stays from one refresh and one run to the next
+        self.channel.currentTextChanged.connect(self._channel_chosen)
         self.span.currentIndexChanged.connect(lambda _: self._set_range())
         bar = QHBoxLayout()
         for widget in (QLabel("Grandeur :"), self.quantity, self.relative, QLabel("  Oscilloscope :"), self.channel,
@@ -471,8 +472,11 @@ class EvolutionView(QWidget):
             self.plot.removeItem(item)
         self._items = []
 
+    def _channel_chosen(self, name: str) -> None:
+        self.wanted_channel = name
+        self._show_trace(name)
+
     def show_evolution(self, data) -> None:
-        previous = self.channel.currentText()
         self._remove_series()
         self._data = data
         self.plot.setLabel("bottom", data.x_label)
@@ -495,12 +499,13 @@ class EvolutionView(QWidget):
 
         self._traces = {t.name: t for t in data.traces}
         names = [t.name for t in data.traces if not t.trigger] + [t.name for t in data.traces if t.trigger]
-        self.channel.blockSignals(True)
+        wanted = self.wanted_channel
+        choice = wanted if wanted == self.NO_TRACE or wanted in self._traces else (names[0] if names else self.NO_TRACE)
+        self.channel.blockSignals(True)  # not the user's choice: a run without that channel does not forget it
         self.channel.clear()
         self.channel.addItems([self.NO_TRACE] + names)
-        self.channel.blockSignals(False)
-        choice = previous if previous in self._traces else (names[0] if names else self.NO_TRACE)
         self.channel.setCurrentText(choice)
+        self.channel.blockSignals(False)
         self._show_trace(choice)
         low, high = data.span
         self.band.setRegion((low, high))

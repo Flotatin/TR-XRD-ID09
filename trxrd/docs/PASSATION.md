@@ -71,8 +71,8 @@ Ne pas les remettre en cause sans lui en parler.
 
 ### 3.2 Par fonctionnalité
 
-Tout est testé : `python -m pytest trxrd` compte 265 tests. Les 7 comparaisons numériques avec la v1 sont
-ignorées quand la v1 n'est pas importable, par exemple dans `.venv-v2`, qui n'a pas PyQt5 : 258 tests
+Tout est testé : `python -m pytest trxrd` compte 268 tests. Les 7 comparaisons numériques avec la v1 sont
+ignorées quand la v1 n'est pas importable, par exemple dans `.venv-v2`, qui n'a pas PyQt5 : 261 tests
 passent alors.
 
 | Fonctionnalité | Où | État / preuve |
@@ -221,6 +221,19 @@ run par run, avec une passe sans exclusion puis une passe avec les zones fixes r
     à 2 196 pixels, hors de l'écran : retour à la ligne, ou texte coupé avec une infobulle.
 
 ## 6. Reste à faire (par priorité)
+
+**Où on en est (fin de séance du 4 novembre 2026).** L'utilisateur a essayé l'ajustement personnalisé et en est
+content. Ses deux dernières remarques sont traitées : à la molette, seules les raies expliquées par un pic détecté
+se cochent ; la voie de l'oscilloscope choisie reste d'un rafraîchissement à l'autre. Pour reprendre :
+1. Lui demander ce qui manque encore par rapport à sa façon de travailler dans la v1 (P1, étape 3).
+2. Zones d'ajustement et zones exclues dessinées à la souris, zone sur le graphe dDAC pour choisir les spectres.
+3. Défaut de la recherche sur D2O_03 scan 6 #0 (P5, poids des pics forts).
+4. Outil de calibration : `test.poni` faux de 4,4 mm. L'utilisateur n'a pas encore dit sur quelle image et quels
+   anneaux il l'a fait.
+5. « Ne se lance plus avec l'exe » (P1) : cause non trouvée, l'utilisateur a repris le travail sans préciser ; voir
+   `trxrd-gui.log` si cela revient.
+6. Les pull requests `p2-validation-2026` puis `gui-viewer` vers `main` restent à ouvrir par l'utilisateur (`gh` n'est
+   pas installé).
 
 ### P1 — Interface PySide6 (en cours)
 
