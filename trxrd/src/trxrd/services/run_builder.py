@@ -77,6 +77,13 @@ def build_run(
             break
 
     source = Source(raw_file=str(scan_file.resolve()), raw_dataset=stack.dataset)
+    try:
+        exposure = esrf.read_exposure(scan_file, stack.dataset)
+    except (OSError, KeyError, ValueError) as exc:
+        logger.warning("No exposure time in %s: %s", scan_file, exc)
+        exposure = None
+    if exposure is not None:
+        source.exposure_time = exposure
     osc = None
     if oscilloscope is not None:
         try:
@@ -89,12 +96,16 @@ def build_run(
             logger.warning("No oscilloscope data for %s: %s", scan_file, exc)
 
     if time_mode == TimeMode.TRIGGER and osc is not None and osc.trigger_channel in osc.channels:
-        times = timing.detect_trigger_times(osc.time, osc.channels[osc.trigger_channel], max_triggers=len(stack))
+        pulses = timing.find_pulses(osc.time, osc.channels[osc.trigger_channel])
+        times = timing.frame_times(pulses, len(stack), float(osc.time[-1]) if osc.time.size else 0.0)
         for spectrum in spectra:
             if 0 <= spectrum.frame < times.size:
                 spectrum.time = float(times[spectrum.frame])
         if times.size < len(stack):
             logger.warning("%d triggers found for %d frames", times.size, len(stack))
+        elif pulses.start.size < len(stack):
+            logger.info("%d triggers on the oscilloscope for %d frames: the later frames continue at the measured period",
+                        pulses.start.size, len(stack))
     elif time_mode == TimeMode.PERIOD:
         for spectrum in spectra:
             spectrum.time = spectrum.frame * frame_period

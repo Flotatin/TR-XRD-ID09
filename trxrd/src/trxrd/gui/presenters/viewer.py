@@ -20,7 +20,7 @@ Views expected (duck typing):
 - navigator: set_current(index, count, text), on_select(index)
 - list of the spectra: show_spectra(columns, rows), set_current(index, selection), on_select(index),
   on_selection(indices)
-- window: set_title, set_status, set_units(available, current), set_busy(text or None),
+- window: set_title, set_status, set_acquisition(text, tooltip), set_units(available, current), set_busy(text or None),
   set_undo(undo label or None, redo label or None), show_message(text),
   ask_open_path() / ask_save_path(suggested) -> path or None, confirm_discard() -> bool,
   show_error(title, text), show_info(title, text), ask_new_run(browse) -> NewRunRequest or None,
@@ -36,7 +36,7 @@ from typing import Callable, List, Optional, Tuple
 import numpy as np
 
 from trxrd.gui.presenters import display
-from trxrd.services import rates, raw_data
+from trxrd.services import acquisition, rates, raw_data
 from trxrd.services.images import FrameSource
 from trxrd.services.run_builder import build_and_save
 from trxrd.services.session import Event, Session
@@ -541,6 +541,31 @@ class SpectraListPresenter:
 
     def current(self, *_) -> None:
         self.view.set_current(self.session.index, self.session.selection)
+
+
+class AcquisitionPresenter:
+    """Integration time and inter-frame time of the run, in the status bar; measured in the background at each run."""
+
+    def __init__(self, session: Session, window, runner=None) -> None:
+        self.session, self.window = session, window
+        self.runner = runner or ImmediateRunner()
+        self._ticket = 0
+        session.subscribe(Event.RUN_CHANGED, self.update)
+        self.update()
+
+    def update(self, *_) -> None:
+        self._ticket += 1
+        ticket, run = self._ticket, self.session.run
+        self.window.set_acquisition("", "")
+        if run is None:
+            return
+        near = [self.session.path] if self.session.path is not None else []
+
+        def shown(result) -> None:
+            if ticket == self._ticket:  # not a run closed since
+                self.window.set_acquisition(*display.acquisition_text(result))
+
+        self.runner.run(lambda progress: acquisition.acquisition_of(run, near), shown, lambda message: None)
 
 
 class MainPresenter:

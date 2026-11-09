@@ -40,6 +40,38 @@ def test_build_run_without_oscilloscope(tuto_scan, tuto_calibration):
     assert [s.frame for s in run.spectra] == [0, 5]
     np.testing.assert_allclose(run.times, [0.0, 2.5])
     assert run.oscilloscope is None
+    assert run.source.exposure_time == 1e-5  # LIMA: entry_0000/ESRF-ID09/jf1m/acquisition/exposure_time
+
+
+def test_frames_after_the_end_of_the_oscilloscope_have_a_time(bliss_dataset, tuto_calibration):
+    """Jungfrau continuous mode: the oscilloscope records 100 ms (98 triggers) of a scan of 1600 frames.
+    Before, the 1502 later spectra had no time, and the dDAC plots showed only the first 98."""
+    t = np.linspace(0, 0.006, 1200)  # stops after the second of the three triggers (0.002, 0.005, 0.008 s)
+    with h5py.File(bliss_dataset.parents[1] / "water02_0001.h5", "a") as master:
+        measurement = master["3.1/measurement"]
+        for name in ("ch5_time", "ch5", "ch6"):
+            del measurement[name]
+        measurement["ch5_time"] = t
+        measurement["ch5"] = sum(((t > c - 1e-4) & (t < c + 1e-4)).astype(float) for c in (0.002, 0.005))
+        measurement["ch6"] = np.sin(t)
+    run = build_run(bliss_dataset, tuto_calibration)
+    np.testing.assert_allclose(run.times, [0.002, 0.005, 0.008], atol=2e-5)
+    assert np.isnan(run.source.exposure_time)  # no acquisition group in this LIMA file
+
+
+def test_info_prints_the_two_times(tmp_path, bliss_dataset, capsys):
+    from conftest import DATA
+    from trxrd.cli import main
+
+    with h5py.File(bliss_dataset, "a") as lima:
+        lima["entry_0000/plot/acquisition/exposure_time"] = 1e-5
+    out = tmp_path / "analysis"
+    assert main(["build", str(bliss_dataset), "--poni", str(DATA / "calib_THT8_correct_samedi.poni"),
+                 "--tth-min", "8", "--tth-max", "25", "-o", str(out)]) == 0
+    capsys.readouterr()
+    assert main(["info", str(out / "water02_0001_scan0003.trxrd.h5")]) == 0
+    printed = capsys.readouterr().out
+    assert "frames: integration 10 µs, inter-frame 2.8" in printed and "3 trigger pulses for 3 spectra" in printed
 
 
 def test_cli_build(tmp_path, bliss_dataset):

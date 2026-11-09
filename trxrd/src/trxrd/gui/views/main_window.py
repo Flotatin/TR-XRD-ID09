@@ -94,6 +94,8 @@ class MainWindow(QMainWindow):
         self.live_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.live_label.hide()
         self.statusBar().addPermanentWidget(self.live_label, 1)
+        self.acquisition_label = QLabel()  # integration and inter-frame times of the run, details in the tooltip
+        self.statusBar().addPermanentWidget(self.acquisition_label)
 
     # ------------------------------------------------------------------ built once the actions exist
 
@@ -129,6 +131,10 @@ class MainWindow(QMainWindow):
     def set_status(self, text: str) -> None:
         self.status_label.setText(text)
         self.status_label.setToolTip(text)
+
+    def set_acquisition(self, text: str, tooltip: str) -> None:
+        self.acquisition_label.setText(text)
+        self.acquisition_label.setToolTip(tooltip)
 
     def set_units(self, available: Sequence[str], current: str) -> None:
         self.units.blockSignals(True)

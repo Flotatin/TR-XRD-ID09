@@ -121,7 +121,7 @@ trxrd/
 │   ├── processing/
 │   │   ├── integration.py      ✅ intégration azimutale pyFAI, pas en 2θ automatique
 │   │   ├── background.py       ✅ lissage (Savitzky-Golay / FFT) + fond SNIP
-│   │   ├── timing.py           ✅ détection des triggers sur l'oscilloscope
+│   │   ├── timing.py           ✅ triggers de l'oscilloscope : temps des images, largeur, période et écart des impulsions
 │   │   ├── peakfit.py          ✅ ajustement simultané des pics (curve_fit)
 │   │   ├── cell.py             ✅ affinement de maille → V → P, avec incertitudes
 │   │   ├── peaks.py            ✅ détection des pics (bruit local, épaulements)
@@ -130,6 +130,7 @@ trxrd/
 │   │   └── rates.py            ✅ pente locale (droite glissante) et pente sur un intervalle
 │   ├── services/
 │   │   ├── run_builder.py      ✅ scan brut → Run (intégration, fond, oscilloscope, base de temps)
+│   │   ├── acquisition.py      ✅ temps d'intégration et inter-frame d'un run (lus dans le brut s'il le faut)
 │   │   ├── fitting.py          ✅ ajuster un spectre ou une série (en suivant l'évolution)
 │   │   ├── identification.py   ✅ analyse automatique : détection → phases → ajustement → P, suivi des pics
 │   │   ├── analysis.py         ✅ réglages de l'utilisateur, analyse sur une copie, pics fixes (GUI, CLI)
@@ -155,7 +156,7 @@ trxrd/
 │       ├── tasks.py            calculs longs dans un thread, résultat rendu au thread de l'interface
 │       ├── builder.py          assemblage : fenêtre + presenters + actions
 │       └── app.py              point d'entrée léger : journal et affichage des erreurs (sans console)
-└── tests/                      408 tests ; data/ = scan TUTO, calibration, ancien fichier .CEDX d'exemple
+└── tests/                      429 tests ; data/ = scan TUTO, calibration, ancien fichier .CEDX d'exemple
 ```
 
 ## 5. Le format de fichier `trxrd-run` (HDF5)
@@ -172,11 +173,12 @@ Nom conseillé : `<dataset>_<scan>.trxrd.h5`, par exemple `water02_0001_scan0027
 ### 5.2 Arborescence
 
 ```
-/                                   NXroot   file_format="trxrd-run", format_version="1.2", creator
+/                                   NXroot   file_format="trxrd-run", format_version="1.3", creator
 └── entry                           NXentry  default → results (ou spectra)
     ├── title, note, created        texte
     ├── ui_state                    JSON libre (zones, préférences d'affichage du GUI)
-    ├── source/                     raw_file, raw_dataset, master_file, scan ("27.1")
+    ├── source/                     raw_file, raw_dataset, master_file, scan ("27.1"),
+    │   │                           exposure_time [s] (temps d'intégration réglé sur le détecteur ; depuis 1.3)
     │   └── raw_data  ──────────►   lien externe vers la pile d'images brute
     ├── calibration/                energy_ev, wavelength_m, poni (TEXTE du .poni), poni_file,
     │                               mask (uint8 compressé, non nul = masqué), mask_file,
@@ -215,6 +217,8 @@ changement incompatible change le majeur, et `load_run` refuse alors le fichier 
   larges. Un fichier 1.0 se relit avec une fenêtre automatique, comme avant.
 - 1.2 (novembre 2026) : table `fits/free_peaks`. Un fichier plus ancien se relit sans pic libre. Sa courbe
   `model`, enregistrée telle quelle, ne contient que les pics des phases.
+- 1.3 (novembre 2026) : `source/exposure_time`, le temps d'intégration d'une image, lu dans le fichier LIMA à
+  la création du run. Un fichier plus ancien se relit avec NaN ; l'interface le cherche alors dans le brut.
 
 ## 6. Traitements
 
@@ -602,6 +606,36 @@ Architecture **MVP** au-dessus de `services.Session` :
 - **Oscilloscope** : `ch5` est le trigger (`Channel2` dans la v1), `ch6` est probablement la consigne du
   piézo (0-7,4 V, `Channel3`). `ch2` est lue quand elle existe. Toutes les voies ont la même base de temps :
   `ch6_time` est décalé de 19 ns, pour un pas de 160 ns.
+- **Temps d'intégration et inter-frame** (demandés par l'utilisateur, novembre 2026), à droite de la barre d'état,
+  le détail dans l'infobulle ; aussi dans `trxrd info` (`services/acquisition.py`) :
+  - intégration : le réglage du détecteur, `acquisition/exposure_time` du fichier LIMA, gardé dans le run
+    (`source/exposure_time`, format 1.3). Le chemin NeXus par défaut des images passe par `jf1m/plot/data` : le
+    réglage est cherché dans les groupes au-dessus. Pour un run plus ancien ou un `.CEDX`, il est lu dans le brut
+    retrouvé, sans modifier le run ;
+  - inter-frame : comme dans la v1 (`_estimate_inter_frame_times`), l'écart entre la fin d'une impulsion de
+    déclenchement et le début de la suivante, en médiane. L'infobulle donne aussi la période (d'un début
+    d'image au suivant) et la largeur de l'impulsion. Un run sans oscilloscope (`.CEDX` du mode continu)
+    prend celui du fichier maître voisin du brut ;
+  - Water05 scan 9 (rafale de 16 images) : intégration 10 µs, impulsion 10,56 µs, inter-frame 6,56 µs, période
+    17,12 µs. Water01 scan 74 (mode continu, 1 600 images) : 10 µs, inter-frame 1,003 ms, période 1,0135 ms ;
+  - l'inter-frame n'est affiché que pour des déclenchements d'images : des impulsions d'une même horloge (périodes
+    à 5 % ou à 1,5 pas d'échantillonnage près de leur médiane), pas plus rapprochées que l'intégration. Sinon :
+    « ? », et la raison dans l'infobulle. L'infobulle donne aussi le pas de l'oscilloscope, la précision de ces
+    temps (160 ns, mais 0,8 ou 1 µs dans certains jeux de données) ;
+  - sur les 744 traces de janvier 2026 : 703 sont des déclenchements d'images. Les 41 autres (D2O_01 scans 1 à 20,
+    Water01 scans 7 à 41, deux scans de LaB6) ne portent que du bruit sur `ch5` : des milliers d'« impulsions »
+    à 3-10 µs, pour 16 à 5 000 images de 10 µs. Sauf pour un scan de LaB6, leur `count_time` BLISS vaut nombre
+    d'images × 1,0135 ms : ce sont des scans en mode continu dont le déclenchement n'a pas été enregistré. Un run construit depuis leur brut
+    prend ses temps dans ce bruit, comme avant (à voir avec l'utilisateur).
+  La mesure prend 0,1 à 0,2 s (ligne de base de degré 50 sur 100 000 points) : elle tourne en arrière-plan à
+  l'ouverture d'un run.
+- **Mode continu : temps au-delà de l'oscilloscope.** L'oscilloscope n'enregistre que 100 ms : 98 impulsions
+  pour les 1 600 images de Water01 scan 74. Les 1 502 spectres suivants d'un run construit depuis le brut
+  restaient sans temps, et le panneau dDAC n'en montrait que 98. Quand la trace s'arrête alors que les
+  impulsions arrivent encore à période régulière (à 5 % près), les images suivantes continuent à cette période
+  (`processing/timing.frame_times`). Si les impulsions s'arrêtent avant la fin de la trace, ou sont
+  irrégulières, rien n'est prolongé. Le dernier spectre de Water01 scan 74 tombe ainsi à 1 620,7 ms. La v1
+  comptait 1 ms par image depuis 0 (1 599 ms) : les `.CEDX` convertis gardent ces temps-là.
 - **Intégration sous le spectre** (Ctrl+K), comme dans la v1 : le cake (2θ × azimut, pyFAI `integrate2d`)
   ou l'image brute du spectre courant, sur le même axe x que le spectre. Les anneaux tombent ainsi sous les
   traits des phases. Le Jungfrau 1M ne voit qu'un secteur d'environ 140° : seul ce secteur est montré, d'un
@@ -1002,6 +1036,9 @@ git push <url-du-nouveau-depot> trxrd-only:main
 - **Détection des pics** : seuils en σ du bruit local au lieu de fractions du maximum (§6.5).
 - **Recherche de composition** déterministe au lieu de l'algorithme génétique (§6.5, §6.6).
 - **Fond SNIP et détection des triggers** : résultats identiques à l'ancien code.
+- **Temps du mode Jungfrau continu** : l'ancien code comptait 1 ms par image à partir de 0. La v2 prend les
+  triggers de l'oscilloscope, puis leur période mesurée (1,0135 ms) au-delà de la trace : les intervalles de
+  temps sont 1,35 % plus longs, donc dP/dt environ 1,3 % plus faible (§9, « Mode continu »).
 - **`Vmin` non repris** : quand son inversion numérique (pynverse) échouait, l'ancien code fixait Vmin = 0,8,
   ce qui arrête l'EoS à V = 0,8 V0 (glace VII ≈ 7 GPa). Le convertisseur ne garde que le `VMIN` écrit dans
   la fiche, sinon 0,6.

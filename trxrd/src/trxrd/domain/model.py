@@ -262,6 +262,7 @@ class Source:
     raw_dataset: str = ""  # path of the image stack inside raw_file
     master_file: str = ""  # BLISS master file (scalars, oscilloscope channels)
     scan: str = ""  # BLISS scan label, e.g. "27.1"
+    exposure_time: float = np.nan  # s, of each frame, as set on the detector (NaN: unknown, files before 1.3)
 
 
 @dataclass

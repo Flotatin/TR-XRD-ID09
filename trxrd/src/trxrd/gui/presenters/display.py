@@ -20,6 +20,7 @@ from trxrd.domain import PhaseCard, PhaseFit, Run, Spectrum, energy_to_wavelengt
 from trxrd.physics import eos, lattice, profiles
 from trxrd.physics.lattice import AXIS_LABELS, convert_two_theta
 from trxrd.services import editing, rates, treatment
+from trxrd.services.acquisition import Acquisition, duration_text
 
 UNITS = ("2th_deg", "q_A^-1", "d_A")
 
@@ -973,6 +974,38 @@ def summary_text(run: Optional[Run], index: int, path: Optional[str], dirty: boo
         return "Aucun run ouvert"
     state = "modifié, non enregistré" if dirty else "enregistré"
     return f"{run.name} — {len(run)} spectres — {path or 'pas encore de fichier'} ({state})"
+
+
+def acquisition_text(acq: Optional[Acquisition]) -> Tuple[str, str]:
+    """The two times of the status bar (integration, inter-frame) and their details for the tooltip; ("", "") if unknown."""
+    if acq is None or not acq.known:
+        return "", ""
+    time = duration_text
+    text = f"Intégration {time(acq.exposure)} · inter-frame {time(acq.inter_frame) if acq.triggers else '?'}"
+    if acq.exposure is not None:
+        lines = [f"Intégration : {time(acq.exposure)}, réglage du détecteur"
+                 + (" (lu dans le fichier brut)" if acq.exposure_from_raw else "")]
+    else:
+        lines = ["Intégration : inconnue (absente du run, et fichier brut introuvable)"]
+    where = (f"la voie {acq.channel} de l'oscilloscope, au pas de {time(acq.step)}"
+             + (" (lu dans le fichier maître : le run n'en a pas)" if acq.pulses_from_raw else ""))
+    if acq.triggers:
+        lines += [
+            f"Inter-frame : {time(acq.inter_frame)}, de la fin d'une impulsion de déclenchement au début de la suivante",
+            f"Période : {time(acq.period)}, d'un début d'image au suivant",
+            f"Impulsion de déclenchement : {time(acq.pulse)}",
+            f"Mesuré sur {acq.pulses} impulsions de {where}",
+        ]
+        if acq.pulses < acq.spectra:
+            lines.append(f"L'oscilloscope s'arrête après {acq.pulses} impulsions, pour {acq.spectra} spectres")
+    elif acq.inter_frame is not None:
+        why = ("irrégulières" if not acq.regular
+               else f"toutes les {time(acq.period)}, plus vite que l'intégration")
+        lines += [f"Inter-frame : inconnu, {where} ne porte pas de déclenchements d'images",
+                  f"({acq.pulses} impulsions {why}, pour {acq.spectra} spectres)"]
+    else:
+        lines.append("Inter-frame : inconnu (pas d'impulsions de déclenchement dans l'oscilloscope du run)")
+    return text, "\n".join(lines)
 
 
 def phases_text(spectra: Sequence[Spectrum]) -> str:

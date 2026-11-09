@@ -112,6 +112,15 @@ def test_files_before_1_2_have_no_free_peaks(tmp_path, sample_run):
     assert all(s.free_peaks == [] for s in load_run(path).spectra)
 
 
+def test_files_before_1_3_have_an_unknown_exposure_time(tmp_path, sample_run):
+    path = save_run(sample_run, tmp_path / "run.trxrd.h5")
+    assert load_run(path).source.exposure_time == 1e-5
+    with h5py.File(path, "a") as f:
+        f.attrs["format_version"] = "1.2"
+        del f["entry/source/exposure_time"]
+    assert np.isnan(load_run(path).source.exposure_time)
+
+
 def test_numpy_string_names_are_written_as_plain_strings(tmp_path, sample_run):
     """Old files hold some names as numpy.str_, which HDF5 attributes refuse."""
     card = sample_run.phases.pop("H2O_Ice_VI")

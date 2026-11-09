@@ -119,7 +119,7 @@ def sample_run():
             two_theta_range=(8.0, 25.0), points_per_degree=50, flip_axis=1, sigma_distance_m=1e-4,
         ),
         phases={ice7.name: ice7, ice6.name: ice6},
-        source=Source(raw_file="", raw_dataset="", master_file="/data/x.h5", scan="27.1"),
+        source=Source(raw_file="", raw_dataset="", master_file="/data/x.h5", scan="27.1", exposure_time=1e-5),
         oscilloscope=Oscilloscope(time=np.linspace(0, 1, 50), channels={"Channel2": np.ones(50), "Channel3": np.zeros(50)}, trigger_channel="Channel2"),
         note="Pressure ramp — essai n°2 [P_H2O_Ice_VII] -> 0.1",
         ui_state={"zones": [[10, 12]], "theme": "light"},

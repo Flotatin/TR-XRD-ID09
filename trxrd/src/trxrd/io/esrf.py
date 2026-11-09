@@ -73,6 +73,31 @@ class ImageStack:
                 yield i, data[i]
 
 
+def read_exposure(path: PathLike, dataset: Optional[str] = None) -> Optional[float]:
+    """Exposure time (s) of each frame, as set on the detector; None if the file does not say.
+
+    LIMA writes it in the detector group: <detector>/acquisition/exposure_time,
+    and as text in <detector>/header/acq_expo_time. The images are often
+    reached through <detector>/plot/data: the groups above them are searched.
+    """
+    with h5py.File(path, "r") as f:
+        group = f[dataset or find_default_signal(f)].parent
+        while True:
+            for key in ("acquisition/exposure_time", "header/acq_expo_time"):
+                if key not in group:
+                    continue
+                value = group[key][()]
+                try:
+                    value = float(value.decode() if isinstance(value, bytes) else value)
+                except (TypeError, ValueError):
+                    continue
+                if np.isfinite(value) and value > 0:
+                    return value
+            if group.name == "/":
+                return None
+            group = group.parent
+
+
 # ----------------------------------------------------------------------------- BLISS master
 
 

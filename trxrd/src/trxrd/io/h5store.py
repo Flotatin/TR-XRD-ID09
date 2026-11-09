@@ -59,7 +59,7 @@ from trxrd.io.h5utils import (
 PathLike = Union[str, Path]
 
 FORMAT_NAME = "trxrd-run"
-FORMAT_VERSION = "1.2"  # 1.1: processing/baseline_window; 1.2: fits/free_peaks
+FORMAT_VERSION = "1.3"  # 1.1: processing/baseline_window; 1.2: fits/free_peaks; 1.3: source/exposure_time
 ENTRY = "entry"
 
 PHASE_FIT_FIELDS = (
@@ -109,6 +109,8 @@ def _write_source(entry: h5py.Group, source: Source, link_raw: bool) -> None:
     group = nx_group(entry, "source", "NXcollection")
     for name in ("raw_file", "raw_dataset", "master_file", "scan"):
         write_str(group, name, getattr(source, name))
+    group["exposure_time"] = float(source.exposure_time)
+    group["exposure_time"].attrs["units"] = "s"
     if link_raw and source.raw_file and source.raw_dataset:
         group["raw_data"] = h5py.ExternalLink(str(Path(source.raw_file).resolve()), source.raw_dataset)
 
@@ -370,7 +372,8 @@ def load_run(path: PathLike) -> Run:
 
 
 def _read_source(group: h5py.Group) -> Source:
-    return Source(**{name: read_str(group, name) for name in ("raw_file", "raw_dataset", "master_file", "scan")})
+    return Source(**{name: read_str(group, name) for name in ("raw_file", "raw_dataset", "master_file", "scan")},
+                  exposure_time=float(read_scalar(group, "exposure_time", np.nan)))
 
 
 def _read_calibration(group: h5py.Group) -> Calibration:

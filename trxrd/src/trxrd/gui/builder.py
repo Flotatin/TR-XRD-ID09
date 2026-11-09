@@ -17,7 +17,7 @@ from trxrd.gui.presenters.editing import EditingPresenter, PeaksPresenter
 from trxrd.gui.presenters.live import LivePresenter
 from trxrd.gui.presenters.treatment import DetectionPresenter, ProcessingPresenter
 from trxrd.gui.presenters.viewer import (
-    CakePresenter, DisplaySettings, EvolutionPresenter, MainPresenter, MapPresenter, NavigatorPresenter,
+    AcquisitionPresenter, CakePresenter, DisplaySettings, EvolutionPresenter, MainPresenter, MapPresenter, NavigatorPresenter,
     RatePresenter, RateSettings, SpectraListPresenter, SpectrumPresenter, TablesPresenter,
 )
 from trxrd.gui.presenters.zones import SpectraZonePresenter, ZonesPresenter
@@ -54,6 +54,7 @@ def create_viewer(session: Optional[Session] = None, runner=None) -> Viewer:
     presenters = [
         SpectrumPresenter(session, settings, window.spectrum),
         cake,
+        AcquisitionPresenter(session, window, runner),
         EvolutionPresenter(session, window.evolution, rate_settings),
         RatePresenter(session, window.dpdt, rate_settings),
         MapPresenter(session, settings, window.map, rate_settings),
