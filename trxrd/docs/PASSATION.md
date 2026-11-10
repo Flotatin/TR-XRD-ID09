@@ -280,8 +280,8 @@ v1 ; ce qui manquait est dans P4. Pour reprendre :
 5. « Ne se lance plus avec l'exe » (P1) : pas revu. Le journal `trxrd-gui.log` montre des lancements normaux depuis
    (4 novembre, 02:22, 02:44 et 03:02, fermés avec le code 0). À regarder si cela revient.
 6. La pull request `gui-viewer` vers `main` reste à ouvrir par l'utilisateur (`gh` n'est pas installé). Une seule
-   suffit : `gui-viewer` contient `p2-validation-2026`, et `main` n'a rien de plus. Les derniers commits ne sont pas
-   poussés : il n'a pas encore dit de le faire.
+   suffit : `gui-viewer` contient `p2-validation-2026`, et `main` n'a rien de plus. Tout est poussé sur GitHub
+   (10 novembre 2026, jusqu'au temps de l'acquisition).
 
 ### P1 — Interface PySide6 (en cours)
 
