@@ -20,7 +20,7 @@ from trxrd.domain import PhaseCard, PhaseFit, Run, Spectrum, energy_to_wavelengt
 from trxrd.physics import eos, lattice, profiles
 from trxrd.physics.lattice import AXIS_LABELS, convert_two_theta
 from trxrd.services import editing, rates, treatment
-from trxrd.services.acquisition import Acquisition, duration_text
+from trxrd.services.acquisition import Acquisition, duration_text, frequency_text
 
 UNITS = ("2th_deg", "q_A^-1", "d_A")
 
@@ -977,11 +977,13 @@ def summary_text(run: Optional[Run], index: int, path: Optional[str], dirty: boo
 
 
 def acquisition_text(acq: Optional[Acquisition]) -> Tuple[str, str]:
-    """The two times of the status bar (integration, inter-frame) and their details for the tooltip; ("", "") if unknown."""
+    """The status bar (integration, inter-frame, frequency of acquisition) and the details for the tooltip;
+    ("", "") if nothing is known. Integration + inter-frame = one frame every period = 1 / frequency."""
     if acq is None or not acq.known:
         return "", ""
     time = duration_text
-    text = f"Intégration {time(acq.exposure)} · inter-frame {time(acq.inter_frame) if acq.triggers else '?'}"
+    text = (f"Intégration {time(acq.exposure)} · inter-frame {time(acq.inter_frame)} · "
+            f"{frequency_text(acq.frequency)}")
     if acq.exposure is not None:
         lines = [f"Intégration : {time(acq.exposure)}, réglage du détecteur"
                  + (" (lu dans le fichier brut)" if acq.exposure_from_raw else "")]
@@ -990,21 +992,26 @@ def acquisition_text(acq: Optional[Acquisition]) -> Tuple[str, str]:
     where = (f"la voie {acq.channel} de l'oscilloscope, au pas de {time(acq.step)}"
              + (" (lu dans le fichier maître : le run n'en a pas)" if acq.pulses_from_raw else ""))
     if acq.triggers:
+        if acq.exposure is not None:
+            lines.append(f"Inter-frame : {time(acq.inter_frame)}, temps entre deux intégrations (période − intégration)")
+        else:
+            lines.append(f"Inter-frame : {time(acq.inter_frame)}, entre deux impulsions de déclenchement "
+                         "(l'intégration est inconnue)")
         lines += [
-            f"Inter-frame : {time(acq.inter_frame)}, de la fin d'une impulsion de déclenchement au début de la suivante",
-            f"Période : {time(acq.period)}, d'un début d'image au suivant",
-            f"Impulsion de déclenchement : {time(acq.pulse)}",
+            f"Fréquence d'acquisition : {frequency_text(acq.frequency)}, une image toutes les {time(acq.period)}"
+            " (intégration + inter-frame)",
+            f"Impulsion de déclenchement : {time(acq.pulse)} ; entre deux impulsions : {time(acq.gap)}",
             f"Mesuré sur {acq.pulses} impulsions de {where}",
         ]
         if acq.pulses < acq.spectra:
             lines.append(f"L'oscilloscope s'arrête après {acq.pulses} impulsions, pour {acq.spectra} spectres")
-    elif acq.inter_frame is not None:
+    elif acq.period is not None:
         why = ("irrégulières" if not acq.regular
                else f"toutes les {time(acq.period)}, plus vite que l'intégration")
-        lines += [f"Inter-frame : inconnu, {where} ne porte pas de déclenchements d'images",
+        lines += [f"Inter-frame et fréquence : inconnus, {where} ne porte pas de déclenchements d'images",
                   f"({acq.pulses} impulsions {why}, pour {acq.spectra} spectres)"]
     else:
-        lines.append("Inter-frame : inconnu (pas d'impulsions de déclenchement dans l'oscilloscope du run)")
+        lines.append("Inter-frame et fréquence : inconnus (pas d'impulsions de déclenchement dans l'oscilloscope du run)")
     return text, "\n".join(lines)
 
 

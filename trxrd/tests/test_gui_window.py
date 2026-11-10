@@ -36,7 +36,7 @@ def test_status_bar_shows_the_two_times_of_the_acquisition(viewer):
     label = viewer.window.acquisition_label
     assert label.text() == ""
     viewer.main.open(str(viewer.path))
-    assert label.text() == "Intégration 10 µs · inter-frame ?"  # flat trigger channel in the sample run
+    assert label.text() == "Intégration 10 µs · inter-frame ? · ?"  # flat trigger channel in the sample run
     assert "Intégration : 10 µs, réglage du détecteur" in label.toolTip()
     viewer.main.close()
     assert label.text() == ""

@@ -161,7 +161,7 @@ def _cmd_info(args: argparse.Namespace) -> int:
     from trxrd.io.h5store import load_run
     from trxrd.io.legacy import is_legacy_file
     from trxrd.notebook import XRDRun
-    from trxrd.services.acquisition import acquisition_of, duration_text
+    from trxrd.services.acquisition import acquisition_of, duration_text, frequency_text
 
     for path in args.paths:
         if is_legacy_file(path):
@@ -173,10 +173,11 @@ def _cmd_info(args: argparse.Namespace) -> int:
             print("  note:", run.note)
         frames = acquisition_of(load_run(path), [path])
         if frames.known:
-            inter_frame = duration_text(frames.inter_frame) if frames.triggers else "?"
-            print(f"  frames: integration {duration_text(frames.exposure)}, inter-frame {inter_frame}"
-                  + (f" (period {duration_text(frames.period)}, {frames.pulses} trigger pulses for {frames.spectra} spectra)"
-                     if frames.triggers else f" (no frame trigger on the oscilloscope: {frames.pulses} pulses)"))
+            print(f"  frames: integration {duration_text(frames.exposure)}, inter-frame {duration_text(frames.inter_frame)},"
+                  f" frequency {frequency_text(frames.frequency)}"
+                  + (f" (one frame every {duration_text(frames.period)}, {frames.pulses} trigger pulses for"
+                     f" {frames.spectra} spectra)" if frames.triggers
+                     else f" (no frame trigger on the oscilloscope: {frames.pulses} pulses)"))
         print(run.summary.describe().T.to_string() if len(run) else "  (empty)")
     return 0
 

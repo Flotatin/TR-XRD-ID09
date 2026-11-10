@@ -97,11 +97,11 @@ def detect_trigger_times(
 class PulseTiming:
     """Medians over the complete pulses of a trigger channel (s)."""
 
-    width: float  # duration of a pulse
-    period: float  # from the start of a pulse to the start of the next
-    gap: float  # from the end of a pulse to the start of the next: the inter-frame time of the v1
+    width: float  # duration of a pulse (median)
+    period: float  # from the start of a pulse to the start of the next (mean)
+    gap: float  # from the end of a pulse to the start of the next: the inter-frame time of the v1 (median)
     count: int  # complete pulses measured
-    regular: bool  # every period within REGULAR of the median, or within the sampling step
+    regular: bool  # every period within REGULAR of the mean, or within the sampling step
     step: float = 0.0  # sampling step of the trace
 
 
@@ -110,13 +110,16 @@ def pulse_timing(pulses: Pulses) -> Optional[PulseTiming]:
 
     Sampled every 1 µs (Bi01), triggers 17.1 µs apart are seen 17 or 18 µs
     apart: 6 % from one another, but from one clock. A period may thus differ
-    from the median by one sampling step (1.5 for the rounding).
+    from the mean by one sampling step (1.5 for the rounding). The period is
+    the mean from the first pulse to the last, which averages this rounding
+    out: 1.01347 ms for Water01 scan 74 (sampled every 1 µs), where the median
+    gave 1.013 ms, 0.7 ms off after 1500 frames.
     """
     start, end = pulses.start[pulses.complete], pulses.end[pulses.complete]
     if start.size < 2:
         return None
     periods = np.diff(start)
-    period = float(np.median(periods))
+    period = float((start[-1] - start[0]) / (start.size - 1))
     return PulseTiming(
         width=float(np.median(end - start)),
         period=period,

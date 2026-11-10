@@ -44,6 +44,7 @@ def test_periods_rounded_by_the_sampling_are_regular():
     assert set(np.round(np.diff(found.start) * 1e6)) == {17.0, 18.0}
     rhythm = pulse_timing(found)
     assert rhythm.regular and rhythm.step == pytest.approx(1e-6) and found.step == pytest.approx(1e-6)
+    assert rhythm.period == pytest.approx(17.12e-6, abs=0.1e-6)  # the median gives 17 µs
 
 
 def test_a_pulse_cut_by_the_trace_is_not_measured():

@@ -83,7 +83,7 @@ values). Never commit the user's data (raw scans, .CEDX) to the repository.
 | GUI (`trxrd-gui`): display data and presenters without Qt, passive views, actions, threads | `gui/presenters/`, `gui/views/`, `gui/actions.py`, `gui/tasks.py`, `gui/builder.py` |
 | Entry point, log file and error messages (keep `trxrd.gui.app:main`: Windows refuses an exe with a new content) | `gui/app.py` |
 | Raw data browsing, raw image and cake of a spectrum | `services/raw_data.py`, `services/images.py` |
-| Integration time and inter-frame time (status bar, `trxrd info`); times of frames after the end of the oscilloscope trace | `services/acquisition.py`, `processing/timing.py` (`find_pulses`, `pulse_timing`, `frame_times`) |
+| Integration time, inter-frame time (between two integrations) and frequency of acquisition (status bar, `trxrd info`); times of frames after the end of the oscilloscope trace | `services/acquisition.py`, `processing/timing.py` (`find_pulses`, `pulse_timing`, `frame_times`) |
 | Preview of a raw scan before integration (whole detector, 2θ range) | `services/images.ScanPreview`, `gui/presenters/preview.py`, `gui/views/preview.py` |
 | GUI image display (histogram, log/linear/sqrt, colour map) | `gui/views/images.py` (`ImagePanel`) |
 | Quantities versus time (P, V, a, c/a, X/X0), map of the patterns versus time | `gui/presenters/display.py` (`evolution_data`, `time_map`) |

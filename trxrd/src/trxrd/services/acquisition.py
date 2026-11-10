@@ -24,8 +24,8 @@ class Acquisition:
     exposure: Optional[float] = None  # integration of a frame, as set on the detector
     exposure_from_raw: bool = False  # read from the raw file found now (the run does not store it)
     pulse: Optional[float] = None  # width of a trigger pulse on the oscilloscope
-    inter_frame: Optional[float] = None  # end of a pulse to the start of the next, as in the v1
-    period: Optional[float] = None  # start of a pulse to the start of the next
+    gap: Optional[float] = None  # end of a pulse to the start of the next (the inter-frame time of the v1)
+    period: Optional[float] = None  # start of a pulse to the start of the next: one frame every period
     pulses: int = 0  # trigger pulses on the oscilloscope (cut ones included)
     step: Optional[float] = None  # sampling step of the oscilloscope: the precision of the measured times
     regular: bool = True
@@ -35,15 +35,29 @@ class Acquisition:
 
     @property
     def known(self) -> bool:
-        return self.exposure is not None or self.inter_frame is not None
+        return self.exposure is not None or self.period is not None
 
     @property
     def triggers(self) -> bool:
         """The pulses are frame triggers: one clock, not faster than the integration. In 41 of the 744 scans of
         January 2026 (D2O_01 1-20, Water01 7-41), the trigger channel holds only noise: thousands of pulses
         3 to 10 µs apart, for 16 to 5000 frames of 10 µs."""
-        return (self.inter_frame is not None and self.regular
+        return (self.period is not None and self.regular
                 and (self.exposure is None or self.period >= self.exposure))
+
+    @property
+    def inter_frame(self) -> Optional[float]:
+        """Time between two integrations: the period minus the integration, so that integration + inter-frame =
+        1 / frequency. Water05 scan 9: 17.12 - 10 = 7.12 µs; the trigger pulse lasts 10.56 µs, and the gap between
+        two pulses (6.56 µs) is used only when the integration is unknown."""
+        if not self.triggers:
+            return None
+        return self.period - self.exposure if self.exposure is not None else self.gap
+
+    @property
+    def frequency(self) -> Optional[float]:
+        """Frames per second (Hz)."""
+        return 1.0 / self.period if self.triggers and self.period > 0 else None
 
 
 def acquisition_of(run: Run, near: Iterable[PathLike] = ()) -> Acquisition:
@@ -68,7 +82,7 @@ def acquisition_of(run: Run, near: Iterable[PathLike] = ()) -> Acquisition:
         exposure=exposure,
         exposure_from_raw=exposure is not None and not np.isfinite(run.source.exposure_time),
         pulse=rhythm.width if rhythm else None,
-        inter_frame=rhythm.gap if rhythm else None,
+        gap=rhythm.gap if rhythm else None,
         period=rhythm.period if rhythm else None,
         pulses=int(pulses.start.size) if rhythm else 0,
         step=rhythm.step if rhythm else None,
@@ -122,3 +136,13 @@ def duration_text(seconds: Optional[float]) -> str:
     if abs(seconds) >= 1e-3:
         return f"{seconds * 1e3:.4g} ms"
     return f"{seconds * 1e6:.4g} µs"
+
+
+def frequency_text(hertz: Optional[float]) -> str:
+    """'58.41 kHz', '986.7 Hz' (4 significant digits)."""
+    if hertz is None or not np.isfinite(hertz):
+        return "?"
+    for factor, unit in ((1e6, "MHz"), (1e3, "kHz")):
+        if abs(hertz) >= factor:
+            return f"{hertz / factor:.4g} {unit}"
+    return f"{hertz:.4g} Hz"

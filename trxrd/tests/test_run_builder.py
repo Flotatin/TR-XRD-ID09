@@ -59,7 +59,7 @@ def test_frames_after_the_end_of_the_oscilloscope_have_a_time(bliss_dataset, tut
     assert np.isnan(run.source.exposure_time)  # no acquisition group in this LIMA file
 
 
-def test_info_prints_the_two_times(tmp_path, bliss_dataset, capsys):
+def test_info_prints_the_times_of_the_acquisition(tmp_path, bliss_dataset, capsys):
     from conftest import DATA
     from trxrd.cli import main
 
@@ -71,7 +71,8 @@ def test_info_prints_the_two_times(tmp_path, bliss_dataset, capsys):
     capsys.readouterr()
     assert main(["info", str(out / "water02_0001_scan0003.trxrd.h5")]) == 0
     printed = capsys.readouterr().out
-    assert "frames: integration 10 µs, inter-frame 2.8" in printed and "3 trigger pulses for 3 spectra" in printed
+    assert "frames: integration 10 µs, inter-frame 2.99" in printed and "frequency 33" in printed  # 3 ms - 10 µs
+    assert "3 trigger pulses for 3 spectra" in printed
 
 
 def test_cli_build(tmp_path, bliss_dataset):

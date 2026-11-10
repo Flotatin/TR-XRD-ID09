@@ -55,6 +55,7 @@ Ne pas les remettre en cause sans lui en parler.
 | Liste des spectres | Dans un onglet (novembre 2026) : en haut de la colonne elle prenait trop de place, mais elle reste utile pour choisir des spectres. En haut, un curseur entre deux flèches, sans boutons précédent / suivant dans la barre d'outils |
 | Mode Live | Utile, repris de la v1 (novembre 2026). Rien ne bascule à l'écran tant que le run affiché a des modifications non enregistrées |
 | Affichage du spectre et détection | Montrer par défaut le signal filtré, fond soustrait, le brut seulement sur demande ; chercher les pics sur ce signal filtré (novembre 2026). L'ajustement reste sur le brut moins le fond (§5, point 1) |
+| Temps de l'acquisition | Afficher l'intégration, l'inter-frame (le temps entre deux intégrations) et la fréquence d'acquisition, qui en est la somme : 1 / (intégration + inter-frame) (novembre 2026) |
 | Peritheos (bibliothèque d'EoS de Clemens Prescher) | Pas de dépendance, `physics/eos.py` reste (novembre 2026). Son catalogue sert à vérifier nos fiches et à en créer une de temps en temps, quand un matériau utile y apparaît (§7) |
 
 ## 3. Ce qui est fait
@@ -69,13 +70,13 @@ Ne pas les remettre en cause sans lui en parler.
 | `8cc1c8c` | Validation sur un run réel (Water05) et cinq corrections qui en découlent ; nommage v1 / v2 |
 | `e135918` | Documentation : commit de référence de la v1 |
 | `68a1b7c` | Suivi des pics ; `trxrd compare` ; `CLAUDE.md` ; environnement virtuel séparé |
-| branche `gui-viewer` | Interface :<br>- étape 1, le lecteur : `trxrd-gui`, presenters sans Qt, registre d'actions, ouverture en arrière-plan (`Session.read` / `attach`) ;<br>- étape 2 : nouveaux runs depuis RAW_DATA, cake sous le spectre, calibration à la Dioptas validée sur le LaB6 réel ; aperçu du scan brut pour choisir la plage 2θ ; analyse automatique depuis l'interface (Ctrl+R) ; spectre affiché filtré, fond soustrait, onglets Traitement et Détection, sélection de spectres ;<br>- étape 3 : travail manuel sur les phases (ajout, P, ajustement, série avec suivi, modèle copié), pics libres gardés, annuler / rétablir ;<br>- étape 2 (suite) : panneau dDAC de la v1 (grandeur au choix P, V, a, b, c, c/a, b/a, T, ou X/X₀, avec le piézo ; dP/dt par échantillon, moyen sur un intervalle ; carte des diffractogrammes en fonction du temps), images à échelle, niveaux et couleurs réglables ;<br>- étape 3 (suite) : pics à la souris, ajustement personnalisé, zones à la souris (ajustement, exclues, zone de spectres), curseur entre deux flèches et liste en onglet, raies et repère 2θ sur le cake et l'image, mode Live ;<br>- temps d'intégration et inter-frame dans la barre d'état (format 1.3), temps des images d'un scan continu au-delà de l'oscilloscope |
+| branche `gui-viewer` | Interface :<br>- étape 1, le lecteur : `trxrd-gui`, presenters sans Qt, registre d'actions, ouverture en arrière-plan (`Session.read` / `attach`) ;<br>- étape 2 : nouveaux runs depuis RAW_DATA, cake sous le spectre, calibration à la Dioptas validée sur le LaB6 réel ; aperçu du scan brut pour choisir la plage 2θ ; analyse automatique depuis l'interface (Ctrl+R) ; spectre affiché filtré, fond soustrait, onglets Traitement et Détection, sélection de spectres ;<br>- étape 3 : travail manuel sur les phases (ajout, P, ajustement, série avec suivi, modèle copié), pics libres gardés, annuler / rétablir ;<br>- étape 2 (suite) : panneau dDAC de la v1 (grandeur au choix P, V, a, b, c, c/a, b/a, T, ou X/X₀, avec le piézo ; dP/dt par échantillon, moyen sur un intervalle ; carte des diffractogrammes en fonction du temps), images à échelle, niveaux et couleurs réglables ;<br>- étape 3 (suite) : pics à la souris, ajustement personnalisé, zones à la souris (ajustement, exclues, zone de spectres), curseur entre deux flèches et liste en onglet, raies et repère 2θ sur le cake et l'image, mode Live ;<br>- intégration, inter-frame et fréquence d'acquisition dans la barre d'état (format 1.3), temps des images d'un scan continu au-delà de l'oscilloscope |
 | branche `p2-validation-2026` | Validation sur les 143 runs de janvier 2026 (61 % → 81 % de spectres aux mêmes phases) : conversion des runs Jungfrau « continu », `Vmin` de la v1 non repris, coût d'apparition d'une famille nul, suivi interrompu par un pic fort inexpliqué, pics larges ignorés, tri des pics fixes, `--temperature`, familles sans casse, CLI sous Windows |
 
 ### 3.2 Par fonctionnalité
 
-Tout est testé : `python -m pytest trxrd` compte 429 tests. Les 7 comparaisons numériques avec la v1 sont
-ignorées quand la v1 n'est pas importable, par exemple dans `.venv-v2`, qui n'a pas PyQt5 : 422 tests
+Tout est testé : `python -m pytest trxrd` compte 430 tests. Les 7 comparaisons numériques avec la v1 sont
+ignorées quand la v1 n'est pas importable, par exemple dans `.venv-v2`, qui n'a pas PyQt5 : 423 tests
 passent alors.
 
 | Fonctionnalité | Où | État / preuve |
@@ -108,8 +109,8 @@ passent alors.
 | Zones à la souris : zone d'ajustement d'un spectre (propagée à la sélection ou à tous), zones exclues du run, zone de spectres sur les trois graphes dDAC, qui choisit la sélection et donne le dP/dt moyen | `editing.set_fit_range`, `analysis.merged_zones`, `gui/presenters/zones.py`, `gui/views/zones.py`, `plots.drag_draws` | ✅ Water01_scan0074 (1 600 spectres) : 28 ms par déplacement de la zone, 0,2 s pour une zone donnée à tous ; Water05 inchangé |
 | Curseur des spectres entre deux flèches, sélection écrite dessous, liste en onglet ; l'analyse automatique propose la sélection | `gui/views/panels.py` (`Navigator`, `SpectraList`), `SpectraListPresenter`, `display.position_text`, `gui/views/analysis.py` | ✅ |
 | Raies des phases en pointillés sur le cake ; repère 2θ au clic : trait sur le spectre et le cake, arc exact sur l'image | `CakePresenter`, `CakeView`, `processing/geometry.iso_curve`, `FrameSource.ring` | ✅ D2O_03 : arc en 11 ms, à ±0,012° du 2θ demandé |
-| Temps d'intégration (réglage du détecteur, gardé dans le run, format 1.3) et inter-frame (écart entre deux impulsions de déclenchement, comme la v1), à droite de la barre d'état, détail en infobulle, et dans `trxrd info` ; lus dans le brut pour un run plus ancien ou un `.CEDX` | `services/acquisition.py`, `processing/timing.py`, `AcquisitionPresenter` | ✅ Water05 scan 9 : 10 µs et 6,56 µs (période 17,12 µs) ; Water01 scan 74 : 10 µs et 1,003 ms (période 1,0135 ms), lus dans le fichier maître pour son `.CEDX` |
-| Temps des images d'un scan continu après la fin de l'oscilloscope (100 ms enregistrées pour 1,6 s) : prolongés à la période mesurée | `processing/timing.frame_times`, `run_builder.build_run` | ✅ Water01 scan 74 : les 1 502 spectres sans temps en ont un, le dernier à 1 620,7 ms ; Water05 scan 9 : temps identiques au `.CEDX` |
+| Intégration (réglage du détecteur, gardé dans le run, format 1.3), inter-frame (temps entre deux intégrations : période − intégration) et fréquence d'acquisition (1 / période), à droite de la barre d'état, détail en infobulle, et dans `trxrd info` ; lus dans le brut pour un run plus ancien ou un `.CEDX` | `services/acquisition.py`, `processing/timing.py`, `AcquisitionPresenter` | ✅ Water05 scan 9 : 10 µs, 7,12 µs, 58,41 kHz ; Water01 scan 74 : 10 µs, 1,003 ms, 986,7 Hz, lus dans le fichier maître pour son `.CEDX` |
+| Temps des images d'un scan continu après la fin de l'oscilloscope (100 ms enregistrées pour 1,6 s) : prolongés à la période mesurée | `processing/timing.frame_times`, `run_builder.build_run` | ✅ Water01 scan 74 : les 1 502 spectres sans temps en ont un, le dernier à 1 621,37 ms (1 621,39 d'après le `count_time` BLISS) ; Water05 scan 9 : temps identiques au `.CEDX` |
 | Mode Live : chaque nouveau scan intégré, analysé, enregistré et ouvert | `services/live.py`, `gui/presenters/live.py`, `gui/views/live.py` | ✅ essai de bout en bout sur un scan réel recopié par morceaux ; **pas encore sur une vraie acquisition** |
 | Limites de zoom de tous les graphes | `limit_view`, `keep_in_limits`, `ImagePanel.update_limits` | ✅ |
 | Cake / image brute sous le spectre | `services/images.py`, `CakePresenter` | ✅ image brute d'un `.CEDX` retrouvée par le nom du run ; 0,03 s par spectre |
@@ -253,18 +254,20 @@ run par run, avec une passe sans exclusion puis une passe avec les zones fixes r
 34. **Une voie de trigger peut ne porter que du bruit.** Sur 744 traces de janvier 2026, 41 n'ont que du bruit sur `ch5`
     (D2O_01 scans 1 à 20, Water01 scans 7 à 41) : des milliers d'« impulsions » à quelques µs. L'inter-frame n'est donc
     affiché que pour des impulsions d'une même horloge, pas plus rapprochées que l'intégration. « Même horloge » doit
-    tolérer le pas de l'oscilloscope : à 1 µs, 17,1 µs se lit 17 ou 18 µs, et 276 scans passaient pour irréguliers.
+    tolérer le pas de l'oscilloscope : à 1 µs, 17,1 µs se lit 17 ou 18 µs, et 276 scans passaient pour irréguliers. Pour la
+    même raison, la période se prend en moyenne de la première impulsion à la dernière, pas en médiane : 1,013 ms au lieu de
+    1,01347 ms pour Water01 scan 74, soit 0,7 ms d'écart après 1 500 images prolongées.
 
 ## 6. Reste à faire (par priorité)
 
 **Où on en est (9 novembre 2026).** L'utilisateur a essayé les zones (« tout est bien »). Faits ensuite à sa demande, à
 essayer : la liste des spectres dans un onglet, les raies des phases sur le cake, le repère 2θ (trait ou arc), le mode Live, et
-les temps d'intégration et inter-frame dans la barre d'état. Les documents ont été comparés au code et à toute l'interface de la
+l'intégration, l'inter-frame et la fréquence d'acquisition dans la barre d'état. Les documents ont été comparés au code et à toute l'interface de la
 v1 ; ce qui manquait est dans P4. Pour reprendre :
-0. **Temps de l'acquisition, à confirmer avec lui** : l'« inter-frame » affiché est l'écart entre deux impulsions, comme dans
-   la v1 (6,56 µs pour Water05 scan 9) ; s'il entend la période (17,12 µs), seul le texte change. Les `.CEDX` du mode continu
-   gardent les temps de la v1 (1 ms par image au lieu de 1,0135 ms) : lui demander s'il faut les corriger, ou refaire ces runs
-   depuis le brut. Les scans dont `ch5` n'est que du bruit (D2O_01 1 à 20, Water01 7 à 41, §5 point 34) prendraient, construits
+0. **Temps de l'acquisition** : intégration, inter-frame (temps entre deux intégrations) et fréquence, comme il l'a défini
+   (10 novembre). À lui demander encore : les `.CEDX` du mode continu
+   gardent les temps de la v1 (1 ms par image au lieu de 1,0135 ms) : faut-il les corriger, ou refaire ces runs depuis le
+   brut ? Les scans dont `ch5` n'est que du bruit (D2O_01 1 à 20, Water01 7 à 41, §5 point 34) prendraient, construits
    depuis le brut, leurs temps dans ce bruit, comme avant : piste à lui proposer, la période de 1,0135 ms (le `count_time`
    BLISS vaut nombre d'images × 1,0135 ms pour ces scans).
 1. **Essayer le mode Live sur une vraie acquisition** : un arrêt de plus de 2 s de l'écriture au milieu d'un scan en ferait

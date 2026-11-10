@@ -156,7 +156,7 @@ trxrd/
 │       ├── tasks.py            calculs longs dans un thread, résultat rendu au thread de l'interface
 │       ├── builder.py          assemblage : fenêtre + presenters + actions
 │       └── app.py              point d'entrée léger : journal et affichage des erreurs (sans console)
-└── tests/                      429 tests ; data/ = scan TUTO, calibration, ancien fichier .CEDX d'exemple
+└── tests/                      430 tests ; data/ = scan TUTO, calibration, ancien fichier .CEDX d'exemple
 ```
 
 ## 5. Le format de fichier `trxrd-run` (HDF5)
@@ -606,18 +606,23 @@ Architecture **MVP** au-dessus de `services.Session` :
 - **Oscilloscope** : `ch5` est le trigger (`Channel2` dans la v1), `ch6` est probablement la consigne du
   piézo (0-7,4 V, `Channel3`). `ch2` est lue quand elle existe. Toutes les voies ont la même base de temps :
   `ch6_time` est décalé de 19 ns, pour un pas de 160 ns.
-- **Temps d'intégration et inter-frame** (demandés par l'utilisateur, novembre 2026), à droite de la barre d'état,
-  le détail dans l'infobulle ; aussi dans `trxrd info` (`services/acquisition.py`) :
+- **Temps d'intégration, inter-frame et fréquence d'acquisition** (demandés par l'utilisateur, novembre 2026), à
+  droite de la barre d'état, le détail dans l'infobulle ; aussi dans `trxrd info` (`services/acquisition.py`) :
   - intégration : le réglage du détecteur, `acquisition/exposure_time` du fichier LIMA, gardé dans le run
     (`source/exposure_time`, format 1.3). Le chemin NeXus par défaut des images passe par `jf1m/plot/data` : le
     réglage est cherché dans les groupes au-dessus. Pour un run plus ancien ou un `.CEDX`, il est lu dans le brut
     retrouvé, sans modifier le run ;
-  - inter-frame : comme dans la v1 (`_estimate_inter_frame_times`), l'écart entre la fin d'une impulsion de
-    déclenchement et le début de la suivante, en médiane. L'infobulle donne aussi la période (d'un début
-    d'image au suivant) et la largeur de l'impulsion. Un run sans oscilloscope (`.CEDX` du mode continu)
-    prend celui du fichier maître voisin du brut ;
-  - Water05 scan 9 (rafale de 16 images) : intégration 10 µs, impulsion 10,56 µs, inter-frame 6,56 µs, période
-    17,12 µs. Water01 scan 74 (mode continu, 1 600 images) : 10 µs, inter-frame 1,003 ms, période 1,0135 ms ;
+  - inter-frame : le temps entre deux intégrations, comme l'utilisateur le définit. C'est la période mesurée moins
+    l'intégration : intégration + inter-frame = une image par période = 1 / fréquence. Ce n'est pas l'écart entre
+    deux impulsions de déclenchement que prenait la v1 (`_estimate_inter_frame_times`) : l'impulsion dure
+    10,56 µs pour 10 µs d'intégration. Cet écart, donné dans l'infobulle, ne sert que si l'intégration est inconnue ;
+  - fréquence d'acquisition : 1 / période. La période est la moyenne de la première impulsion à la dernière, et non
+    leur médiane : échantillonnées toutes les 1 µs, les périodes de Water01 scan 74 se lisent 1 013 ou 1 014 µs, et
+    la médiane donnait 1,013 ms au lieu de 1,01347 ms. Un run sans oscilloscope (`.CEDX` du mode continu) prend
+    celui du fichier maître voisin du brut ;
+  - Water05 scan 9 (rafale de 16 images) : intégration 10 µs, inter-frame 7,12 µs, 58,41 kHz (une image toutes les
+    17,12 µs ; impulsion de 10,56 µs, 6,56 µs entre deux impulsions). Water01 scan 74 (mode continu, 1 600 images) :
+    10 µs, 1,003 ms, 986,7 Hz ;
   - l'inter-frame n'est affiché que pour des déclenchements d'images : des impulsions d'une même horloge (périodes
     à 5 % ou à 1,5 pas d'échantillonnage près de leur médiane), pas plus rapprochées que l'intégration. Sinon :
     « ? », et la raison dans l'infobulle. L'infobulle donne aussi le pas de l'oscilloscope, la précision de ces
@@ -634,8 +639,9 @@ Architecture **MVP** au-dessus de `services.Session` :
   restaient sans temps, et le panneau dDAC n'en montrait que 98. Quand la trace s'arrête alors que les
   impulsions arrivent encore à période régulière (à 5 % près), les images suivantes continuent à cette période
   (`processing/timing.frame_times`). Si les impulsions s'arrêtent avant la fin de la trace, ou sont
-  irrégulières, rien n'est prolongé. Le dernier spectre de Water01 scan 74 tombe ainsi à 1 620,7 ms. La v1
-  comptait 1 ms par image depuis 0 (1 599 ms) : les `.CEDX` convertis gardent ces temps-là.
+  irrégulières, rien n'est prolongé. Le dernier spectre de Water01 scan 74 tombe ainsi à 1 621,37 ms ; le
+  `count_time` BLISS (1 600 images × 1,01347 ms) donne 1 621,39 ms. Avec la période médiane (1,013 ms), l'écart
+  atteignait 0,7 ms. La v1 comptait 1 ms par image depuis 0 (1 599 ms) : les `.CEDX` convertis gardent ces temps-là.
 - **Intégration sous le spectre** (Ctrl+K), comme dans la v1 : le cake (2θ × azimut, pyFAI `integrate2d`)
   ou l'image brute du spectre courant, sur le même axe x que le spectre. Les anneaux tombent ainsi sous les
   traits des phases. Le Jungfrau 1M ne voit qu'un secteur d'environ 140° : seul ce secteur est montré, d'un
